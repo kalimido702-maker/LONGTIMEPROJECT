@@ -1,0 +1,173 @@
+import { BaseSeeder } from "./Seeder.interface";
+import { IndexedDBRepository } from "../IndexedDBRepository";
+import { Role } from "@/domain/entities/Index";
+
+/**
+ * RoleSeeder - إضافة الأدوار الافتراضية
+ */
+export class RoleSeeder extends BaseSeeder {
+  name = "RoleSeeder";
+
+  async shouldRun(repository: IndexedDBRepository<Role>): Promise<boolean> {
+    const count = await repository.count();
+    return count === 0;
+  }
+
+  async seed(repository: IndexedDBRepository<Role>): Promise<void> {
+    const defaultRoles: Role[] = [
+      {
+        id: "admin",
+        name: "مدير النظام",
+        nameEn: "admin",
+        description: "صلاحيات كاملة على جميع أجزاء النظام",
+        color: "bg-red-500",
+        isDefault: true,
+        createdAt: new Date().toISOString(),
+        permissions: {
+          invoices: ["view", "create", "edit", "delete", "refund"],
+          products: ["view", "create", "edit", "delete", "adjustStock"],
+          customers: ["view", "create", "edit", "delete"],
+          suppliers: ["view", "create", "edit", "delete"],
+          purchases: ["view", "create", "edit", "delete"],
+          employees: ["view", "create", "edit", "delete"],
+          reports: ["view", "export"],
+          settings: ["view", "edit"],
+          shifts: ["view", "create", "close"],
+          credit: ["view", "edit"],
+          installments: ["view", "edit"],
+          promotions: ["view", "create", "edit", "delete"],
+          restaurant: ["view", "create"],
+          returns: ["view", "create"],
+          depositSources: ["view", "create", "update"],
+          deposits: ["view", "create"],
+          expenseCategories: ["view", "create", "update"],
+          expenses: ["view", "create"],
+          employeeAdvances: ["view", "create", "approve"],
+        },
+      },
+      {
+        id: "manager",
+        name: "مدير",
+        nameEn: "manager",
+        description: "صلاحيات إدارية على المبيعات والموظفين والتقارير",
+        color: "bg-blue-500",
+        isDefault: true,
+        createdAt: new Date().toISOString(),
+        permissions: {
+          invoices: ["view", "create", "edit", "refund"],
+          products: ["view", "create", "edit", "adjustStock"],
+          customers: ["view", "create", "edit"],
+          suppliers: ["view", "create", "edit"],
+          purchases: ["view", "create", "edit"],
+          employees: ["view", "edit"],
+          reports: ["view", "export"],
+          settings: ["view"],
+          shifts: ["view", "create", "close"],
+          credit: ["view", "edit"],
+          installments: ["view", "edit"],
+          promotions: ["view", "create", "edit"],
+          restaurant: ["view", "create"],
+          returns: ["view", "create"],
+          depositSources: ["view", "create", "update"],
+          deposits: ["view", "create"],
+          expenseCategories: ["view", "create", "update"],
+          expenses: ["view", "create"],
+          employeeAdvances: ["view", "create", "approve"],
+        },
+      },
+      {
+        id: "cashier",
+        name: "كاشير",
+        nameEn: "cashier",
+        description: "صلاحيات البيع وإدارة الفواتير فقط",
+        color: "bg-green-500",
+        isDefault: true,
+        createdAt: new Date().toISOString(),
+        permissions: {
+          invoices: ["view", "create"],
+          products: ["view"],
+          customers: ["view", "create"],
+          suppliers: [],
+          purchases: [],
+          employees: [],
+          reports: [],
+          settings: [],
+          shifts: ["view", "create"],
+          credit: ["view"],
+          installments: ["view"],
+          promotions: ["view"],
+          restaurant: ["view"],
+          returns: ["view", "create"],
+          depositSources: [],
+          deposits: [],
+          expenseCategories: [],
+          expenses: [],
+          employeeAdvances: [],
+        },
+      },
+      {
+        id: "accountant",
+        name: "محاسب",
+        nameEn: "accountant",
+        description: "صلاحيات عرض التقارير المالية والمحاسبية",
+        color: "bg-purple-500",
+        isDefault: true,
+        createdAt: new Date().toISOString(),
+        permissions: {
+          invoices: ["view"],
+          products: ["view"],
+          customers: ["view"],
+          suppliers: ["view"],
+          purchases: ["view"],
+          employees: [],
+          reports: ["view", "export"],
+          settings: [],
+          shifts: ["view"],
+          credit: ["view"],
+          installments: ["view"],
+          promotions: ["view"],
+          restaurant: [],
+          returns: ["view"],
+          depositSources: ["view"],
+          deposits: ["view"],
+          expenseCategories: ["view"],
+          expenses: ["view"],
+          employeeAdvances: ["view"],
+        },
+      },
+      {
+        id: "viewer",
+        name: "مطّلع",
+        nameEn: "viewer",
+        description: "صلاحيات الاطلاع فقط - للعرض بدون تعديل",
+        color: "bg-gray-500",
+        isDefault: true,
+        createdAt: new Date().toISOString(),
+        permissions: {
+          invoices: ["view"],
+          products: ["view"],
+          customers: ["view"],
+          suppliers: ["view"],
+          purchases: ["view"],
+          employees: ["view"],
+          reports: ["view"],
+          settings: [],
+          shifts: ["view"],
+          credit: ["view"],
+          installments: ["view"],
+          promotions: ["view"],
+          restaurant: ["view"],
+          returns: ["view"],
+          depositSources: ["view"],
+          deposits: ["view"],
+          expenseCategories: ["view"],
+          expenses: ["view"],
+          employeeAdvances: ["view"],
+        },
+      },
+    ];
+
+    await repository.batchAdd(defaultRoles);
+    this.log(`✅ Created ${defaultRoles.length} default roles`);
+  }
+}

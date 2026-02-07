@@ -1,0 +1,394 @@
+import { useState, useEffect, useMemo } from "react";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { MessageCircle, Send, FileText, User, AlertCircle, Loader2 } from "lucide-react";
+import { db, Customer, Invoice } from "@/shared/lib/indexedDB";
+import { useToast } from "@/hooks/use-toast";
+import { useSettingsContext } from "@/contexts/SettingsContext";
+import { whatsappService, WhatsAppAccount } from "@/services/whatsapp/whatsappService";
+
+interface StatementWhatsAppDialogProps {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+}
+
+export const StatementWhatsAppDialog = ({
+    open,
+    onOpenChange,
+}: StatementWhatsAppDialogProps) => {
+    const { toast } = useToast();
+    const { getSetting } = useSettingsContext();
+    const currency = getSetting("currency") || "EGP";
+    const storeName = getSetting("storeName") || "المتجر";
+
+    const [customers, setCustomers] = useState<Customer[]>([]);
+    const [invoices, setInvoices] = useState<Invoice[]>([]);
+    const [activeAccount, setActiveAccount] = useState<WhatsAppAccount | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [sending, setSending] = useState(false);
+
+    // Options
+    const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
+    const [contentType, setContentType] = useState<"balanceOnly" | "balanceAndStatement">("balanceOnly");
+    const [fromDate, setFromDate] = useState(new Date(new Date().getFullYear(), 0, 1).toLocaleDateString('en-CA'));
+    const [toDate, setToDate] = useState(new Date().toLocaleDateString('en-CA'));
+
+    useEffect(() => {
+        if (open) {
+            loadData();
+        }
+    }, [open]);
+
+    const loadData = async () => {
+        setLoading(true);
+        try {
+            const [custs, invs, accounts] = await Promise.all([
+                db.getAll<Customer>("customers"),
+                db.getAll<Invoice>("invoices"),
+                db.getAll<WhatsAppAccount>("whatsappAccounts"),
+            ]);
+            setCustomers(custs.filter((c) => c.currentBalance > 0)); // Only customers with balance
+            setInvoices(invs);
+
+            // Find active & connected WhatsApp account
+            const active = accounts.find(a => a.isActive && a.status === "connected");
+            setActiveAccount(active || null);
+        } catch (error) {
+            console.error("Error loading data:", error);
+        }
+        setLoading(false);
+    };
+
+    // Get selected customer
+    const selectedCustomer = useMemo(() => {
+        return customers.find((c) => c.id === selectedCustomerId);
+    }, [customers, selectedCustomerId]);
+
+    // Get customer invoices for statement
+    const customerInvoices = useMemo(() => {
+        if (!selectedCustomerId) return [];
+
+        return invoices
+            .filter((inv) => {
+                if (inv.customerId !== selectedCustomerId) return false;
+                // Use local date for comparison to avoid timezone issues
+                const invDate = new Date(inv.createdAt).toLocaleDateString('en-CA');
+                return invDate >= fromDate && invDate <= toDate;
+            })
+            .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    }, [invoices, selectedCustomerId, fromDate, toDate]);
+
+    // Format balance message
+    const formatBalanceMessage = () => {
+        if (!selectedCustomer) return "";
+
+        const now = new Date();
+        const dateStr = now.toLocaleDateString("ar-EG");
+        const timeStr = now.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" });
+        const balance = Math.round(selectedCustomer.currentBalance);
+
+        return `شركة لونج تايم للصناعات الكهربائية 
+
+رصيد المديونية 
+*العميل:* ${selectedCustomer.name}
+---
+*الرصيد المستحق:* ${balance} جنيه
+
+---
+
+📅 *التاريخ:* ${dateStr} والساعة ${timeStr}`;
+    };
+
+    // Format full statement message
+    const formatStatementMessage = () => {
+        if (!selectedCustomer) return "";
+
+        let message = `📋 *كشف حساب تفصيلي - ${storeName}*
+
+*العميل:* ${selectedCustomer.name}
+*الفترة:* من ${fromDate} إلى ${toDate}
+
+`;
+
+        if (customerInvoices.length > 0) {
+            message += `*الفواتير:*\n`;
+            let runningTotal = 0;
+
+            customerInvoices.forEach((inv, idx) => {
+                runningTotal += inv.remainingAmount;
+                message += `${idx + 1}. ${new Date(inv.createdAt).toLocaleDateString("ar-EG")} - فاتورة #${inv.invoiceNumber || inv.id}\n`;
+                message += `   المبلغ: ${inv.total.toFixed(2)} | المدفوع: ${inv.paidAmount.toFixed(2)} | المتبقي: ${inv.remainingAmount.toFixed(2)}\n`;
+            });
+
+            message += `\n---\n*إجمالي المتبقي:* ${runningTotal.toFixed(2)} ${currency}\n`;
+        } else {
+            message += `لا توجد فواتير في هذه الفترة.\n`;
+        }
+
+        message += `\n*الرصيد الحالي:* ${selectedCustomer.currentBalance.toFixed(2)} ${currency}\n`;
+        message += `\nنرجو سداد المبلغ المستحق.\nشكراً`;
+
+        return message;
+    };
+
+    // Send statement using WhatsApp service
+    const handleSend = async () => {
+        if (!activeAccount) {
+            toast({
+                title: "لا يوجد حساب واتساب متصل",
+                description: "يرجى ربط حساب واتساب أولاً من صفحة إدارة الواتساب",
+                variant: "destructive"
+            });
+            return;
+        }
+
+        if (!selectedCustomer) {
+            toast({ title: "يرجى اختيار عميل", variant: "destructive" });
+            return;
+        }
+
+        if (!selectedCustomer.phone) {
+            toast({ title: "العميل ليس لديه رقم هاتف", variant: "destructive" });
+            return;
+        }
+
+        setSending(true);
+
+        try {
+            if (contentType === "balanceOnly") {
+                // Send simple text for balance
+                const message = formatBalanceMessage();
+                await whatsappService.sendMessage(
+                    activeAccount.id,
+                    selectedCustomer.phone,
+                    message,
+                    undefined,
+                    { customerId: selectedCustomer.id, type: "reminder" }
+                );
+            } else {
+                // Send PDF for detailed statement
+                toast({ title: "📊 جاري توليد كشف الحساب...", description: "يرجى الانتظار" });
+
+                const { generateStatementPDF } = await import("@/services/statementPdfService");
+                const from = new Date(fromDate);
+                const to = new Date(toDate);
+
+                const pdfBlob = await generateStatementPDF(selectedCustomer.id, from, to);
+
+                if (!pdfBlob) {
+                    throw new Error("فشل توليد ملف PDF");
+                }
+
+                toast({ title: "📤 جاري الإرسال...", description: "يتم رفع الملف" });
+
+                // Convert blob to base64
+                const base64data = await new Promise<string>((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result as string);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(pdfBlob);
+                });
+
+                const caption = `📊 *كشف حساب تفصيلي*\n` +
+                    `*العميل:* ${selectedCustomer.name}\n` +
+                    `*الفترة:* ${fromDate} إلى ${toDate}\n\n` +
+                    `*الرصيد النهائي:* ${selectedCustomer.currentBalance.toFixed(2)} ${currency}\n\n` +
+                    `يرجى مراجعة الملف المرفق.`;
+
+                await whatsappService.sendMessage(
+                    activeAccount.id,
+                    selectedCustomer.phone,
+                    caption, // Message text used as caption
+                    {
+                        type: "document",
+                        url: base64data,
+                        caption: caption,
+                        filename: `كشف حساب ${selectedCustomer.name}.pdf`
+                    },
+                    { customerId: selectedCustomer.id, type: "statement" }
+                );
+            }
+
+            toast({
+                title: "✅ تم الإرسال بنجاح",
+                description: contentType === "balanceOnly" ? "تم إرسال الرصيد" : "تم إرسال ملف كشف الحساب",
+            });
+
+            onOpenChange(false);
+        } catch (error: any) {
+            console.error("Failed to send statement:", error);
+            toast({
+                title: "فشل الإرسال",
+                description: error.message || "حدث خطأ أثناء الإرسال",
+                variant: "destructive"
+            });
+        }
+
+        setSending(false);
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent dir="rtl" className="max-w-lg">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <FileText className="h-5 w-5 text-blue-600" />
+                        إرسال كشف حساب واتساب
+                    </DialogTitle>
+                </DialogHeader>
+
+                <div className="space-y-4 py-4">
+                    {/* WhatsApp Account Status */}
+                    {!activeAccount ? (
+                        <Alert variant="destructive">
+                            <AlertCircle className="h-4 w-4" />
+                            <AlertDescription>
+                                لا يوجد حساب واتساب متصل. يرجى ربط حساب من صفحة إدارة الواتساب أولاً.
+                            </AlertDescription>
+                        </Alert>
+                    ) : (
+                        <Alert className="bg-green-50 border-green-200">
+                            <MessageCircle className="h-4 w-4 text-green-600" />
+                            <AlertDescription className="text-green-800">
+                                متصل: {activeAccount.name} ({activeAccount.phone})
+                            </AlertDescription>
+                        </Alert>
+                    )}
+
+                    {/* Customer Selection */}
+                    <div className="space-y-2">
+                        <Label>اختر العميل</Label>
+                        <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="اختر عميل له رصيد مستحق..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {customers.map((customer) => (
+                                    <SelectItem key={customer.id} value={customer.id}>
+                                        <div className="flex items-center justify-between gap-4">
+                                            <span>{customer.name}</span>
+                                            <Badge variant="destructive" className="text-xs">
+                                                {customer.currentBalance.toFixed(2)} {currency}
+                                            </Badge>
+                                        </div>
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    {/* Content Type */}
+                    <div className="space-y-2">
+                        <Label>نوع الكشف</Label>
+                        <RadioGroup
+                            value={contentType}
+                            onValueChange={(v) => setContentType(v as "balanceOnly" | "balanceAndStatement")}
+                        >
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-muted/50">
+                                    <RadioGroupItem value="balanceOnly" id="balance" />
+                                    <Label htmlFor="balance" className="cursor-pointer">
+                                        <div className="font-medium">الرصيد فقط</div>
+                                        <div className="text-xs text-muted-foreground">المبلغ المستحق</div>
+                                    </Label>
+                                </div>
+                                <div className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-muted/50">
+                                    <RadioGroupItem value="balanceAndStatement" id="statement" />
+                                    <Label htmlFor="statement" className="cursor-pointer">
+                                        <div className="font-medium">كشف تفصيلي</div>
+                                        <div className="text-xs text-muted-foreground">جميع الفواتير</div>
+                                    </Label>
+                                </div>
+                            </div>
+                        </RadioGroup>
+                    </div>
+
+                    {/* Date Range for Statement */}
+                    {contentType === "balanceAndStatement" && (
+                        <div className="space-y-2">
+                            <Label>فترة الكشف</Label>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-1">
+                                    <Label className="text-xs">من</Label>
+                                    <Input
+                                        type="date"
+                                        value={fromDate}
+                                        onChange={(e) => setFromDate(e.target.value)}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label className="text-xs">إلى</Label>
+                                    <Input
+                                        type="date"
+                                        value={toDate}
+                                        onChange={(e) => setToDate(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Preview */}
+                    {selectedCustomer && (
+                        <div className="bg-muted/50 rounded-lg p-4 space-y-2">
+                            <div className="flex items-center gap-2">
+                                <User className="h-4 w-4 text-muted-foreground" />
+                                <span className="font-medium">{selectedCustomer.name}</span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                                <span className="text-muted-foreground">الرصيد المستحق:</span>
+                                <span className="font-bold text-red-600">
+                                    {selectedCustomer.currentBalance.toFixed(2)} {currency}
+                                </span>
+                            </div>
+                            {contentType === "balanceAndStatement" && (
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">عدد الفواتير:</span>
+                                    <Badge variant="secondary">{customerInvoices.length}</Badge>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => onOpenChange(false)} disabled={sending}>
+                        إلغاء
+                    </Button>
+                    <Button
+                        onClick={handleSend}
+                        disabled={!selectedCustomerId || loading || !activeAccount || sending}
+                        className="gap-2 bg-green-600 hover:bg-green-700"
+                    >
+                        {sending ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                            <Send className="h-4 w-4" />
+                        )}
+                        إرسال الكشف
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+};
+
+export default StatementWhatsAppDialog;

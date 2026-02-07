@@ -1,0 +1,242 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    /* Professional green for success/money theme */
+    --primary: 152 65% 25%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 152 70% 35%;
+
+    /* Blue secondary for contrast */
+    --secondary: 215 85% 55%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 152 65% 25%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 152 65% 25%;
+
+    --radius: 0.75rem;
+
+    /* Success colors for positive actions */
+    --success: 152 65% 35%;
+    --success-foreground: 0 0% 100%;
+
+    /* Warning for alerts */
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg,
+        hsl(152 65% 25%),
+        hsl(152 70% 35%));
+    --gradient-secondary: linear-gradient(135deg,
+        hsl(215 85% 55%),
+        hsl(215 85% 65%));
+    --gradient-success: linear-gradient(135deg,
+        hsl(152 65% 35%),
+        hsl(152 70% 45%));
+
+    /* Shadows */
+    --shadow-sm: 0 2px 4px -1px hsl(0 0% 0% / 0.06);
+    --shadow-md: 0 4px 6px -1px hsl(0 0% 0% / 0.1);
+    --shadow-lg: 0 10px 15px -3px hsl(0 0% 0% / 0.1);
+    --shadow-primary: 0 8px 24px -6px hsl(152 65% 25% / 0.3);
+    --shadow-secondary: 0 8px 24px -6px hsl(215 85% 55% / 0.3);
+
+    /* Transitions */
+    --transition-fast: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-slow: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 152 65% 25%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 152 65% 96%;
+    --sidebar-accent-foreground: 152 65% 25%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 152 65% 25%;
+
+    /* Chart Colors - Dynamic */
+    --chart-1: hsl(152, 65%, 35%);
+    --chart-2: hsl(215, 85%, 55%);
+    --chart-3: hsl(38, 92%, 50%);
+    --chart-4: hsl(0, 84%, 60%);
+    --chart-5: hsl(152, 65%, 50%);
+    --chart-6: hsl(215, 85%, 70%);
+    --chart-7: hsl(38, 92%, 65%);
+    --chart-8: hsl(0, 84%, 75%);
+
+    /* Print Colors */
+    --print-header: #1a6644;
+    --print-subheader: #daa520;
+    --print-border: #000000;
+    --print-background: #f8f9fa;
+    --print-alternate-row: #f2f2f2;
+    --print-text: #1a1a1a;
+    --print-text-light: #666666;
+    --print-text-lighter: #888888;
+
+    /* QR Code Colors */
+    --qr-foreground: #000000;
+    --qr-background: #ffffff;
+  }
+
+  .dark {
+    --background: 222.2 47% 11%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 47% 15%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 47% 15%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 152 70% 45%;
+    --primary-foreground: 222.2 47% 11%;
+    --primary-glow: 152 70% 55%;
+
+    --secondary: 215 85% 60%;
+    --secondary-foreground: 222.2 47% 11%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 152 70% 45%;
+    --accent-foreground: 222.2 47% 11%;
+
+    --destructive: 0 62.8% 50%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 25%;
+    --input: 217.2 32.6% 25%;
+    --ring: 152 70% 45%;
+
+    --success: 152 70% 45%;
+    --success-foreground: 222.2 47% 11%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 222.2 47% 11%;
+
+    --gradient-primary: linear-gradient(135deg,
+        hsl(152 70% 45%),
+        hsl(152 70% 55%));
+    --gradient-secondary: linear-gradient(135deg,
+        hsl(215 85% 60%),
+        hsl(215 85% 70%));
+    --gradient-success: linear-gradient(135deg,
+        hsl(152 70% 45%),
+        hsl(152 70% 55%));
+
+    --shadow-sm: 0 2px 4px -1px hsl(0 0% 0% / 0.3);
+    --shadow-md: 0 4px 6px -1px hsl(0 0% 0% / 0.4);
+    --shadow-lg: 0 10px 15px -3px hsl(0 0% 0% / 0.5);
+    --shadow-primary: 0 8px 24px -6px hsl(152 70% 45% / 0.4);
+    --shadow-secondary: 0 8px 24px -6px hsl(215 85% 60% / 0.4);
+
+    --sidebar-background: 222.2 47% 13%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 152 70% 45%;
+    --sidebar-primary-foreground: 222.2 47% 11%;
+    --sidebar-accent: 217.2 32.6% 20%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 217.2 32.6% 20%;
+    --sidebar-ring: 152 70% 45%;
+
+    /* Chart Colors - Dynamic (Dark Mode) */
+    --chart-1: hsl(152, 70%, 45%);
+    --chart-2: hsl(215, 85%, 60%);
+    --chart-3: hsl(38, 92%, 50%);
+    --chart-4: hsl(0, 84%, 60%);
+    --chart-5: hsl(152, 70%, 60%);
+    --chart-6: hsl(215, 85%, 75%);
+    --chart-7: hsl(38, 92%, 65%);
+    --chart-8: hsl(0, 84%, 75%);
+
+    /* Print Colors (same as light for consistency in print) */
+    --print-header: #1a6644;
+    --print-subheader: #daa520;
+    --print-border: #000000;
+    --print-background: #f8f9fa;
+    --print-alternate-row: #f2f2f2;
+    --print-text: #1a1a1a;
+    --print-text-light: #666666;
+    --print-text-lighter: #888888;
+
+    /* QR Code Colors (Dark Mode) */
+    --qr-foreground: #ffffff;
+    --qr-background: #1a1a1a;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "cv11", "ss01";
+    font-optical-sizing: auto;
+  }
+
+  /* RTL Support for Arabic */
+  [dir="rtl"] {
+    direction: rtl;
+  }
+
+  /* Smooth animations */
+  * {
+    transition: var(--transition-fast);
+  }
+
+  /* إصلاح مشكلة Input freeze - التأكد من أن inputs دائماً قابلة للنقر */
+  input,
+  textarea,
+  select {
+    pointer-events: auto !important;
+    user-select: text !important;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-muted;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted-foreground/30 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/50;
+  }
+}
