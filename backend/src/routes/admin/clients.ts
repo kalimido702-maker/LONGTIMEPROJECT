@@ -133,7 +133,7 @@ async function adminClientsRoutes(fastify: FastifyInstance) {
             await db.query<ResultSetHeader>(
                 `INSERT INTO clients (id, name, name_en, email, phone, address, tax_number, subscription_plan, max_branches, max_devices)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [id, name, nameEn, email, phone, address, taxNumber, subscriptionPlan || "basic", maxBranches || 1, maxDevices || 1]
+                [id, name, nameEn || null, email || null, phone || null, address || null, taxNumber || null, subscriptionPlan || "basic", maxBranches || 1, maxDevices || 1]
             );
 
             // Create main branch

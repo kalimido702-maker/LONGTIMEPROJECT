@@ -69,6 +69,13 @@ interface EncryptedData {
 // Cache the device ID to ensure consistency within a session
 let cachedDeviceId: string | null = null;
 
+// Cache sync credentials to prevent excessive API calls (causes 429 rate limiting)
+let cachedSyncCredentials: {
+  data: any;
+  timestamp: number;
+} | null = null;
+const SYNC_CREDENTIALS_CACHE_TTL = 3 * 60 * 1000; // 3 minutes cache TTL
+
 /**
  * الحصول على معلومات الـ Hardware الفريدة للجهاز
  */

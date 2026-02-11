@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { db, Customer, Invoice, PaymentMethod } from "@/shared/lib/indexedDB";
 import { useSettingsContext } from "@/contexts/SettingsContext";
+import { calculateSingleCustomerBalance } from "@/hooks/useCustomerBalances";
 
 interface Payment {
     id: string;
@@ -58,6 +59,7 @@ export const CustomerDetailsDialog = ({
     const [invoices, setInvoices] = useState<Invoice[]>([]);
     const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
     const [payments, setPayments] = useState<Payment[]>([]);
+    const [calculatedBalance, setCalculatedBalance] = useState<number | null>(null);
     const [expandedInvoice, setExpandedInvoice] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
 
@@ -95,6 +97,10 @@ export const CustomerDetailsDialog = ({
                         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
                 );
             setPayments(customerPayments);
+
+            // حساب الرصيد الفعلي من الحركات
+            const actualBalance = await calculateSingleCustomerBalance(customer.id);
+            setCalculatedBalance(actualBalance);
         } catch (error) {
             console.error("Error loading customer data:", error);
         } finally {
@@ -141,9 +147,8 @@ export const CustomerDetailsDialog = ({
     // Calculate totals
     const totalPurchases = invoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
     const totalPaid = invoices.reduce((sum, inv) => sum + (inv.paidAmount || 0), 0);
-    // استخدام رصيد العميل الفعلي بدلاً من حساب من الفواتير
-    // لأن التسديدات من رصيد العميل بتحدث customer.currentBalance مباشرة
-    const totalRemaining = customer?.currentBalance || 0;
+    // استخدام الرصيد المحسوب الفعلي بدلاً من الرصيد المخزن
+    const totalRemaining = calculatedBalance !== null ? calculatedBalance : Number(customer?.currentBalance || 0);
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>

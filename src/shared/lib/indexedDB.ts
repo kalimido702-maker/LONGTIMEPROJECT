@@ -76,16 +76,34 @@ class IndexedDBService {
     // Update Admin Role
     const adminRole = await this.get<Role>("roles", "admin");
     if (adminRole) {
-      const currentPermissions = adminRole.permissions.invoices || [];
-      const newPermissions = ["edit", "delete"];
-      const updatedPermissions = [...new Set([...currentPermissions, ...newPermissions])];
+      const currentInvoicePerms = adminRole.permissions.invoices || [];
+      const newInvoicePerms = ["edit", "delete"];
+      const updatedInvoicePerms = [...new Set([...currentInvoicePerms, ...newInvoicePerms])];
 
-      if (updatedPermissions.length !== currentPermissions.length) {
+      const currentReturnsPerms = adminRole.permissions.returns || [];
+      const updatedReturnsPerms = [...new Set([...currentReturnsPerms, "edit", "delete"])];
+
+      const currentPaymentsPerms = adminRole.permissions.payments || [];
+      const updatedPaymentsPerms = [...new Set([...currentPaymentsPerms, "view", "edit"])];
+
+      // إضافة صلاحيات القبض
+      const currentCollectionsPerms = adminRole.permissions.collections || [];
+      const updatedCollectionsPerms = [...new Set([...currentCollectionsPerms, "view", "create", "edit", "delete"])];
+
+      const needsUpdate = updatedInvoicePerms.length !== currentInvoicePerms.length ||
+        updatedReturnsPerms.length !== currentReturnsPerms.length ||
+        updatedPaymentsPerms.length !== currentPaymentsPerms.length ||
+        updatedCollectionsPerms.length !== currentCollectionsPerms.length;
+
+      if (needsUpdate) {
         await this.update("roles", {
           ...adminRole,
           permissions: {
             ...adminRole.permissions,
-            invoices: updatedPermissions
+            invoices: updatedInvoicePerms,
+            returns: updatedReturnsPerms,
+            payments: updatedPaymentsPerms,
+            collections: updatedCollectionsPerms,
           }
         });
       }
@@ -115,6 +133,7 @@ class IndexedDBService {
             installments: ["view"],
             promotions: ["view"],
             restaurant: ["view"],
+            collections: ["view"],
             returns: ["view"],
             depositSources: ["view"],
             deposits: ["view"],

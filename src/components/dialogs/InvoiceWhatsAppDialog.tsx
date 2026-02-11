@@ -119,19 +119,9 @@ export const InvoiceWhatsAppDialog = ({
 
 *العميل:* ${inv.customerName}
 *التاريخ:* ${new Date(inv.createdAt).toLocaleDateString("ar-EG")}
+*الإجمالي:* ${Math.round(inv.total)} ${currency}
 
-*المنتجات:*
-${(inv.items || []).map(item =>
-            `• ${item.productName} × ${item.quantity} = ${item.total.toFixed(2)} ${currency}`
-        ).join("\n")}
-
----
-*الإجمالي:* ${inv.total.toFixed(2)} ${currency}
-*المدفوع:* ${inv.paidAmount.toFixed(2)} ${currency}
-*المتبقي:* ${inv.remainingAmount.toFixed(2)} ${currency}
-
-شكراً ✨
-longtimelt.com`;
+شركة لونج تايم للصناعة الكهربائية`;
     };
 
     // Send invoices using WhatsApp service
@@ -397,7 +387,7 @@ longtimelt.com`;
                         </div>
                         {filteredInvoices.length > 0 && (
                             <p className="text-xs text-muted-foreground mt-2">
-                                إجمالي: {filteredInvoices.reduce((sum, i) => sum + i.total, 0).toFixed(2)} {currency}
+                                إجمالي: {filteredInvoices.reduce((sum, i) => sum + (Number(i.total) || 0), 0).toFixed(2)} {currency}
                             </p>
                         )}
                     </div>

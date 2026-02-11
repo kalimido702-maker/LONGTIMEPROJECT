@@ -615,6 +615,10 @@ export class SmartSyncManager extends EventEmitter {
             }
 
             console.log(`[SmartSync] Found ${unsyncedRecords.length} unsynced records`);
+            // Log details of unsynced records for debugging
+            for (const { table, record } of unsyncedRecords) {
+                console.log(`[SmartSync] Unsynced: ${table}/${record.id || record.key} (is_synced=${record.is_synced}, last_synced_at=${record.last_synced_at})`);
+            }
 
             // Send in batches
             const batches = this.createBatches(unsyncedRecords, this.config.batchSize);
@@ -627,6 +631,9 @@ export class SmartSyncManager extends EventEmitter {
             }
 
             console.log(`[SmartSync] Pushed ${result.pushed} records`);
+            if (result.errors.length > 0) {
+                console.warn(`[SmartSync] Push errors:`, result.errors);
+            }
 
         } catch (error: any) {
             console.error('[SmartSync] Push failed:', error);

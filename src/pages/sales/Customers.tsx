@@ -48,6 +48,7 @@ import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { CustomerDetailsDialog } from "@/components/dialogs/CustomerDetailsDialog";
 import { ExcelExportButton, ExcelColumn } from "@/components/common/ExcelExportButton";
+import { useCustomerBalances } from "@/hooks/useCustomerBalances";
 import {
   downloadCustomerImportTemplate,
   importCustomersFromExcel,
@@ -69,10 +70,13 @@ const Customers = () => {
   const [selectedCustomerForDetails, setSelectedCustomerForDetails] = useState<Customer | null>(null);
   const [salesReps, setSalesReps] = useState<SalesRep[]>([]);
   const [filterBySalesRep, setFilterBySalesRep] = useState<string>("all");
+  const [filterBySupervisor, setFilterBySupervisor] = useState<string>("all");
+  const [supervisors, setSupervisors] = useState<SalesRep[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [isImportResultOpen, setIsImportResultOpen] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const { getBalance, refresh: refreshBalances } = useCustomerBalances([customers]);
   const [formData, setFormData] = useState({
     name: "",
     phone: "",
@@ -105,6 +109,8 @@ const Customers = () => {
   const loadSalesReps = async () => {
     const reps = await db.getAll<SalesRep>("salesReps");
     setSalesReps(reps.filter((r) => r.isActive));
+    const sups = reps.filter((r: any) => r.role === "supervisor" || r.isSupervisor);
+    setSupervisors(sups);
   };
 
   const getSalesRepName = (id?: string) => {
@@ -125,7 +131,14 @@ const Customers = () => {
         filterBySalesRep === "all" ||
         customer.salesRepId === filterBySalesRep;
 
-      return matchesSearch && matchesSalesRep;
+      // Filter by supervisor (through salesRep -> supervisorId)
+      let matchesSupervisor = true;
+      if (filterBySupervisor !== "all") {
+        const rep = salesReps.find((r) => r.id === customer.salesRepId);
+        matchesSupervisor = !!rep && rep.supervisorId === filterBySupervisor;
+      }
+
+      return matchesSearch && matchesSalesRep && matchesSupervisor;
     }
   );
 
@@ -317,7 +330,7 @@ const Customers = () => {
       return;
     }
 
-    if (amount > payingCustomer.currentBalance) {
+    if (amount > getBalance(payingCustomer.id, Number(payingCustomer.currentBalance) || 0)) {
       toast.error("المبلغ المدخل أكبر من رصيد العميل");
       return;
     }
@@ -370,7 +383,7 @@ const Customers = () => {
       // تحديث رصيد العميل
       const updatedCustomer: Customer = {
         ...payingCustomer,
-        currentBalance: payingCustomer.currentBalance - amount,
+        currentBalance: Number(payingCustomer.currentBalance || 0) - amount,
       };
       await db.update("customers", updatedCustomer);
 
@@ -421,13 +434,13 @@ const Customers = () => {
                 <div>
                   <p className="text-sm text-muted-foreground">إجمالي المديونية</p>
                   <p className="text-2xl font-bold text-red-600 dark:text-red-400">
-                    {filteredCustomers.reduce((sum, c) => sum + (c.currentBalance > 0 ? c.currentBalance : 0), 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 })} {currency}
+                    {filteredCustomers.reduce((sum, c) => sum + (getBalance(c.id, Number(c.currentBalance) || 0) > 0 ? getBalance(c.id, Number(c.currentBalance) || 0) : 0), 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 })} {currency}
                   </p>
                 </div>
               </div>
               <div className="text-left">
                 <p className="text-sm text-muted-foreground">عدد العملاء المدينين</p>
-                <p className="text-xl font-bold">{filteredCustomers.filter(c => c.currentBalance > 0).length}</p>
+                <p className="text-xl font-bold">{filteredCustomers.filter(c => getBalance(c.id, Number(c.currentBalance) || 0) > 0).length}</p>
               </div>
             </div>
           </CardContent>
@@ -440,7 +453,8 @@ const Customers = () => {
             <ExcelExportButton
               data={filteredCustomers.map(c => ({
                 ...c,
-                creditDebit: c.currentBalance >= 0 ? "دائنة" : "مدينة",
+                currentBalance: getBalance(c.id, Number(c.currentBalance) || 0),
+                creditDebit: getBalance(c.id, Number(c.currentBalance) || 0) >= 0 ? "دائنة" : "مدينة",
               }))}
               columns={[
                 { header: "اسم الحساب", key: "name", width: 25 },
@@ -744,6 +758,19 @@ const Customers = () => {
               className="pr-10 h-12"
             />
           </div>
+          <Select value={filterBySupervisor} onValueChange={setFilterBySupervisor}>
+            <SelectTrigger className="w-48 h-12">
+              <SelectValue placeholder="فلترة حسب المشرف" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">جميع المشرفين</SelectItem>
+              {supervisors.map((sup) => (
+                <SelectItem key={sup.id} value={sup.id}>
+                  {sup.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Select value={filterBySalesRep} onValueChange={setFilterBySalesRep}>
             <SelectTrigger className="w-48 h-12">
               <SelectValue placeholder="فلترة حسب المندوب" />
@@ -819,12 +846,12 @@ const Customers = () => {
                       <span>الرصيد الحالي</span>
                     </div>
                     <p
-                      className={`text-lg font-bold ${customer.currentBalance > 0
+                      className={`text-lg font-bold ${getBalance(customer.id, Number(customer.currentBalance) || 0) > 0
                         ? "text-destructive"
                         : "text-success"
                         }`}
                     >
-                      {customer.currentBalance.toFixed(2)} {currency}
+                      {getBalance(customer.id, Number(customer.currentBalance) || 0).toFixed(2)} {currency}
                     </p>
                   </div>
                   <div>
@@ -837,14 +864,14 @@ const Customers = () => {
                     </p>
                   </div>
                 </div>
-                {customer.creditLimit > 0 && (
+                {Number(customer.creditLimit) > 0 && (
                   <div className="pt-2 text-sm text-muted-foreground">
-                    حد الائتمان: {customer.creditLimit.toFixed(2)} {currency}
+                    حد الائتمان: {Number(customer.creditLimit || 0).toFixed(2)} {currency}
                   </div>
                 )}
 
                 {/* زر التسديد */}
-                {can("credit", "edit") && customer.currentBalance > 0 && (
+                {can("credit", "edit") && getBalance(customer.id, Number(customer.currentBalance) || 0) > 0 && (
                   <div className="pt-3 border-t">
                     <Button
                       size="sm"
@@ -903,7 +930,7 @@ const Customers = () => {
                   <div className="flex justify-between">
                     <span className="text-sm">الرصيد المستحق:</span>
                     <span className="font-semibold text-destructive">
-                      {payingCustomer.currentBalance.toFixed(2)} {currency}
+                      {getBalance(payingCustomer.id, Number(payingCustomer.currentBalance) || 0).toFixed(2)} {currency}
                     </span>
                   </div>
                 </div>
@@ -945,11 +972,11 @@ const Customers = () => {
                   value={paymentAmount}
                   onChange={(e) => setPaymentAmount(e.target.value)}
                   min="0"
-                  max={payingCustomer.currentBalance}
+                  max={getBalance(payingCustomer.id, Number(payingCustomer.currentBalance) || 0)}
                   step="0.01"
                 />
                 <p className="text-xs text-muted-foreground">
-                  الحد الأقصى: {payingCustomer.currentBalance.toFixed(2)}{" "}
+                  الحد الأقصى: {getBalance(payingCustomer.id, Number(payingCustomer.currentBalance) || 0).toFixed(2)}{" "}
                   {currency}
                 </p>
               </div>
@@ -960,7 +987,7 @@ const Customers = () => {
                     المبلغ المتبقي بعد الدفع:{" "}
                     <strong>
                       {(
-                        payingCustomer.currentBalance -
+                        getBalance(payingCustomer.id, Number(payingCustomer.currentBalance) || 0) -
                         parseFloat(paymentAmount)
                       ).toFixed(2)}{" "}
                       {currency}

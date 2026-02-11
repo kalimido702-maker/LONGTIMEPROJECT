@@ -53,19 +53,21 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 
-const paymentTypeIcons = {
+const paymentTypeIcons: Record<string, any> = {
   cash: Banknote,
   wallet: Wallet,
   visa: CreditCard,
   bank_transfer: Building2,
+  credit: Wallet,
   other: HelpCircle,
 };
 
-const paymentTypeLabels = {
+const paymentTypeLabels: Record<string, string> = {
   cash: "نقدي",
   wallet: "محفظة إلكترونية",
   visa: "فيزا/بطاقة ائتمان",
   bank_transfer: "تحويل بنكي",
+  credit: "آجل",
   other: "أخرى",
 };
 
@@ -267,7 +269,7 @@ export default function PaymentMethods() {
   };
 
   const getMethodIcon = (type: PaymentMethod["type"]) => {
-    const Icon = paymentTypeIcons[type];
+    const Icon = paymentTypeIcons[type] || HelpCircle;
     return <Icon className="h-5 w-5" />;
   };
 

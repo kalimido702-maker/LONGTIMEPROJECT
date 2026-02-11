@@ -109,18 +109,25 @@ function numberToArabicWords(num: number): string {
 export async function generateStatementHTML(data: AccountStatementData): Promise<string> {
     const logoBase64 = await loadLogoBase64();
 
-    const rowsHtml = data.rows.map((row, index) => `
+    const rowsHtml = data.rows.map((row, index) => {
+        // Shorten long movement IDs (e.g., RET-1234567890 → RET-...7890)
+        let displayId = row.movementId || '-';
+        if (displayId.length > 12) {
+            displayId = displayId.substring(0, 4) + '...' + displayId.slice(-4);
+        }
+        return `
         <tr>
             <td>${index + 1}</td>
             <td>${row.date}</td>
             <td>${row.movement}</td>
-            <td>${row.debit > 0 ? formatNum(row.debit, 2, 2) : '-'}</td>
-            <td>${row.credit > 0 ? formatNum(row.credit, 2, 2) : '-'}</td>
-            <td>${formatNum(row.balance, 2, 2)}</td>
-            <td>${row.movementId || '-'}</td>
+            <td>${row.debit > 0 ? Math.round(row.debit) : '-'}</td>
+            <td>${row.credit > 0 ? Math.round(row.credit) : '-'}</td>
+            <td>${Math.round(row.balance)}</td>
+            <td>${displayId}</td>
             <td>${row.notes || '-'}</td>
         </tr>
-    `).join("");
+    `;
+    }).join("");
 
     const formatDate = (date: Date): string => {
         const options: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'long', day: 'numeric' };
@@ -212,8 +219,8 @@ export async function generateStatementHTML(data: AccountStatementData): Promise
             height: 2px;
             background: #000;
             width: 55%;
-            margin-bottom: 8px;
-            margin-top: 8px;
+            margin-bottom: 20px;
+            margin-top: 25px;
         }
         
         .report-title {
@@ -271,6 +278,8 @@ export async function generateStatementHTML(data: AccountStatementData): Promise
             padding: 6px 4px;
             border: 1px solid #000;
             text-align: center;
+            word-break: break-all;
+            font-size: 11px;
         }
         
         tr:nth-child(even) {
@@ -370,7 +379,7 @@ export async function generateStatementHTML(data: AccountStatementData): Promise
             <div class="period-info">
                 <span class="period-label">بداية من: ${formatDate(data.dateFrom)} وحتى: ${formatShortDate(data.dateTo)}</span>
             </div>
-            <div class="opening-balance-box">${formatNum(data.closingBalance, 2, 2)}</div>
+            <div class="opening-balance-box">${Math.round(data.closingBalance)}</div>
         </div>
 
         <!-- Table -->
@@ -394,7 +403,7 @@ export async function generateStatementHTML(data: AccountStatementData): Promise
                 <tfoot>
                     <tr class="balance-row">
                         <td colspan="5" style="text-align: left; padding-left: 20px;">الرصيد</td>
-                        <td>${formatNum(data.closingBalance, 2, 2)}</td>
+                        <td>${Math.round(data.closingBalance)}</td>
                         <td colspan="2"></td>
                     </tr>
                 </tfoot>
@@ -403,30 +412,29 @@ export async function generateStatementHTML(data: AccountStatementData): Promise
         
         <!-- Summary Section -->
         <div class="summary-section">
-            <div class="summary-title">ملخص</div>
+            <div class="summary-title">تقرير</div>
             <table class="summary-table">
                 <tr>
-                    <td style="text-align: right;">بيع</td>
-                    <td>${formatNum(data.summary.totalSales, 2, 2)}</td>
+                    <td style="text-align: right;">إجمالي المبيعات</td>
+                    <td>${Math.round(data.summary.totalSales)}</td>
                 </tr>
                 <tr>
-                    <td style="text-align: right;">مرتجع بيع</td>
-                    <td>${formatNum(data.summary.totalReturns, 2, 2)}</td>
+                    <td style="text-align: right;">إجمالي المرتجعات</td>
+                    <td>${Math.round(data.summary.totalReturns)}</td>
                 </tr>
                 <tr>
-                    <td style="text-align: right;">قبض</td>
-                    <td>${formatNum(data.summary.totalPayments, 2, 2)}</td>
+                    <td style="text-align: right;">إجمالي المدفوعات</td>
+                    <td>${Math.round(data.summary.totalPayments)}</td>
                 </tr>
                 <tr class="debt-row">
                     <td style="text-align: right; padding-bottom: 10px;">الديون</td>
-                    <td style="padding-bottom: 10px;">${formatNum(data.closingBalance, 2, 2)}</td>
+                    <td style="padding-bottom: 10px;">${Math.round(data.closingBalance)}</td>
                 </tr>
             </table>
         </div>
 
         <!-- Footer Text -->
         <div class="footer-text">
-            ${numberToArabicWords(data.closingBalance)}
         </div>
     </div>
 

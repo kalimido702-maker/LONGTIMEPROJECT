@@ -86,7 +86,7 @@ export async function generateAccountStatement(
 
     // Build rows
     const rows: AccountStatementRow[] = [];
-    let runningBalance = customer.previousStatement || 0;
+    let runningBalance = Number(customer.previousStatement) || 0;
 
     // Combine all movements and sort by date
     const movements: {
@@ -164,28 +164,28 @@ export async function generateAccountStatement(
 
         switch (mov.type) {
             case "invoice":
-                debit = mov.data.total;
+                debit = Number(mov.data.total) || 0;
                 movementType = "بيع";
                 movementId = mov.data.invoiceNumber || mov.data.id;
                 notes = mov.data.notes || "";
                 summary.totalSales += debit;
                 break;
             case "payment":
-                credit = mov.data.amount;
+                credit = Number(mov.data.amount) || 0;
                 movementType = "قبض";
                 movementId = mov.data.id;
                 notes = mov.data.notes || "";
                 summary.totalPayments += credit;
                 break;
             case "return":
-                credit = mov.data.total || mov.data.amount || 0;
+                credit = Number(mov.data.total || mov.data.amount) || 0;
                 movementType = "مرتجع بيع";
                 movementId = mov.data.id;
                 notes = mov.data.notes || "";
                 summary.totalReturns += credit;
                 break;
             case "bonus":
-                credit = mov.data.bonusAmount || mov.data.amount || 0;
+                credit = Number(mov.data.bonusAmount || mov.data.amount) || 0;
                 movementType = "بونص";
                 movementId = mov.data.id;
                 notes = `بونص ${mov.data.bonusPercentage || 0}%`;
@@ -214,7 +214,7 @@ export async function generateAccountStatement(
         dateTo,
         rows,
         summary,
-        openingBalance: customer.previousStatement || 0,
+        openingBalance: Number(customer.previousStatement) || 0,
         closingBalance: runningBalance,
     };
 }

@@ -38,6 +38,13 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogFooter,
+} from "@/components/ui/dialog";
+import {
     Wallet,
     User,
     CreditCard,
@@ -50,12 +57,19 @@ import {
     Filter,
     Calendar,
     X,
+    FileSpreadsheet,
+    Printer,
+    Trash2,
+    Edit,
+    ShieldAlert,
 } from "lucide-react";
-import { db, Customer, PaymentMethod } from "@/shared/lib/indexedDB";
+import { db, Customer, PaymentMethod, SalesRep } from "@/shared/lib/indexedDB";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { exportToExcel } from "@/lib/reportExport";
+import { useCustomerBalances } from "@/hooks/useCustomerBalances";
 
 // نوع سجل القبض
 interface CollectionRecord {
@@ -73,14 +87,22 @@ interface CollectionRecord {
 
 export default function Collections() {
     const { getSetting } = useSettingsContext();
-    const { user } = useAuth();
+    const { user, can } = useAuth();
     const currency = getSetting("currency") || "EGP";
     const amountInputRef = useRef<HTMLInputElement>(null);
+
+    // صلاحيات القبض
+    const canViewCollections = can("collections", "view");
+    const canCreateCollection = can("collections", "create");
+    const canEditCollection = can("collections", "edit");
+    const canDeleteCollection = can("collections", "delete");
 
     // البيانات
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
     const [recentCollections, setRecentCollections] = useState<CollectionRecord[]>([]);
+
+    const { getBalance, refresh: refreshBalances } = useCustomerBalances([customers]);
 
     // نموذج الإدخال
     const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
@@ -93,10 +115,22 @@ export default function Collections() {
     const [isLoading, setIsLoading] = useState(false);
 
     // Advanced filters
-    const [filterDateFrom, setFilterDateFrom] = useState<string>("");
-    const [filterDateTo, setFilterDateTo] = useState<string>("");
+    const [filterDateFrom, setFilterDateFrom] = useState<string>(new Date().toISOString().split('T')[0]);
+    const [filterDateTo, setFilterDateTo] = useState<string>(new Date().toISOString().split('T')[0]);
     const [filterPaymentMethodId, setFilterPaymentMethodId] = useState<string>("all");
+    const [filterSupervisorId, setFilterSupervisorId] = useState<string>("all");
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
+    // Supervisors and sales reps
+    const [supervisors, setSupervisors] = useState<SalesRep[]>([]);
+    const [salesReps, setSalesReps] = useState<SalesRep[]>([]);
+
+    // Edit dialog state
+    const [editDialogOpen, setEditDialogOpen] = useState(false);
+    const [editingCollection, setEditingCollection] = useState<CollectionRecord | null>(null);
+    const [editAmount, setEditAmount] = useState("");
+    const [editNotes, setEditNotes] = useState("");
+    const [editPaymentMethodId, setEditPaymentMethodId] = useState("");
 
     useEffect(() => {
         loadData();
@@ -107,7 +141,7 @@ export default function Collections() {
         const allCustomers = await db.getAll<Customer>("customers");
         // ترتيب حسب الرصيد (الأعلى رصيد أولاً)
         const sortedCustomers = allCustomers.sort(
-            (a, b) => (b.currentBalance || 0) - (a.currentBalance || 0)
+            (a, b) => Number(b.currentBalance || 0) - Number(a.currentBalance || 0)
         );
         setCustomers(sortedCustomers);
 
@@ -115,6 +149,12 @@ export default function Collections() {
         const allMethods = await db.getAll<PaymentMethod>("paymentMethods");
         const activeMethods = allMethods.filter((m) => m.isActive);
         setPaymentMethods(activeMethods);
+
+        // تحميل المندوبين والمشرفين
+        const allReps = await db.getAll<SalesRep>("salesReps");
+        setSalesReps(allReps);
+        const supervisorReps = allReps.filter((r: any) => r.role === "supervisor" || r.isSupervisor);
+        setSupervisors(supervisorReps);
 
         // تحميل آخر عمليات القبض
         await loadRecentCollections();
@@ -213,6 +253,17 @@ export default function Collections() {
             filtered = filtered.filter(c => c.paymentMethodId === filterPaymentMethodId);
         }
 
+        // Supervisor filter - filter by customers whose salesRep belongs to supervisor
+        if (filterSupervisorId && filterSupervisorId !== "all") {
+            const supervisorRepIds = salesReps
+                .filter(r => r.supervisorId === filterSupervisorId)
+                .map(r => r.id);
+            const supervisorCustomerIds = customers
+                .filter(c => c.salesRepId && supervisorRepIds.includes(c.salesRepId))
+                .map(c => c.id);
+            filtered = filtered.filter(c => supervisorCustomerIds.includes(c.customerId));
+        }
+
         // Global text search
         if (globalSearchQuery) {
             const query = globalSearchQuery.toLowerCase();
@@ -226,12 +277,60 @@ export default function Collections() {
         }
 
         return filtered;
-    }, [recentCollections, globalSearchQuery, filterDateFrom, filterDateTo, filterPaymentMethodId]);
+    }, [recentCollections, globalSearchQuery, filterDateFrom, filterDateTo, filterPaymentMethodId, filterSupervisorId, salesReps, customers]);
 
     // العميل المختار
     const selectedCustomer = useMemo(() => {
         return customers.find((c) => c.id === selectedCustomerId);
     }, [customers, selectedCustomerId]);
+
+    // طباعة إيصال القبض
+    const handlePrintReceipt = async (collection: CollectionRecord) => {
+        const customer = customers.find(c => c.id === collection.customerId);
+        const currentBalance = customer ? getBalance(customer.id, Number(customer.currentBalance || 0)) : 0;
+        // The current balance already has this payment deducted, so previousBalance = currentBalance + amount
+        const previousBalance = currentBalance + Number(collection.amount);
+
+        // Reuse the same receipt design
+        await generateCollectionReceipt(collection, previousBalance, currentBalance);
+    };
+
+    // تصدير البيانات إلى Excel
+    const handleExportToExcel = () => {
+        if (filteredCollections.length === 0) {
+            toast.error("لا توجد بيانات للتصدير");
+            return;
+        }
+
+        exportToExcel({
+            title: "تقرير عمليات القبض",
+            fileName: `تقرير_القبض_${filterDateFrom || 'all'}_${filterDateTo || 'all'}`,
+            data: filteredCollections.map((c) => ({
+                customerName: c.customerName,
+                date: new Date(c.createdAt).toLocaleDateString("ar-EG"),
+                amount: c.amount,
+                transactionId: c.id,
+                paymentMethod: c.paymentMethodName,
+                user: c.userName,
+                notes: c.notes || "",
+            })),
+            columns: [
+                { header: "اسم العميل", dataKey: "customerName" },
+                { header: "التاريخ", dataKey: "date" },
+                { header: "المبلغ", dataKey: "amount" },
+                { header: "رقم العملية", dataKey: "transactionId" },
+                { header: "طريقة الدفع", dataKey: "paymentMethod" },
+                { header: "المستخدم", dataKey: "user" },
+                { header: "ملاحظات", dataKey: "notes" },
+            ],
+            summary: [
+                { label: "إجمالي العمليات", value: filteredCollections.length },
+                { label: "إجمالي المبلغ", value: filteredCollections.reduce((sum, c) => sum + c.amount, 0) },
+            ],
+        });
+
+        toast.success("تم تصدير البيانات بنجاح");
+    };
 
     // معالجة القبض
     const handleSubmit = async (e?: React.FormEvent) => {
@@ -267,7 +366,8 @@ export default function Collections() {
             );
 
             // تحديث رصيد العميل (خصم المبلغ المدفوع)
-            const newBalance = (customer.currentBalance || 0) - amountValue;
+            const previousBalance = getBalance(customer.id, Number(customer.currentBalance || 0));
+            const newBalance = previousBalance - amountValue;
             const updatedCustomer: Customer = {
                 ...customer,
                 currentBalance: newBalance,
@@ -288,7 +388,23 @@ export default function Collections() {
                 notes: notes || undefined,
             };
 
-            // حفظ سجل الدفع في localStorage
+            // حفظ سجل الدفع في IndexedDB payments store (للظهور في كشف الحساب)
+            const dbPaymentRecord = {
+                id: paymentRecord.id,
+                customerId: selectedCustomerId,
+                customerName: customer.name,
+                amount: amountValue,
+                paymentMethodId: selectedPaymentMethodId,
+                paymentMethodName: paymentMethod?.name || "",
+                paymentType: "collection",
+                createdAt: new Date().toISOString(),
+                userId: user?.id || "",
+                userName: user?.name || "",
+                notes: notes || undefined,
+            };
+            await db.add("payments", dbPaymentRecord);
+
+            // حفظ سجل الدفع في localStorage أيضاً
             const existingCollections = localStorage.getItem('pos-collections');
             const collections: CollectionRecord[] = existingCollections ? JSON.parse(existingCollections) : [];
             collections.unshift(paymentRecord);
@@ -300,6 +416,9 @@ export default function Collections() {
             toast.success(
                 `تم قبض ${amountValue.toFixed(2)} ${currency} من ${customer.name}`
             );
+
+            // Generate and print receipt
+            generateCollectionReceipt(paymentRecord, previousBalance, newBalance);
 
             // إعادة تعيين النموذج
             setSelectedCustomerId("");
@@ -317,6 +436,279 @@ export default function Collections() {
             toast.error("حدث خطأ أثناء عملية القبض");
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    // Generate collection receipt
+    const generateCollectionReceipt = async (record: CollectionRecord, previousBalance: number, newBalance: number) => {
+        const receiptDate = new Date(record.createdAt).toLocaleDateString("ar-EG");
+        const customer = customers.find(c => c.id === record.customerId);
+        const customerCode = customer?.id?.slice(-8) || '';
+        const receiptNumber = record.id.replace('collection_', '');
+
+        // Load logo & QR
+        let logoBase64: string | null = null;
+        let qrBase64: string | null = null;
+        try {
+            const logoModule = await import("@/assets/images/longtime-logo.png");
+            if (typeof logoModule.default === "string") logoBase64 = logoModule.default;
+        } catch (_e) { /* ignore */ }
+        try {
+            const QRCode = (await import("qrcode")).default;
+            qrBase64 = await QRCode.toDataURL("https://longtimelt.com", { width: 120, margin: 1 });
+        } catch (_e) { /* ignore */ }
+
+        const receiptContent = `
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <title>إيصال قبض - ${record.id}</title>
+    <style>
+        @page { size: A5 landscape; margin: 10mm; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+            background: #fff;
+            color: #333;
+            direction: rtl;
+            width: 700px;
+            margin: 0 auto;
+            padding: 15px;
+        }
+        .receipt-container {
+            border: 2px solid #2b7cba;
+            padding: 0;
+            position: relative;
+        }
+        /* Header */
+        .receipt-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 25px;
+            border-bottom: 2px solid #2b7cba;
+            background: linear-gradient(135deg, #f8fbff 0%, #eef5fc 100%);
+        }
+        .company-name {
+            font-size: 36px;
+            font-weight: bold;
+            color: #2b7cba;
+        }
+        .logo-img {
+            width: 90px;
+            height: auto;
+        }
+        /* Title */
+        .receipt-title {
+            text-align: center;
+            padding: 12px 20px;
+            position: relative;
+        }
+        .receipt-title-box {
+            display: inline-block;
+            border: 2px solid #333;
+            padding: 6px 30px;
+            font-size: 18px;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+        /* Type badge */
+        .receipt-type {
+            position: absolute;
+            left: 25px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #2b7cba;
+            color: #fff;
+            padding: 6px 20px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 4px;
+        }
+        /* Info section */
+        .receipt-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding: 15px 25px;
+            border-bottom: 2px solid #2b7cba;
+            background: #f0f7ff;
+        }
+        .customer-info {
+            text-align: right;
+        }
+        .customer-name {
+            font-size: 22px;
+            font-weight: bold;
+            color: #333;
+        }
+        .customer-contact {
+            font-size: 13px;
+            color: #666;
+            margin-top: 3px;
+        }
+        .receipt-meta {
+            text-align: left;
+            font-size: 13px;
+            line-height: 2;
+        }
+        .receipt-meta .label {
+            color: #2b7cba;
+            font-weight: bold;
+        }
+        /* Amounts section */
+        .amounts-section {
+            padding: 20px 25px;
+        }
+        .amount-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .amount-label {
+            background: #2b7cba;
+            color: #fff;
+            padding: 8px 22px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 4px;
+            min-width: 150px;
+            text-align: center;
+        }
+        .amount-label.red {
+            background: #e53935;
+        }
+        .amount-value {
+            font-size: 26px;
+            font-weight: bold;
+            color: #333;
+            min-width: 200px;
+            text-align: center;
+        }
+        .amount-value.paid {
+            font-size: 28px;
+            border: 2px solid #333;
+            padding: 5px 25px;
+        }
+        .amount-value.current {
+            font-size: 28px;
+            color: #333;
+        }
+        /* Notes */
+        .notes-section {
+            padding: 0 25px 10px;
+            font-size: 13px;
+            color: #666;
+        }
+        .notes-section span {
+            font-weight: bold;
+            color: #333;
+        }
+        /* Footer */
+        .receipt-footer {
+            border-top: 2px solid #2b7cba;
+            padding: 15px 25px;
+            text-align: center;
+            background: #f8fbff;
+        }
+        .footer-text {
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        .footer-link {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2b7cba;
+            text-decoration: underline;
+        }
+        .qr-code {
+            margin-top: 10px;
+        }
+        .qr-code img {
+            width: 100px;
+            height: 100px;
+        }
+        .employee-info {
+            font-size: 11px;
+            color: #999;
+            margin-top: 8px;
+        }
+        @media print {
+            body { width: 100%; padding: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="receipt-container">
+        <!-- Header -->
+        <div class="receipt-header">
+            <div class="company-name">لونج تايم</div>
+            ${logoBase64 ? `<img src="${logoBase64}" class="logo-img" alt="Logo">` : ''}
+        </div>
+
+        <!-- Title -->
+        <div class="receipt-title">
+            <span class="receipt-title-box">ايصال استلام نقدية/تحويل بنكي</span>
+            <span class="receipt-type">قبض</span>
+        </div>
+
+        <!-- Customer & Meta Info -->
+        <div class="receipt-info">
+            <div class="customer-info">
+                <div class="customer-name">${record.customerName}</div>
+                ${customer?.phone ? `<div class="customer-contact">${customer.phone}</div>` : ''}
+            </div>
+            <div class="receipt-meta">
+                <div><span class="label">رقم الايصال: </span>${receiptNumber}</div>
+                <div><span class="label">التاريخ: </span>${receiptDate}</div>
+                <div><span class="label">كود العميل: </span>${customerCode}</div>
+            </div>
+        </div>
+
+        <!-- Amounts -->
+        <div class="amounts-section">
+            <div class="amount-row">
+                <span class="amount-label">الرصيد السابق</span>
+                <span class="amount-value">${Number(previousBalance).toFixed(2)}</span>
+            </div>
+            <div class="amount-row">
+                <span class="amount-label">المدفوع</span>
+                <span class="amount-value paid">${Number(record.amount).toFixed(2)}</span>
+            </div>
+            <div class="amount-row">
+                <span class="amount-label red">الرصيد الحالي</span>
+                <span class="amount-value current">${Number(newBalance).toFixed(2)}</span>
+            </div>
+        </div>
+
+        ${record.notes ? `
+        <div class="notes-section">
+            <span>ملاحظات: </span>${record.notes}
+        </div>` : ''}
+
+        <!-- Footer -->
+        <div class="receipt-footer">
+            <div class="footer-text">للاطلاع على صور منتجاتنا يمكنك زيارة موقعنا</div>
+            <div class="footer-link">longtimelt.com</div>
+            ${qrBase64 ? `<div class="qr-code"><img src="${qrBase64}" alt="QR Code"></div>` : ''}
+            <div class="employee-info">المحصّل: ${record.userName}</div>
+        </div>
+    </div>
+    <script>
+        window.onload = function() {
+            window.print();
+        };
+    </script>
+</body>
+</html>`;
+
+        const printWindow = window.open("", "_blank");
+        if (printWindow) {
+            printWindow.document.write(receiptContent);
+            printWindow.document.close();
         }
     };
 
@@ -340,10 +732,10 @@ export default function Collections() {
 
     // إحصائيات
     const totalCustomersWithDebt = customers.filter(
-        (c) => (c.currentBalance || 0) > 0
+        (c) => getBalance(c.id, Number(c.currentBalance || 0)) > 0
     ).length;
     const totalDebt = customers.reduce(
-        (sum, c) => sum + (c.currentBalance || 0),
+        (sum, c) => sum + Math.max(0, getBalance(c.id, Number(c.currentBalance || 0))),
         0
     );
     // Filtered statistics based on current filters
@@ -355,10 +747,127 @@ export default function Collections() {
     });
     const todayTotal = todayCollections.reduce((sum, c) => sum + c.amount, 0);
 
+    // فتح نافذة تعديل القبض
+    const handleEditCollection = (collection: CollectionRecord) => {
+        setEditingCollection(collection);
+        setEditAmount(collection.amount.toString());
+        setEditNotes(collection.notes || "");
+        setEditPaymentMethodId(collection.paymentMethodId);
+        setEditDialogOpen(true);
+    };
+
+    // حفظ تعديل القبض
+    const handleSaveEditCollection = async () => {
+        if (!editingCollection) return;
+
+        const newAmount = parseFloat(editAmount);
+        if (!newAmount || newAmount <= 0) {
+            toast.error("يرجى إدخال مبلغ صحيح");
+            return;
+        }
+
+        const oldAmount = editingCollection.amount;
+        const amountDiff = newAmount - oldAmount; // positive = increased, negative = decreased
+        const paymentMethod = paymentMethods.find(m => m.id === editPaymentMethodId);
+
+        try {
+            // تحديث رصيد العميل بالفرق
+            const customer = customers.find(c => c.id === editingCollection.customerId);
+            if (customer) {
+                const currentBalance = Number(customer.currentBalance || 0);
+                // إذا زاد المبلغ → ينقص الرصيد أكثر، إذا نقص → يرجع جزء
+                const updatedBalance = currentBalance - amountDiff;
+                await db.update("customers", { ...customer, currentBalance: updatedBalance });
+            }
+
+            // تحديث في localStorage
+            const saved = localStorage.getItem('pos-collections');
+            if (saved) {
+                const collections: CollectionRecord[] = JSON.parse(saved);
+                const idx = collections.findIndex(c => c.id === editingCollection.id);
+                if (idx !== -1) {
+                    collections[idx] = {
+                        ...collections[idx],
+                        amount: newAmount,
+                        notes: editNotes || undefined,
+                        paymentMethodId: editPaymentMethodId,
+                        paymentMethodName: paymentMethod?.name || collections[idx].paymentMethodName,
+                    };
+                    localStorage.setItem('pos-collections', JSON.stringify(collections));
+                }
+            }
+
+            // تحديث في IndexedDB payments
+            try {
+                const payment = await db.get<any>("payments", editingCollection.id);
+                if (payment) {
+                    await db.update("payments", {
+                        ...payment,
+                        amount: newAmount,
+                        notes: editNotes || undefined,
+                        paymentMethodId: editPaymentMethodId,
+                        paymentMethodName: paymentMethod?.name || payment.paymentMethodName,
+                    });
+                }
+            } catch (_e) { /* قد لا يكون موجود */ }
+
+            toast.success("تم تعديل عملية القبض بنجاح");
+            setEditDialogOpen(false);
+            setEditingCollection(null);
+            await loadData();
+        } catch (error) {
+            console.error("Error editing collection:", error);
+            toast.error("حدث خطأ أثناء تعديل عملية القبض");
+        }
+    };
+
+    // حذف عملية قبض
+    const handleDeleteCollection = async (collection: CollectionRecord) => {
+        if (!confirm(`هل أنت متأكد من حذف عملية القبض بمبلغ ${collection.amount.toFixed(2)} ${currency} من ${collection.customerName}؟`)) {
+            return;
+        }
+        try {
+            // حذف من localStorage
+            const saved = localStorage.getItem('pos-collections');
+            if (saved) {
+                const collections: CollectionRecord[] = JSON.parse(saved);
+                const updated = collections.filter(c => c.id !== collection.id);
+                localStorage.setItem('pos-collections', JSON.stringify(updated));
+            }
+
+            // حذف من payments في IndexedDB
+            try {
+                await db.delete("payments", collection.id);
+            } catch (_e) { /* قد لا يكون موجود */ }
+
+            // إعادة رصيد العميل
+            const customer = customers.find(c => c.id === collection.customerId);
+            if (customer) {
+                const restoredBalance = Number(customer.currentBalance || 0) + Number(collection.amount);
+                await db.update("customers", { ...customer, currentBalance: restoredBalance });
+            }
+
+            toast.success("تم حذف عملية القبض بنجاح");
+            await loadData();
+        } catch (error) {
+            console.error("Error deleting collection:", error);
+            toast.error("حدث خطأ أثناء حذف عملية القبض");
+        }
+    };
+
     return (
         <div className="min-h-screen bg-background" dir="rtl">
             <POSHeader />
 
+            {!canViewCollections ? (
+                <div className="container mx-auto p-6">
+                    <Card className="p-8 text-center">
+                        <ShieldAlert className="h-12 w-12 text-red-500 mx-auto mb-4" />
+                        <h2 className="text-2xl font-bold mb-2">غير مصرح</h2>
+                        <p className="text-muted-foreground">ليس لديك صلاحية عرض القبض</p>
+                    </Card>
+                </div>
+            ) : (
             <div className="container mx-auto p-6">
                 <div className="flex items-center justify-between mb-6">
                     <h1 className="text-3xl font-bold flex items-center gap-2">
@@ -401,6 +910,7 @@ export default function Collections() {
                                     setFilterDateFrom("");
                                     setFilterDateTo("");
                                     setFilterPaymentMethodId("all");
+                                    setFilterSupervisorId("all");
                                     setGlobalSearchQuery("");
                                 }}
                             >
@@ -451,12 +961,44 @@ export default function Collections() {
                                 </Select>
                             </div>
                             <div className="space-y-2">
+                                <Label>المشرف</Label>
+                                <Select
+                                    value={filterSupervisorId}
+                                    onValueChange={setFilterSupervisorId}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="جميع المشرفين" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">جميع المشرفين</SelectItem>
+                                        {supervisors.map((sup) => (
+                                            <SelectItem key={sup.id} value={sup.id}>
+                                                {sup.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                            <div className="space-y-2">
                                 <Label>النتائج</Label>
                                 <div className="h-10 flex items-center">
                                     <Badge variant="secondary" className="text-lg px-4">
                                         {filteredCollections.length} عملية
                                     </Badge>
                                 </div>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>تصدير</Label>
+                                <Button
+                                    variant="outline"
+                                    onClick={handleExportToExcel}
+                                    className="h-10 gap-2"
+                                >
+                                    <FileSpreadsheet className="h-4 w-4" />
+                                    تصدير Excel
+                                </Button>
                             </div>
                         </div>
                     </Card>
@@ -520,8 +1062,9 @@ export default function Collections() {
                     </Card>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className={`grid grid-cols-1 ${canCreateCollection ? 'lg:grid-cols-3' : ''} gap-6`}>
                     {/* نموذج القبض السريع */}
+                    {canCreateCollection && (
                     <Card className="p-6 lg:col-span-1">
                         <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
                             <Plus className="h-5 w-5" />
@@ -547,7 +1090,7 @@ export default function Collections() {
                                                 <div className="flex flex-col items-start">
                                                     <span>{selectedCustomer.name}</span>
                                                     <span className="text-xs text-red-500">
-                                                        رصيد: {(selectedCustomer.currentBalance || 0).toFixed(2)}{" "}
+                                                        رصيد: {getBalance(selectedCustomer.id, Number(selectedCustomer.currentBalance || 0)).toFixed(2)}{" "}
                                                         {currency}
                                                     </span>
                                                 </div>
@@ -598,12 +1141,12 @@ export default function Collections() {
                                                             </div>
                                                             <Badge
                                                                 variant={
-                                                                    (customer.currentBalance || 0) > 0
+                                                                    getBalance(customer.id, Number(customer.currentBalance || 0)) > 0
                                                                         ? "destructive"
                                                                         : "secondary"
                                                                 }
                                                             >
-                                                                {(customer.currentBalance || 0).toFixed(2)}
+                                                                {getBalance(customer.id, Number(customer.currentBalance || 0)).toFixed(2)}
                                                             </Badge>
                                                         </CommandItem>
                                                     ))}
@@ -634,7 +1177,7 @@ export default function Collections() {
                                             size="sm"
                                             onClick={() =>
                                                 setAmount(
-                                                    (selectedCustomer.currentBalance || 0).toFixed(2)
+                                                    getBalance(selectedCustomer.id, Number(selectedCustomer.currentBalance || 0)).toFixed(2)
                                                 )
                                             }
                                         >
@@ -646,7 +1189,7 @@ export default function Collections() {
                                             size="sm"
                                             onClick={() =>
                                                 setAmount(
-                                                    ((selectedCustomer.currentBalance || 0) / 2).toFixed(2)
+                                                    (getBalance(selectedCustomer.id, Number(selectedCustomer.currentBalance || 0)) / 2).toFixed(2)
                                                 )
                                             }
                                         >
@@ -715,9 +1258,10 @@ export default function Collections() {
                             </Button>
                         </form>
                     </Card>
+                    )}
 
                     {/* آخر عمليات القبض */}
-                    <Card className="p-6 lg:col-span-2">
+                    <Card className={`p-6 ${canCreateCollection ? 'lg:col-span-2' : 'lg:col-span-3'}`}>
                         <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
                             <History className="h-5 w-5" />
                             آخر عمليات القبض
@@ -731,13 +1275,14 @@ export default function Collections() {
                                     <TableHead>طريقة الدفع</TableHead>
                                     <TableHead>التاريخ</TableHead>
                                     <TableHead>الموظف</TableHead>
+                                    <TableHead>إجراءات</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {filteredCollections.length === 0 ? (
                                     <TableRow>
                                         <TableCell
-                                            colSpan={5}
+                                            colSpan={6}
                                             className="text-center text-muted-foreground py-8"
                                         >
                                             لا توجد عمليات قبض حتى الآن
@@ -759,6 +1304,40 @@ export default function Collections() {
                                             <TableCell className="text-muted-foreground">
                                                 {collection.userName}
                                             </TableCell>
+                                            <TableCell>
+                                                <div className="flex items-center gap-1">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => handlePrintReceipt(collection)}
+                                                        title="طباعة إيصال"
+                                                    >
+                                                        <Printer className="h-4 w-4" />
+                                                    </Button>
+                                                    {canEditCollection && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() => handleEditCollection(collection)}
+                                                            title="تعديل عملية القبض"
+                                                            className="text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                                                        >
+                                                            <Edit className="h-4 w-4" />
+                                                        </Button>
+                                                    )}
+                                                    {canDeleteCollection && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() => handleDeleteCollection(collection)}
+                                                            title="حذف عملية القبض"
+                                                            className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                                                        >
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
+                                                    )}
+                                                </div>
+                                            </TableCell>
                                         </TableRow>
                                     ))
                                 )}
@@ -767,6 +1346,74 @@ export default function Collections() {
                     </Card>
                 </div>
             </div>
+            )}
+
+            {/* نافذة تعديل القبض */}
+            <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+                <DialogContent className="max-w-md" dir="rtl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Edit className="h-5 w-5" />
+                            تعديل عملية القبض
+                        </DialogTitle>
+                    </DialogHeader>
+                    {editingCollection && (
+                        <div className="space-y-4 py-2">
+                            <div className="p-3 bg-muted rounded-lg">
+                                <p className="font-medium">{editingCollection.customerName}</p>
+                                <p className="text-sm text-muted-foreground">
+                                    التاريخ: {formatDate(editingCollection.createdAt)}
+                                </p>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>المبلغ *</Label>
+                                <Input
+                                    type="number"
+                                    value={editAmount}
+                                    onChange={(e) => setEditAmount(e.target.value)}
+                                    placeholder="0.00"
+                                    className="h-12 text-xl font-bold text-center"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>طريقة الدفع</Label>
+                                <Select
+                                    value={editPaymentMethodId}
+                                    onValueChange={setEditPaymentMethodId}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="اختر طريقة الدفع" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {paymentMethods.map((method) => (
+                                            <SelectItem key={method.id} value={method.id}>
+                                                {method.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>ملاحظات</Label>
+                                <Input
+                                    value={editNotes}
+                                    onChange={(e) => setEditNotes(e.target.value)}
+                                    placeholder="ملاحظات..."
+                                />
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter className="gap-2">
+                        <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+                            إلغاء
+                        </Button>
+                        <Button onClick={handleSaveEditCollection}>
+                            <Check className="h-4 w-4 ml-2" />
+                            حفظ التعديل
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

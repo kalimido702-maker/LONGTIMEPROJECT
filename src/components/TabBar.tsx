@@ -57,7 +57,7 @@ const menuGroups = [
     {
         label: 'المالية',
         items: [
-            { path: '/collections', permission: 'credit', name: 'القبض السريع' },
+            { path: '/collections', permission: 'collections', name: 'القبض السريع' },
             { path: '/bonus', permission: 'credit', name: 'البونص' },
             { path: '/supervisor-bonus', permission: 'credit', name: 'بونص المشرفين' },
             { path: '/deposit-sources', permission: 'depositSources', name: 'مصادر الإيداعات' },

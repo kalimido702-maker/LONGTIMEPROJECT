@@ -150,12 +150,29 @@ export class MigrationRunner {
                             }
                         }
                     } catch (stmtError: any) {
-                        // Log but continue for certain errors (like "already exists")
-                        if (stmtError.message?.includes("already exists") ||
-                            stmtError.message?.includes("duplicate column") ||
-                            stmtError.code === "ER_TABLE_EXISTS_ERROR" ||
-                            stmtError.code === "SQLITE_ERROR" && stmtError.message?.includes("already exists")) {
-                            logger.debug(`  ⚠️ Skipping (already exists): ${trimmed.substring(0, 50)}...`);
+                        const msg = (stmtError.message || "").toLowerCase();
+                        const code = stmtError.code || "";
+                        // Log but continue for certain errors (like "already exists", "duplicate column", etc.)
+                        const isIgnorable =
+                            msg.includes("already exists") ||
+                            msg.includes("duplicate column") ||
+                            msg.includes("duplicate key name") ||
+                            msg.includes("duplicate entry") ||
+                            msg.includes("can't drop") ||
+                            msg.includes("check that column/key exists") ||
+                            msg.includes("unknown column") ||
+                            msg.includes("doesn't exist") ||
+                            code === "ER_TABLE_EXISTS_ERROR" ||
+                            code === "ER_DUP_FIELDNAME" ||
+                            code === "ER_DUP_KEYNAME" ||
+                            code === "ER_DUP_ENTRY" ||
+                            code === "ER_CANT_DROP_FIELD_OR_KEY" ||
+                            code === "ER_NO_SUCH_TABLE" ||
+                            code === "ER_BAD_FIELD_ERROR" ||
+                            (code === "SQLITE_ERROR" && msg.includes("already exists"));
+
+                        if (isIgnorable) {
+                            logger.debug(`  ⚠️ Skipping (${code || 'already exists'}): ${trimmed.substring(0, 80)}...`);
                         } else {
                             throw stmtError;
                         }

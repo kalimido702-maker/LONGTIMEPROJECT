@@ -24,6 +24,8 @@ import { db, Customer, Invoice } from "@/shared/lib/indexedDB";
 import { useToast } from "@/hooks/use-toast";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { whatsappService, WhatsAppAccount } from "@/services/whatsapp/whatsappService";
+import { generateAccountStatement } from "@/lib/accountStatementExport";
+import { useCustomerBalances } from "@/hooks/useCustomerBalances";
 
 interface StatementWhatsAppDialogProps {
     open: boolean;
@@ -50,6 +52,8 @@ export const StatementWhatsAppDialog = ({
     const [contentType, setContentType] = useState<"balanceOnly" | "balanceAndStatement">("balanceOnly");
     const [fromDate, setFromDate] = useState(new Date(new Date().getFullYear(), 0, 1).toLocaleDateString('en-CA'));
     const [toDate, setToDate] = useState(new Date().toLocaleDateString('en-CA'));
+    const [calculatedBalance, setCalculatedBalance] = useState<number | null>(null);
+    const { balanceMap, getBalance, refresh: refreshBalances } = useCustomerBalances([open]);
 
     useEffect(() => {
         if (open) {
@@ -65,7 +69,7 @@ export const StatementWhatsAppDialog = ({
                 db.getAll<Invoice>("invoices"),
                 db.getAll<WhatsAppAccount>("whatsappAccounts"),
             ]);
-            setCustomers(custs.filter((c) => c.currentBalance > 0)); // Only customers with balance
+            setCustomers(custs); // سيتم فلترة العملاء حسب الرصيد المحسوب
             setInvoices(invs);
 
             // Find active & connected WhatsApp account
@@ -96,6 +100,25 @@ export const StatementWhatsAppDialog = ({
             .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     }, [invoices, selectedCustomerId, fromDate, toDate]);
 
+    // Calculate actual balance from account statement
+    useEffect(() => {
+        if (!selectedCustomerId) {
+            setCalculatedBalance(null);
+            return;
+        }
+        const calcBalance = async () => {
+            try {
+                const data = await generateAccountStatement(selectedCustomerId, new Date(fromDate), new Date(toDate));
+                if (data) {
+                    setCalculatedBalance(data.closingBalance);
+                }
+            } catch (e) {
+                console.error('Error calculating balance:', e);
+            }
+        };
+        calcBalance();
+    }, [selectedCustomerId, fromDate, toDate]);
+
     // Format balance message
     const formatBalanceMessage = () => {
         if (!selectedCustomer) return "";
@@ -103,7 +126,7 @@ export const StatementWhatsAppDialog = ({
         const now = new Date();
         const dateStr = now.toLocaleDateString("ar-EG");
         const timeStr = now.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" });
-        const balance = Math.round(selectedCustomer.currentBalance);
+        const balance = calculatedBalance !== null ? Math.round(calculatedBalance) : Math.round(getBalance(selectedCustomer.id, Number(selectedCustomer.currentBalance) || 0));
 
         return `شركة لونج تايم للصناعات الكهربائية 
 
@@ -133,9 +156,9 @@ export const StatementWhatsAppDialog = ({
             let runningTotal = 0;
 
             customerInvoices.forEach((inv, idx) => {
-                runningTotal += inv.remainingAmount;
+                runningTotal += Number(inv.remainingAmount || 0);
                 message += `${idx + 1}. ${new Date(inv.createdAt).toLocaleDateString("ar-EG")} - فاتورة #${inv.invoiceNumber || inv.id}\n`;
-                message += `   المبلغ: ${inv.total.toFixed(2)} | المدفوع: ${inv.paidAmount.toFixed(2)} | المتبقي: ${inv.remainingAmount.toFixed(2)}\n`;
+                message += `   المبلغ: ${Number(inv.total || 0).toFixed(2)} | المدفوع: ${Number(inv.paidAmount || 0).toFixed(2)} | المتبقي: ${Number(inv.remainingAmount || 0).toFixed(2)}\n`;
             });
 
             message += `\n---\n*إجمالي المتبقي:* ${runningTotal.toFixed(2)} ${currency}\n`;
@@ -143,7 +166,8 @@ export const StatementWhatsAppDialog = ({
             message += `لا توجد فواتير في هذه الفترة.\n`;
         }
 
-        message += `\n*الرصيد الحالي:* ${selectedCustomer.currentBalance.toFixed(2)} ${currency}\n`;
+        const actualBal = calculatedBalance !== null ? calculatedBalance : getBalance(selectedCustomer.id, Number(selectedCustomer.currentBalance) || 0);
+        message += `\n*الرصيد الحالي:* ${Number(actualBal).toFixed(2)} ${currency}\n`;
         message += `\nنرجو سداد المبلغ المستحق.\nشكراً`;
 
         return message;
@@ -191,6 +215,9 @@ export const StatementWhatsAppDialog = ({
                 const from = new Date(fromDate);
                 const to = new Date(toDate);
 
+                // Use pre-calculated balance, or fallback to customer stored balance
+                const actualBalance = calculatedBalance !== null ? Math.round(calculatedBalance) : Number(selectedCustomer.currentBalance || 0);
+
                 const pdfBlob = await generateStatementPDF(selectedCustomer.id, from, to);
 
                 if (!pdfBlob) {
@@ -210,7 +237,7 @@ export const StatementWhatsAppDialog = ({
                 const caption = `📊 *كشف حساب تفصيلي*\n` +
                     `*العميل:* ${selectedCustomer.name}\n` +
                     `*الفترة:* ${fromDate} إلى ${toDate}\n\n` +
-                    `*الرصيد النهائي:* ${selectedCustomer.currentBalance.toFixed(2)} ${currency}\n\n` +
+                    `*الرصيد النهائي:* ${actualBalance} ${currency}\n\n` +
                     `يرجى مراجعة الملف المرفق.`;
 
                 await whatsappService.sendMessage(
@@ -281,12 +308,14 @@ export const StatementWhatsAppDialog = ({
                                 <SelectValue placeholder="اختر عميل له رصيد مستحق..." />
                             </SelectTrigger>
                             <SelectContent>
-                                {customers.map((customer) => (
+                                {customers
+                                    .filter((c) => getBalance(c.id, Number(c.currentBalance) || 0) > 0)
+                                    .map((customer) => (
                                     <SelectItem key={customer.id} value={customer.id}>
                                         <div className="flex items-center justify-between gap-4">
                                             <span>{customer.name}</span>
                                             <Badge variant="destructive" className="text-xs">
-                                                {customer.currentBalance.toFixed(2)} {currency}
+                                                {getBalance(customer.id, Number(customer.currentBalance) || 0).toFixed(2)} {currency}
                                             </Badge>
                                         </div>
                                     </SelectItem>
@@ -356,7 +385,7 @@ export const StatementWhatsAppDialog = ({
                             <div className="flex justify-between text-sm">
                                 <span className="text-muted-foreground">الرصيد المستحق:</span>
                                 <span className="font-bold text-red-600">
-                                    {selectedCustomer.currentBalance.toFixed(2)} {currency}
+                                    {calculatedBalance !== null ? Math.round(calculatedBalance) : Number(selectedCustomer.currentBalance || 0).toFixed(2)} {currency}
                                 </span>
                             </div>
                             {contentType === "balanceAndStatement" && (

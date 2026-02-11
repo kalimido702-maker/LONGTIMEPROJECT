@@ -1,3 +1,5 @@
+import bcrypt from 'bcrypt';
+
 /**
  * FieldMapper - COMPLETE Data transformation layer between client and server schemas
  * 
@@ -430,7 +432,7 @@ const TABLE_MAPPINGS: Record<string, TableMapping> = {
         ],
         clientOnlyFields: ['local_updated_at'],
     },
-    // Sales Returns - MySQL: original_invoice_id, customer_id, total_amount, reason, status
+    // Sales Returns - MySQL: original_invoice_id, customer_id, total_amount, total, reason, status
     sales_returns: {
         fields: [
             { clientField: 'id', serverField: 'id' },
@@ -438,13 +440,16 @@ const TABLE_MAPPINGS: Record<string, TableMapping> = {
             { clientField: 'invoiceId', serverField: 'original_invoice_id', transform: validateId },
             { clientField: 'customerId', serverField: 'customer_id', transform: validateId },
             { clientField: 'totalAmount', serverField: 'total_amount' },
-            { clientField: 'total', serverField: 'total_amount' },
+            { clientField: 'total', serverField: 'total' },
+            { clientField: 'subtotal', serverField: 'total' },
             { clientField: 'reason', serverField: 'reason' },
             { clientField: 'status', serverField: 'status', defaultValue: 'completed' },
+            { clientField: 'returnDate', serverField: 'return_date', transform: toMySQLDateTime },
+            { clientField: 'createdAt', serverField: 'return_date', transform: toMySQLDateTime },
             { clientField: 'createdAt', serverField: 'created_at', transform: toMySQLDateTime },
             { clientField: 'updatedAt', serverField: 'updated_at', transform: toMySQLDateTime },
         ],
-        clientOnlyFields: ['local_updated_at', 'items', 'customerName', 'invoiceNumber'],
+        clientOnlyFields: ['local_updated_at', 'items', 'customerName', 'invoiceNumber', 'refundMethod', 'refundStatus', 'deliveryStatus', 'userName', 'userId', 'tax'],
     },
     // WhatsApp Accounts - MySQL: name, phone, status, daily_limit, daily_sent, last_reset_date, anti_spam_delay, is_active, last_connected_at
     whatsapp_accounts: {
@@ -700,6 +705,28 @@ const TABLE_MAPPINGS: Record<string, TableMapping> = {
         ],
         clientOnlyFields: ['local_updated_at', 'shiftId'],
     },
+    // Users - MySQL: username, password_hash, full_name, email, phone, role, is_active
+    users: {
+        fields: [
+            { clientField: 'id', serverField: 'id' },
+            { clientField: 'username', serverField: 'username' },
+            { clientField: 'password', serverField: 'password_hash', transform: (v: string) => {
+                if (!v) return null;
+                // If already a bcrypt hash, keep as-is
+                if (v.startsWith('$2b$') || v.startsWith('$2a$')) return v;
+                // Hash plaintext password
+                return bcrypt.hashSync(v, 10);
+            }},
+            { clientField: 'name', serverField: 'full_name' },
+            { clientField: 'email', serverField: 'email' },
+            { clientField: 'phone', serverField: 'phone' },
+            { clientField: 'role', serverField: 'role', defaultValue: 'cashier' },
+            { clientField: 'active', serverField: 'is_active', defaultValue: true },
+            { clientField: 'createdAt', serverField: 'created_at', transform: toMySQLDateTime },
+            { clientField: 'updatedAt', serverField: 'updated_at', transform: toMySQLDateTime },
+        ],
+        clientOnlyFields: ['local_updated_at'],
+    },
     // Product Stock - SQLite: product_id, warehouse_id, quantity, min_quantity, max_quantity
     product_stock: {
         fields: [
@@ -726,7 +753,7 @@ export class FieldMapper {
         tableName: string,
         clientData: Record<string, any>,
         clientId: string | number,
-        branchId: string | number
+        branchId: string | number | null
     ): Record<string, any> {
         const mapping = TABLE_MAPPINGS[tableName];
         if (!mapping) {
@@ -771,7 +798,12 @@ export class FieldMapper {
 
         // Add required server fields
         serverData.client_id = clientId;
-        serverData.branch_id = branchId;
+        
+        // Tables that don't have branch_id column
+        const noBranchTables = ['roles'];
+        if (!noBranchTables.includes(tableName)) {
+            serverData.branch_id = branchId;
+        }
 
         // Add server defaults for missing fields
         if (mapping.serverDefaults) {

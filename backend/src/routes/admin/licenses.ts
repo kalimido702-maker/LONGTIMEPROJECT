@@ -168,7 +168,7 @@ async function adminLicensesRoutes(fastify: FastifyInstance) {
                 `INSERT INTO licenses (id, license_key, client_id, branch_id, expires_at, max_devices, notes, sync_interval, enable_sync, enable_offline_mode, auto_update)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
-                    id, licenseKey, clientId, branchId, expiresAt, maxDevices || 1, notes,
+                    id, licenseKey, clientId, branchId || null, expiresAt || null, maxDevices || 1, notes || null,
                     syncInterval ?? 300000, // default 5 min
                     enableSync ?? true,
                     enableOfflineMode ?? false,

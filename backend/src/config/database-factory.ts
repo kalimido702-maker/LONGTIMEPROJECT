@@ -49,8 +49,21 @@ class MySQLConnection implements DatabaseConnection {
         this.pool = pool;
     }
 
+    // Convert ISO datetime strings (2026-02-11T01:32:20.749Z) to MySQL format (2026-02-11 01:32:20)
+    private sanitizeParams(params?: any[]): any[] {
+        if (!params) return [];
+        return params.map(p => {
+            if (p === undefined) return null;
+            if (p instanceof Date) return p.toISOString().slice(0, 19).replace('T', ' ');
+            if (typeof p === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(p)) {
+                return p.slice(0, 19).replace('T', ' ');
+            }
+            return p;
+        });
+    }
+
     async query<T = any>(sql: string, params?: any[]): Promise<QueryResult<T>> {
-        const [rows, fields] = await this.pool.query(sql, params);
+        const [rows, fields] = await this.pool.query(sql, this.sanitizeParams(params));
         return {
             rows: rows as T[],
             affectedRows: (rows as any).affectedRows,
@@ -59,7 +72,7 @@ class MySQLConnection implements DatabaseConnection {
     }
 
     async execute<T = any>(sql: string, params?: any[]): Promise<QueryResult<T>> {
-        const [rows] = await this.pool.execute(sql, params);
+        const [rows] = await this.pool.execute(sql, this.sanitizeParams(params));
         return {
             rows: rows as T[],
             affectedRows: (rows as any).affectedRows,
@@ -544,9 +557,25 @@ export const db = {
             };
             return sqliteConnection;
         } else {
-            // For MySQL, use the actual pool connection
+            // For MySQL, wrap the raw pool connection to sanitize params (ISO datetime → MySQL format)
             const pool = (database as any).pool;
-            return pool.getConnection();
+            const rawConn = await pool.getConnection();
+            const sanitize = (params?: any[]): any[] => {
+                if (!params) return [];
+                return params.map((p: any) => {
+                    if (p === undefined) return null;
+                    if (p instanceof Date) return p.toISOString().slice(0, 19).replace('T', ' ');
+                    if (typeof p === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(p)) {
+                        return p.slice(0, 19).replace('T', ' ');
+                    }
+                    return p;
+                });
+            };
+            const originalQuery = rawConn.query.bind(rawConn);
+            const originalExecute = rawConn.execute.bind(rawConn);
+            rawConn.query = (sql: string, params?: any[]) => originalQuery(sql, sanitize(params));
+            rawConn.execute = (sql: string, params?: any[]) => originalExecute(sql, sanitize(params));
+            return rawConn;
         }
     }
 };

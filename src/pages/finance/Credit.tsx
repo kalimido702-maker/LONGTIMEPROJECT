@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { POSHeader } from "@/components/POS/POSHeader";
-import { db, Invoice, Customer, PaymentMethod } from "@/shared/lib/indexedDB";
+import { db, Invoice, Customer, PaymentMethod, SalesRep } from "@/shared/lib/indexedDB";
 import { toast } from "sonner";
 import {
   CreditCard,
@@ -27,8 +27,14 @@ import {
   DollarSign,
   Search,
   User,
+  Calendar,
+  Filter,
+  FileSpreadsheet,
+  X,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { exportToExcel } from "@/lib/reportExport";
+import { useCustomerBalances } from "@/hooks/useCustomerBalances";
 import {
   Select,
   SelectContent,
@@ -51,8 +57,15 @@ export default function Credit() {
     useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterCustomerId, setFilterCustomerId] = useState<string>("all");
+  const [filterSupervisorId, setFilterSupervisorId] = useState<string>("all");
+  const [filterDateFrom, setFilterDateFrom] = useState<string>("");
+  const [filterDateTo, setFilterDateTo] = useState<string>("");
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState("");
+  const [supervisors, setSupervisors] = useState<SalesRep[]>([]);
+  const [salesReps, setSalesReps] = useState<SalesRep[]>([]);
+  const { getBalance, refresh: refreshBalances } = useCustomerBalances([customers]);
 
   useEffect(() => {
     loadData();
@@ -71,6 +84,12 @@ export default function Credit() {
     // Load payment methods
     const methods = await db.getAll<PaymentMethod>("paymentMethods");
     setPaymentMethods(methods.filter((m) => m.isActive));
+
+    // Load sales reps and supervisors
+    const allReps = await db.getAll<SalesRep>("salesReps");
+    setSalesReps(allReps);
+    const supervisorReps = allReps.filter((r: any) => r.role === "supervisor" || r.isSupervisor);
+    setSupervisors(supervisorReps);
   };
 
   const openPaymentDialog = (invoice: Invoice) => {
@@ -168,7 +187,7 @@ export default function Credit() {
       return;
     }
 
-    if (amount > selectedCustomer.currentBalance) {
+    if (amount > getBalance(selectedCustomer.id, Number(selectedCustomer.currentBalance) || 0)) {
       toast.error("المبلغ المدخل أكبر من رصيد العميل");
       return;
     }
@@ -250,9 +269,8 @@ export default function Credit() {
   };
 
   const getTotalCredit = () => {
-    // استخدام رصيد العملاء الفعلي بدل حساب من الفواتير
-    // لأن التسديدات بتحدث customer.currentBalance مباشرة
-    return customers.reduce((sum, c) => sum + (c.currentBalance || 0), 0);
+    // استخدام الرصيد المحسوب الفعلي بدل الرصيد المخزن
+    return customers.reduce((sum, c) => sum + Math.max(0, getBalance(c.id, Number(c.currentBalance) || 0)), 0);
   };
 
   const getOverdueInvoices = () => {
@@ -281,23 +299,22 @@ export default function Credit() {
 
   // الحصول على قائمة العملاء الذين لديهم ديون
   const getCustomersWithDebts = () => {
-    // استخدام customer.currentBalance مباشرة بدل حساب من الفواتير
-    // لأن التسديدات بتحدث customer.currentBalance
+    // استخدام الرصيد المحسوب الفعلي
     return customers
-      .filter((c) => (c.currentBalance || 0) > 0)
+      .filter((c) => getBalance(c.id, Number(c.currentBalance) || 0) > 0)
       .map((customer) => {
         const customerInvoices = invoices.filter(
           (inv) => inv.customerId === customer.id && inv.remainingAmount > 0
         );
         return {
           customer,
-          totalDebt: customer.currentBalance || 0,
+          totalDebt: getBalance(customer.id, Number(customer.currentBalance) || 0),
           invoiceCount: customerInvoices.length,
         };
       });
   };
 
-  // تصفية الفواتير حسب البحث والعميل
+  // تصفية الفواتير حسب البحث والعميل والمشرف والتاريخ
   const filteredInvoices = invoices.filter((invoice) => {
     const matchesSearch =
       searchTerm === "" ||
@@ -309,8 +326,68 @@ export default function Credit() {
     const matchesCustomer =
       filterCustomerId === "all" || invoice.customerId === filterCustomerId;
 
-    return matchesSearch && matchesCustomer;
+    // Supervisor filter
+    let matchesSupervisor = true;
+    if (filterSupervisorId && filterSupervisorId !== "all") {
+      const supervisorRepIds = salesReps
+        .filter(r => r.supervisorId === filterSupervisorId)
+        .map(r => r.id);
+      const customer = customers.find(c => c.id === invoice.customerId);
+      matchesSupervisor = !!(customer?.salesRepId && supervisorRepIds.includes(customer.salesRepId));
+    }
+
+    // Date range filter
+    let matchesDate = true;
+    if (filterDateFrom) {
+      const fromDate = new Date(filterDateFrom);
+      fromDate.setHours(0, 0, 0, 0);
+      matchesDate = matchesDate && new Date(invoice.createdAt) >= fromDate;
+    }
+    if (filterDateTo) {
+      const toDate = new Date(filterDateTo);
+      toDate.setHours(23, 59, 59, 999);
+      matchesDate = matchesDate && new Date(invoice.createdAt) <= toDate;
+    }
+
+    return matchesSearch && matchesCustomer && matchesSupervisor && matchesDate;
   });
+
+  // Excel export
+  const handleExportToExcel = () => {
+    if (filteredInvoices.length === 0) {
+      toast.error("لا توجد بيانات للتصدير");
+      return;
+    }
+
+    exportToExcel({
+      title: "تقرير المبيعات الآجلة",
+      fileName: `تقرير_الآجل_${filterDateFrom || 'all'}_${filterDateTo || 'all'}`,
+      data: filteredInvoices.map((inv) => ({
+        customerName: getCustomerName(inv.customerId),
+        date: new Date(inv.createdAt).toLocaleDateString("ar-EG"),
+        total: Math.round(inv.total),
+        paid: Math.round(inv.paidAmount),
+        remaining: Math.round(inv.remainingAmount),
+        invoiceNumber: inv.invoiceNumber || inv.id,
+        status: inv.paymentStatus === "paid" ? "مكتمل" : inv.paymentStatus === "partial" ? "جزئي" : "غير مدفوع",
+      })),
+      columns: [
+        { header: "اسم العميل", dataKey: "customerName" },
+        { header: "التاريخ", dataKey: "date" },
+        { header: "الإجمالي", dataKey: "total" },
+        { header: "المدفوع", dataKey: "paid" },
+        { header: "المتبقي", dataKey: "remaining" },
+        { header: "رقم الفاتورة", dataKey: "invoiceNumber" },
+        { header: "الحالة", dataKey: "status" },
+      ],
+      summary: [
+        { label: "إجمالي الفواتير", value: filteredInvoices.length },
+        { label: "إجمالي الديون", value: filteredInvoices.reduce((sum, inv) => sum + inv.remainingAmount, 0) },
+      ],
+    });
+
+    toast.success("تم تصدير البيانات بنجاح");
+  };
 
   return (
     <div className="min-h-screen bg-background" dir="rtl">
@@ -427,7 +504,7 @@ export default function Credit() {
 
           {/* البحث والتصفية */}
           <Card className="mb-6 p-4">
-            <div className="flex gap-3">
+            <div className="flex gap-3 mb-3">
               <div className="flex-1 relative">
                 <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -437,27 +514,118 @@ export default function Credit() {
                   className="pr-10"
                 />
               </div>
-              <Select
-                value={filterCustomerId}
-                onValueChange={setFilterCustomerId}
+              <Button
+                variant={showAdvancedFilters ? "default" : "outline"}
+                onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                className="gap-2"
               >
-                <SelectTrigger className="w-64">
-                  <SelectValue placeholder="تصفية حسب العميل" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">جميع العملاء</SelectItem>
-                  {customers
-                    .filter((c) =>
-                      invoices.some((inv) => inv.customerId === c.id)
-                    )
-                    .map((customer) => (
-                      <SelectItem key={customer.id} value={customer.id}>
-                        {customer.name} - {customer.phone}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+                <Filter className="h-4 w-4" />
+                فلتر متقدم
+              </Button>
             </div>
+            {showAdvancedFilters && (
+              <div className="border-t pt-3">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-sm">فلاتر متقدمة</h3>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setFilterCustomerId("all");
+                      setFilterSupervisorId("all");
+                      setFilterDateFrom("");
+                      setFilterDateTo("");
+                      setSearchTerm("");
+                    }}
+                  >
+                    <X className="h-4 w-4 ml-1" />
+                    مسح الفلاتر
+                  </Button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                  <div className="space-y-2">
+                    <Label>العميل</Label>
+                    <Select
+                      value={filterCustomerId}
+                      onValueChange={setFilterCustomerId}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="جميع العملاء" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">جميع العملاء</SelectItem>
+                        {customers
+                          .filter((c) =>
+                            invoices.some((inv) => inv.customerId === c.id)
+                          )
+                          .map((customer) => (
+                            <SelectItem key={customer.id} value={customer.id}>
+                              {customer.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>المشرف</Label>
+                    <Select
+                      value={filterSupervisorId}
+                      onValueChange={setFilterSupervisorId}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="جميع المشرفين" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">جميع المشرفين</SelectItem>
+                        {supervisors.map((sup) => (
+                          <SelectItem key={sup.id} value={sup.id}>
+                            {sup.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-1">
+                      <Calendar className="h-4 w-4" />
+                      من تاريخ
+                    </Label>
+                    <Input
+                      type="date"
+                      value={filterDateFrom}
+                      onChange={(e) => setFilterDateFrom(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-1">
+                      <Calendar className="h-4 w-4" />
+                      إلى تاريخ
+                    </Label>
+                    <Input
+                      type="date"
+                      value={filterDateTo}
+                      onChange={(e) => setFilterDateTo(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>تصدير</Label>
+                    <Button
+                      variant="outline"
+                      onClick={handleExportToExcel}
+                      className="w-full gap-2"
+                    >
+                      <FileSpreadsheet className="h-4 w-4" />
+                      تصدير Excel
+                    </Button>
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <Badge variant="secondary" className="text-sm px-3">
+                    {filteredInvoices.length} فاتورة
+                  </Badge>
+                </div>
+              </div>
+            )}
           </Card>
 
           <Card>
@@ -691,7 +859,7 @@ export default function Credit() {
                       <div className="flex justify-between">
                         <span className="text-sm">الرصيد المستحق:</span>
                         <span className="font-semibold text-destructive">
-                          {selectedCustomer.currentBalance.toFixed(2)} جنيه
+                          {getBalance(selectedCustomer.id, Number(selectedCustomer.currentBalance) || 0).toFixed(2)} جنيه
                         </span>
                       </div>
                     </div>
@@ -733,11 +901,11 @@ export default function Credit() {
                       value={paymentAmount}
                       onChange={(e) => setPaymentAmount(e.target.value)}
                       min="0"
-                      max={selectedCustomer.currentBalance}
+                      max={getBalance(selectedCustomer.id, Number(selectedCustomer.currentBalance) || 0)}
                       step="0.01"
                     />
                     <p className="text-xs text-muted-foreground">
-                      الحد الأقصى: {selectedCustomer.currentBalance.toFixed(2)}{" "}
+                      الحد الأقصى: {getBalance(selectedCustomer.id, Number(selectedCustomer.currentBalance) || 0).toFixed(2)}{" "}
                       جنيه
                     </p>
                   </div>
@@ -748,7 +916,7 @@ export default function Credit() {
                         المبلغ المتبقي بعد الدفع:{" "}
                         <strong>
                           {(
-                            selectedCustomer.currentBalance -
+                            getBalance(selectedCustomer.id, Number(selectedCustomer.currentBalance) || 0) -
                             parseFloat(paymentAmount)
                           ).toFixed(2)}{" "}
                           جنيه

@@ -31,6 +31,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { db, WhatsAppAccount, WhatsAppCampaign, Supervisor, SalesRep } from "@/shared/lib/indexedDB";
 import { whatsappService } from "@/services/whatsapp/whatsappService";
+import { useCustomerBalances } from "@/hooks/useCustomerBalances";
 import {
   Megaphone,
   Plus,
@@ -155,6 +156,7 @@ const WhatsAppCampaigns = () => {
   const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
   const [salesReps, setSalesReps] = useState<SalesRep[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const { getBalance } = useCustomerBalances([customers]);
 
   const [addDialog, setAddDialog] = useState(false);
   const [helpDialog, setHelpDialog] = useState(false);
@@ -233,19 +235,19 @@ const WhatsAppCampaigns = () => {
     let filtered = [...customers];
 
     if (newCampaign.targetType === "credit") {
-      filtered = filtered.filter((c: any) => c.currentBalance > 0);
+      filtered = filtered.filter((c: any) => getBalance(c.id, Number(c.currentBalance) || 0) > 0);
     } else if (newCampaign.targetType === "installment") {
       filtered = filtered.filter((c: any) => c.hasInstallments);
     }
 
     if (newCampaign.minAmount) {
       filtered = filtered.filter(
-        (c: any) => (c.currentBalance || 0) >= parseFloat(newCampaign.minAmount)
+        (c: any) => getBalance(c.id, Number(c.currentBalance) || 0) >= parseFloat(newCampaign.minAmount)
       );
     }
     if (newCampaign.maxAmount) {
       filtered = filtered.filter(
-        (c: any) => (c.currentBalance || 0) <= parseFloat(newCampaign.maxAmount)
+        (c: any) => getBalance(c.id, Number(c.currentBalance) || 0) <= parseFloat(newCampaign.maxAmount)
       );
     }
 

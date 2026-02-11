@@ -20,7 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Search, RotateCcw, FileText, Calendar, Printer } from "lucide-react";
+import { Search, RotateCcw, FileText, Calendar, Printer, Trash2, Edit, ShieldAlert, Check } from "lucide-react";
 import {
   db,
   Invoice,
@@ -34,10 +34,17 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { toast } from "sonner";
 import { pdfService } from "@/lib/printing/pdfService";
+import { calculateSingleCustomerBalance } from "@/hooks/useCustomerBalances";
 
 const SalesReturns = () => {
   const { user, can } = useAuth();
   const { getSetting } = useSettingsContext();
+
+  // صلاحيات المرتجعات
+  const canCreateReturn = can("returns", "create");
+  const canEditReturn = can("returns", "edit");
+  const canDeleteReturn = can("returns", "delete");
+
   const [salesReturns, setSalesReturns] = useState<SalesReturn[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -53,6 +60,12 @@ const SalesReturns = () => {
   const [returnsSearchQuery, setReturnsSearchQuery] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+
+  // Edit return state
+  const [editReturnDialogOpen, setEditReturnDialogOpen] = useState(false);
+  const [editingReturn, setEditingReturn] = useState<SalesReturn | null>(null);
+  const [editReturnReason, setEditReturnReason] = useState("");
+  const [editReturnRefundMethod, setEditReturnRefundMethod] = useState<"cash" | "credit" | "balance">("cash");
 
   useEffect(() => {
     loadData();
@@ -122,7 +135,9 @@ const SalesReturns = () => {
     if (invoice.customerId) {
       const customer = await db.get<Customer>("customers", invoice.customerId);
       if (customer) {
-        setCustomerBalance(customer.currentBalance);
+        // حساب الرصيد الفعلي من الحركات
+        const actualBalance = await calculateSingleCustomerBalance(customer.id);
+        setCustomerBalance(actualBalance);
       }
     } else {
       setCustomerBalance(null);
@@ -376,6 +391,79 @@ const SalesReturns = () => {
     return new Date(date).toLocaleDateString("ar-EG");
   };
 
+  // فتح نافذة تعديل المرتجع
+  const handleEditReturn = (returnDoc: SalesReturn) => {
+    setEditingReturn(returnDoc);
+    setEditReturnReason(returnDoc.reason || "");
+    setEditReturnRefundMethod(returnDoc.refundMethod || "cash");
+    setEditReturnDialogOpen(true);
+  };
+
+  // حفظ تعديل المرتجع
+  const handleSaveEditReturn = async () => {
+    if (!editingReturn) return;
+    if (!editReturnReason.trim()) {
+      toast.error("يرجى إدخال سبب الإرجاع");
+      return;
+    }
+
+    try {
+      const updatedReturn: SalesReturn = {
+        ...editingReturn,
+        reason: editReturnReason,
+        refundMethod: editReturnRefundMethod,
+      };
+      await db.update("salesReturns", updatedReturn);
+
+      toast.success("تم تعديل المرتجع بنجاح");
+      setEditReturnDialogOpen(false);
+      setEditingReturn(null);
+      loadData();
+    } catch (error) {
+      console.error("Error editing return:", error);
+      toast.error("حدث خطأ أثناء تعديل المرتجع");
+    }
+  };
+
+  // حذف مرتجع
+  const handleDeleteReturn = async (returnDoc: SalesReturn) => {
+    if (!confirm(`هل أنت متأكد من حذف المرتجع ${returnDoc.id}؟ سيتم التراجع عن تعديلات المخزون والرصيد.`)) {
+      return;
+    }
+    try {
+      // إعادة الكميات للمخزون (عكس المرتجع)
+      for (const item of returnDoc.items) {
+        try {
+          const product = await db.get<Product>("products", item.productId);
+          if (product) {
+            const restoredQty = Number(product.stockQuantity || 0) - Number(item.quantity);
+            await db.update("products", { ...product, stockQuantity: restoredQty });
+          }
+        } catch (_e) { /* تجاهل */ }
+      }
+
+      // إعادة رصيد العميل
+      if (returnDoc.customerId) {
+        try {
+          const customer = await db.get<Customer>("customers", returnDoc.customerId);
+          if (customer) {
+            const restoredBalance = Number(customer.currentBalance || 0) + Number(returnDoc.total || 0);
+            await db.update("customers", { ...customer, currentBalance: restoredBalance });
+          }
+        } catch (_e) { /* تجاهل */ }
+      }
+
+      // حذف المرتجع
+      await db.delete("salesReturns", returnDoc.id);
+
+      toast.success("تم حذف المرتجع بنجاح");
+      loadData();
+    } catch (error) {
+      console.error("Error deleting return:", error);
+      toast.error("حدث خطأ أثناء حذف المرتجع");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background" dir="rtl">
       <POSHeader />
@@ -529,18 +617,48 @@ const SalesReturns = () => {
                         <p className="text-sm text-muted-foreground">
                           عدد المنتجات: {returnDoc.items.length}
                         </p>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handlePrintReturn(returnDoc);
-                          }}
-                          className="gap-2"
-                        >
-                          <Printer className="h-4 w-4" />
-                          طباعة
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handlePrintReturn(returnDoc);
+                            }}
+                            className="gap-2"
+                          >
+                            <Printer className="h-4 w-4" />
+                            طباعة
+                          </Button>
+                          {canEditReturn && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditReturn(returnDoc);
+                              }}
+                              className="gap-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                            >
+                              <Edit className="h-4 w-4" />
+                              تعديل
+                            </Button>
+                          )}
+                          {canDeleteReturn && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteReturn(returnDoc);
+                              }}
+                              className="gap-2 text-red-500 hover:text-red-700 hover:bg-red-50"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              حذف
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </Card>
@@ -548,6 +666,58 @@ const SalesReturns = () => {
               })()}
             </div>
           </Card>
+
+          {/* نافذة تعديل المرتجع */}
+          <Dialog open={editReturnDialogOpen} onOpenChange={setEditReturnDialogOpen}>
+            <DialogContent className="max-w-md" dir="rtl">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Edit className="h-5 w-5" />
+                  تعديل المرتجع
+                </DialogTitle>
+              </DialogHeader>
+              {editingReturn && (
+                <div className="space-y-4 py-2">
+                  <div className="p-3 bg-muted rounded-lg space-y-1">
+                    <p className="font-medium">رقم المرتجع: {editingReturn.id}</p>
+                    <p className="text-sm text-muted-foreground">العميل: {editingReturn.customerName || "غير محدد"}</p>
+                    <p className="text-sm text-muted-foreground">المبلغ: {formatCurrency(editingReturn.total)}</p>
+                    <p className="text-sm text-muted-foreground">التاريخ: {formatDate(editingReturn.createdAt)}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>سبب الإرجاع *</Label>
+                    <Textarea
+                      value={editReturnReason}
+                      onChange={(e) => setEditReturnReason(e.target.value)}
+                      placeholder="سبب الإرجاع..."
+                      rows={3}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>طريقة الاسترجاع</Label>
+                    <select
+                      value={editReturnRefundMethod}
+                      onChange={(e) => setEditReturnRefundMethod(e.target.value as "cash" | "credit" | "balance")}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="cash">نقداً</option>
+                      <option value="credit">إضافة لرصيد العميل</option>
+                      <option value="balance">خصم من رصيد العميل</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setEditReturnDialogOpen(false)}>
+                  إلغاء
+                </Button>
+                <Button onClick={handleSaveEditReturn}>
+                  <Check className="h-4 w-4 ml-2" />
+                  حفظ التعديل
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {/* Dialog إنشاء مرتجع */}
           <Dialog

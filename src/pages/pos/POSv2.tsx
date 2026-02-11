@@ -364,10 +364,13 @@ const POSv2 = () => {
   };
 
   const filteredProducts = products.filter((p) => {
+    // Search by name, barcode, or code
+    const lowerQuery = searchQuery.toLowerCase();
     const matchSearch =
-      p.nameAr.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.barcode?.includes(searchQuery);
+      p.nameAr.toLowerCase().includes(lowerQuery) ||
+      p.name.toLowerCase().includes(lowerQuery) ||
+      p.barcode?.toLowerCase().includes(lowerQuery) ||
+      (p as any).code?.toLowerCase().includes(lowerQuery);
 
     const matchCategory =
       selectedCategory === "all" ||
@@ -376,6 +379,21 @@ const POSv2 = () => {
         : p.category === selectedCategory);
 
     return matchSearch && matchCategory;
+  }).sort((a, b) => {
+    // Prioritize exact code/barcode matches
+    const lowerQuery = searchQuery.toLowerCase();
+    const aCodeMatch = a.barcode?.toLowerCase() === lowerQuery || (a as any).code?.toLowerCase() === lowerQuery;
+    const bCodeMatch = b.barcode?.toLowerCase() === lowerQuery || (b as any).code?.toLowerCase() === lowerQuery;
+    if (aCodeMatch && !bCodeMatch) return -1;
+    if (bCodeMatch && !aCodeMatch) return 1;
+
+    // Then prioritize partial code matches
+    const aCodePartial = a.barcode?.toLowerCase().includes(lowerQuery) || (a as any).code?.toLowerCase().includes(lowerQuery);
+    const bCodePartial = b.barcode?.toLowerCase().includes(lowerQuery) || (b as any).code?.toLowerCase().includes(lowerQuery);
+    if (aCodePartial && !bCodePartial) return -1;
+    if (bCodePartial && !aCodePartial) return 1;
+
+    return 0;
   });
 
   // Format currency: remove decimals if integer
@@ -709,6 +727,9 @@ const POSv2 = () => {
     if (defaultPaymentMethod) {
       setSelectedPaymentMethodId(defaultPaymentMethod.id);
     }
+
+    // Reset date to today
+    setInvoiceDate(new Date().toISOString().split('T')[0]);
   };
 
   // Calculations
@@ -722,7 +743,7 @@ const POSv2 = () => {
     : parseFloat(discountAmount) || 0;
 
   const afterDiscount = subtotal - discount;
-  const tax = includeTax ? (afterDiscount * taxRate) / 100 : 0;
+  const tax = (includeTax && taxRate > 0) ? (afterDiscount * taxRate) / 100 : 0;
   const total = afterDiscount + tax;
 
   // حساب المدفوع من الدفع المقسم أو المدفوع العادي
@@ -776,271 +797,70 @@ const POSv2 = () => {
     setPaymentSplits(paymentSplits.filter((_, i) => i !== index));
   };
 
-  // Generate Quote PDF
-  const generateQuotePDF = () => {
+  // Generate Quote PDF - Uses same template as invoice but with "عرض سعر" header
+  const generateQuotePDF = async () => {
     if (cartItems.length === 0) {
       toast({ title: "لا يوجد منتجات في السلة", variant: "destructive" });
       return;
     }
 
-    const quoteNumber = `QT-${Date.now()}`;
-    const currentDate = new Date().toLocaleDateString("ar-EG", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
+    try {
+      const { generateInvoiceHTML } = await import("@/services/invoicePdfService");
+      const allProducts = await db.getAll("products");
 
-    const customerName =
-      selectedCustomer === "cash"
-        ? "عميل نقدي"
-        : customers.find((c) => c.id === selectedCustomer)?.name || "عميل";
+      const customerData = selectedCustomer !== "cash"
+        ? customers.find((c) => c.id === selectedCustomer)
+        : null;
 
-    const quoteContent = `
-      <!DOCTYPE html>
-      <html dir="rtl" lang="ar">
-      <head>
-        <meta charset="UTF-8">
-        <title>عرض سعر - ${quoteNumber}</title>
-        <style>
-          * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-          }
-          body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            padding: 40px;
-            background: #fff;
-            color: #333;
-            direction: rtl;
-          }
-          .quote-container {
-            max-width: 800px;
-            margin: 0 auto;
-            border: 2px solid #333;
-            padding: 30px;
-          }
-          .header {
-            text-align: center;
-            border-bottom: 2px solid #333;
-            padding-bottom: 20px;
-            margin-bottom: 20px;
-          }
-          .header h1 {
-            font-size: 28px;
-            margin-bottom: 10px;
-            color: #1a1a1a;
-          }
-          .store-info {
-            font-size: 14px;
-            color: #666;
-            line-height: 1.8;
-          }
-          .quote-title {
-            text-align: center;
-            background: #f5f5f5;
-            padding: 15px;
-            margin: 20px 0;
-            border-radius: 8px;
-          }
-          .quote-title h2 {
-            font-size: 24px;
-            color: #333;
-          }
-          .quote-info {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 20px;
-            padding: 15px;
-            background: #fafafa;
-            border-radius: 8px;
-          }
-          .quote-info div {
-            text-align: center;
-          }
-          .quote-info label {
-            font-size: 12px;
-            color: #888;
-            display: block;
-          }
-          .quote-info span {
-            font-size: 14px;
-            font-weight: bold;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 20px 0;
-          }
-          th, td {
-            border: 1px solid #ddd;
-            padding: 12px 10px;
-            text-align: center;
-          }
-          th {
-            background: #333;
-            color: #fff;
-            font-weight: bold;
-          }
-          tr:nth-child(even) {
-            background: #f9f9f9;
-          }
-          .totals {
-            margin-top: 20px;
-            padding: 20px;
-            background: #f5f5f5;
-            border-radius: 8px;
-          }
-          .totals-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 8px 0;
-            border-bottom: 1px solid #ddd;
-          }
-          .totals-row:last-child {
-            border-bottom: none;
-            font-weight: bold;
-            font-size: 18px;
-            padding-top: 15px;
-            color: #1a1a1a;
-          }
-          .footer {
-            margin-top: 30px;
-            text-align: center;
-            padding-top: 20px;
-            border-top: 1px dashed #ccc;
-          }
-          .footer p {
-            font-size: 12px;
-            color: #888;
-            margin-bottom: 5px;
-          }
-          .validity {
-            background: #fff3cd;
-            padding: 15px;
-            border-radius: 8px;
-            margin-top: 20px;
-            text-align: center;
-            border: 1px solid #ffc107;
-          }
-          .validity strong {
-            color: #856404;
-          }
-          @media print {
-            body {
-              padding: 0;
-            }
-            .quote-container {
-              border: none;
-            }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="quote-container">
-          <div class="header">
-            <h1>${storeName || "المتجر"}</h1>
-            <div class="store-info">
-              ${storeAddress ? `<p>${storeAddress}</p>` : ""}
-              ${storePhone ? `<p>هاتف: ${storePhone}</p>` : ""}
-            </div>
-          </div>
-          
-          <div class="quote-title">
-            <h2>📋 عرض سعر</h2>
-          </div>
-          
-          <div class="quote-info">
-            <div>
-              <label>رقم العرض</label>
-              <span>${quoteNumber}</span>
-            </div>
-            <div>
-              <label>التاريخ</label>
-              <span>${currentDate}</span>
-            </div>
-            <div>
-              <label>العميل</label>
-              <span>${customerName}</span>
-            </div>
-          </div>
-          
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>المنتج</th>
-                <th>الكمية</th>
-                <th>السعر</th>
-                <th>الإجمالي</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${cartItems
-        .map(
-          (item, index) => `
-                <tr>
-                  <td>${index + 1}</td>
-                  <td>${item.name}</td>
-                  <td>${item.quantity}</td>
-                  <td>${item.price.toFixed(2)} ${currency}</td>
-                  <td>${(item.price * item.quantity).toFixed(
-            2
-          )} ${currency}</td>
-                </tr>
-              `
-        )
-        .join("")}
-            </tbody>
-          </table>
-          
-          <div class="totals">
-            <div class="totals-row">
-              <span>المجموع الفرعي:</span>
-              <span>${subtotal.toFixed(2)} ${currency}</span>
-            </div>
-            ${discount > 0
-        ? `
-            <div class="totals-row">
-              <span>الخصم:</span>
-              <span>- ${discount.toFixed(2)} ${currency}</span>
-            </div>
-            `
-        : ""
+      const quoteNumber = `QT-${Date.now().toString().slice(-6)}`;
+      const currentDate = new Date().toLocaleDateString("ar-EG");
+
+      const items = cartItems.map((item) => {
+        const product = allProducts.find((p: any) => p.id === item.id);
+        return {
+          productName: item.nameAr || item.name || "",
+          productCode: (product as any)?.code || "",
+          quantity: item.quantity,
+          price: item.customPrice || item.price,
+          total: (item.customPrice || item.price) * item.quantity,
+          unitsPerCarton: (product as any)?.unitsPerCarton || (product as any)?.cartonCount,
+        };
+      });
+
+      const pdfData = {
+        id: quoteNumber,
+        invoiceNumber: quoteNumber,
+        date: currentDate,
+        customerName: customerData?.name || "عميل",
+        customerAddress: customerData?.address || "",
+        items: items,
+        total: total,
+        discount: discount > 0 ? discount : undefined,
+        previousBalance: customerData?.currentBalance,
+        currentBalance: undefined, // لا يتجمع مع عرض السعر
+        isReturn: false,
+        isQuote: true,
+      };
+
+      // Generate HTML using invoice template
+      let html = await generateInvoiceHTML(pdfData as any);
+
+      // Replace "فاتورة إلى:" with "عرض سعر إلى:" in the generated HTML
+      html = html.replace('فاتورة إلى:', 'عرض سعر إلى:');
+      html = html.replace('فاتورة بيع', 'عرض سعر');
+      html = html.replace(/الرصيد الحالي/g, '');
+
+      const printWindow = window.open("", "_blank");
+      if (printWindow) {
+        printWindow.document.write(html);
+        printWindow.document.close();
+        printWindow.onload = () => {
+          printWindow.print();
+        };
       }
-            ${tax > 0
-        ? `
-            <div class="totals-row">
-              <span>الضريبة (${taxRate}%):</span>
-              <span>${tax.toFixed(2)} ${currency}</span>
-            </div>
-            `
-        : ""
-      }
-            <div class="totals-row">
-              <span>الإجمالي النهائي:</span>
-              <span>${total.toFixed(2)} ${currency}</span>
-            </div>
-          </div>
-          <div class="footer">
-            <p>شكراً لاختياركم ${storeName || "متجرنا"}</p>
-            <p>الأسعار قابلة للتغيير - هذا العرض غير ملزم</p>
-          </div>
-        </div>
-        
-        <script>
-          window.onload = function() {
-            window.print();
-          };
-        </script>
-      </body>
-      </html>
-    `;
-
-    const printWindow = window.open("", "_blank");
-    if (printWindow) {
-      printWindow.document.write(quoteContent);
-      printWindow.document.close();
+    } catch (error) {
+      console.error("Error generating quote:", error);
+      toast({ title: "حدث خطأ أثناء إنشاء عرض السعر", variant: "destructive" });
     }
   };
 
@@ -1204,10 +1024,10 @@ const POSv2 = () => {
         // Assuming simple tax logic matching standard invoice, but verifying:
         // If includeTax is true, tax is added? Or included?
         // Looking at state: includeTax
-        const taxAmt = includeTax ? subtotal * (taxRate / 100) : 0;
+        const taxAmt = (includeTax && taxRate > 0) ? subtotal * (taxRate / 100) : 0;
         const totalAmt = subtotal + taxAmt; // - discount? Return usually no discount unless specified.
 
-        const returnId = `RET-${Date.now()}`;
+        const returnId = `RET-${Date.now().toString().slice(-6)}`;
         const customerData = customers.find((c) => c.id === selectedCustomer);
 
         const returnData: SalesReturn = {
@@ -1562,7 +1382,7 @@ const POSv2 = () => {
       const message = `🧾 *فاتورة رقم ${savedInvoiceForWhatsApp.invoiceNumber || savedInvoiceForWhatsApp.id}*\n` +
         `*العميل:* ${savedInvoiceForWhatsApp.customerName}\n` +
         `*الإجمالي:* ${formatCurrency(savedInvoiceForWhatsApp.total)}\n\n` +
-        `شكراً\n\nlongtimelt.com`;
+        `شركة لونج تايم للصناعة الكهربائية`;
 
       const phone = customer.phone.replace(/[^0-9]/g, "");
       const repPhone = rep?.phone?.replace(/[^0-9]/g, "");
@@ -1967,116 +1787,7 @@ const POSv2 = () => {
                 )}
               </div>
 
-              {/* Totals Section */}
-              {cartItems.length > 0 && (
-                <Card className="p-3 shrink-0 space-y-2">
-                  {/* Discount & Promotions */}
-                  <div className="flex gap-2 items-end">
-                    {promotions.length > 0 && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setPromotionDialogOpen(true)}
-                        className="h-8 gap-1"
-                      >
-                        <Tag className="h-3 w-3" /> عروض ({promotions.length})
-                      </Button>
-                    )}
-                    <div className="flex-1">
-                      <Label className="text-xs">خصم %</Label>
-                      <Input
-                        type="number"
-                        value={discountPercent}
-                        onChange={(e) => { setDiscountPercent(e.target.value); setDiscountAmount(""); setSelectedPromotion(""); }}
-                        className="h-8"
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <Label className="text-xs">خصم مبلغ</Label>
-                      <Input
-                        type="number"
-                        value={discountAmount}
-                        onChange={(e) => { setDiscountAmount(e.target.value); setDiscountPercent(""); setSelectedPromotion(""); }}
-                        className="h-8"
-                      />
-                    </div>
-                  </div>
 
-                  {selectedPromotion && (
-                    <div className="bg-green-50 border border-green-200 rounded px-2 py-1 text-xs text-green-900 flex items-center gap-1">
-                      <Tag className="h-3 w-3" />
-                      <span>تم تطبيق: {promotions.find((p) => p.id === selectedPromotion)?.name}</span>
-                    </div>
-                  )}
-
-                  {/* Totals */}
-                  <div className="bg-muted p-2 rounded space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span>المجموع:</span>
-                      <span className="font-bold">{Math.round(subtotal)}</span>
-                    </div>
-                    {discount > 0 && (
-                      <div className="flex justify-between text-red-600">
-                        <span>الخصم:</span>
-                        <span>-{Math.round(discount)}</span>
-                      </div>
-                    )}
-                    {tax > 0 && (
-                      <div className="flex justify-between text-muted-foreground">
-                        <span>الضريبة ({taxRate}%):</span>
-                        <span>{Math.round(tax)}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-lg font-bold border-t pt-1">
-                      <span>الإجمالي:</span>
-                      <span className="text-primary">{Math.round(total)} {currency}</span>
-                    </div>
-                  </div>
-
-                  {/* Paid Amount */}
-                  <div className="flex items-center gap-2">
-                    <Label className="text-xs whitespace-nowrap">المدفوع:</Label>
-                    <Input
-                      type="number"
-                      value={paidAmount}
-                      onChange={(e) => setPaidAmount(e.target.value)}
-                      className="h-8 flex-1"
-                    />
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">
-                      الباقي: {Math.round(total - paid)}
-                    </span>
-                  </div>
-                </Card>
-              )}
-
-              {/* Pending Orders */}
-              {pendingOrders.length > 0 && (
-                <Card className="p-2 shrink-0">
-                  <div className="flex gap-2 items-center mb-2">
-                    <Pause className="h-4 w-4" />
-                    <span className="text-sm font-bold">
-                      معلق ({pendingOrders.length})
-                    </span>
-                  </div>
-                  <div className="flex gap-2 overflow-x-auto">
-                    {pendingOrders.map((o) => (
-                      <Card
-                        key={o.id}
-                        onClick={() => resumeOrder(o)}
-                        className="p-2 min-w-[100px] cursor-pointer hover:shadow"
-                      >
-                        <div className="text-xs">
-                          <div className="font-bold">#{o.id.slice(-6)}</div>
-                          <div>{o.items.length} منتج</div>
-                          <div className="text-muted-foreground text-[10px]">
-                            {new Date(o.timestamp).toLocaleTimeString("ar")}
-                          </div>
-                        </div>
-                      </Card>
-                    ))}
-                  </div>
-                </Card>
-              )}
             </div>
           </ResizablePanel>
 
@@ -2137,18 +1848,17 @@ const POSv2 = () => {
                   </div>
                 </div>
 
-                {/* Invoice Date (Admin Only) */}
-                {isAdmin && (
-                  <div className="space-y-1">
-                    <Label className="text-xs">تاريخ الفاتورة (أدمن فقط)</Label>
+                {/* Invoice Date */}
+                <div className="space-y-1">
+                    <Label className="text-xs">تاريخ الفاتورة</Label>
                     <Input
                       type="date"
                       value={invoiceDate}
-                      onChange={(e) => setInvoiceDate(e.target.value)}
+                      onChange={(e) => isAdmin ? setInvoiceDate(e.target.value) : null}
+                      readOnly={!isAdmin}
                       className="h-9"
                     />
                   </div>
-                )}
 
                 {/* Invoice Notes */}
                 <div className="space-y-1">
@@ -2572,7 +2282,7 @@ const POSv2 = () => {
                       <span>-{Math.round(discount)}</span>
                     </div>
                   )}
-                  {includeTax && (
+                  {includeTax && tax > 0 && (
                     <div className="flex justify-between text-blue-600">
                       <span>الضريبة:</span>
                       <span>+{formatCurrency(tax)}</span>
@@ -2617,12 +2327,8 @@ const POSv2 = () => {
                 )}
 
                 {/* Actions */}
-                <div className="grid grid-cols-2 gap-2">
-                  <Button variant="outline" onClick={suspendOrder}>
-                    <Pause className="h-4 w-4 ml-2" />
-                    تعليق
-                  </Button>
-                  <Button variant="outline" onClick={clearCart}>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={clearCart} className="flex-1">
                     <X className="h-4 w-4 ml-2" />
                     إلغاء
                   </Button>
@@ -3092,9 +2798,7 @@ const POSv2 = () => {
                 </div>
 
                 <div className="text-center text-xs text-muted-foreground pt-2 border-t border-dashed">
-                  شكراً ✨
-                  <br />
-                  longtimelt.com
+                  شركة لونج تايم للصناعات الكهربائية
                 </div>
               </div>
 

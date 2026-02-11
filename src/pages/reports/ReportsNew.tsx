@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { POSHeader } from "@/components/POS/POSHeader";
+import { useCustomerBalances } from "@/hooks/useCustomerBalances";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -99,6 +100,8 @@ const Reports = () => {
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
   const [salesReps, setSalesReps] = useState<SalesRep[]>([]);
+  const [payments, setPayments] = useState<any[]>([]);
+  const { getBalance } = useCustomerBalances([customers]);
 
   // Filters
   const [startDate, setStartDate] = useState(() => {
@@ -126,7 +129,7 @@ const Reports = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [inv, cust, prod, salesRet, shft, emp, exp, pms, cats, sups, reps] =
+      const [inv, cust, prod, salesRet, shft, emp, exp, pms, cats, sups, reps, pays] =
         await Promise.all([
           db.getAll<Invoice>("invoices"),
           db.getAll<Customer>("customers"),
@@ -139,6 +142,7 @@ const Reports = () => {
           db.getAll<ProductCategory>("productCategories"),
           db.getAll<Supervisor>("supervisors"),
           db.getAll<SalesRep>("salesReps"),
+          db.getAll<any>("payments"),
         ]);
       setInvoices(inv);
       setCustomers(cust);
@@ -151,6 +155,7 @@ const Reports = () => {
       setCategories(cats);
       setSupervisors(sups);
       setSalesReps(reps);
+      setPayments(pays);
     } catch (error) {
       console.error("Error loading data:", error);
       toast({
@@ -172,11 +177,12 @@ const Reports = () => {
     return itemDate >= start && itemDate <= end;
   };
 
-  const formatCurrency = (amount: number) => {
-    if (Number.isInteger(amount)) {
-      return `${amount} ${currency}`;
+  const formatCurrency = (amount: number | string) => {
+    const num = Number(amount) || 0;
+    if (Number.isInteger(num)) {
+      return `${num} ${currency}`;
     }
-    return `${amount.toFixed(2)} ${currency}`;
+    return `${num.toFixed(2)} ${currency}`;
   };
 
   const formatDate = (date: string) =>
@@ -211,6 +217,24 @@ const Reports = () => {
         if (!hasCategory) return false;
       }
 
+      // Filter by supervisor (through customer's salesRep -> supervisorId)
+      if (selectedSupervisor !== "all") {
+        const customer = customers.find((c) => c.id === inv.customerId);
+        if (!customer) return false;
+        const rep = salesReps.find((r) => r.id === (customer as any).salesRepId);
+        if (!rep || rep.supervisorId !== selectedSupervisor) {
+          return false;
+        }
+      }
+
+      // Filter by sales rep (through customer's salesRepId)
+      if (selectedSalesRep !== "all") {
+        const customer = customers.find((c) => c.id === inv.customerId);
+        if (!customer || (customer as any).salesRepId !== selectedSalesRep) {
+          return false;
+        }
+      }
+
       return true;
     });
   }, [
@@ -221,12 +245,31 @@ const Reports = () => {
     selectedPaymentMethod,
     selectedCategory,
     selectedCustomer,
+    selectedSupervisor,
+    selectedSalesRep,
     products,
+    customers,
   ]);
 
-  const filteredSalesReturns = salesReturns.filter((ret) =>
-    filterByDate(ret.createdAt)
-  );
+  const filteredSalesReturns = salesReturns.filter((ret) => {
+    if (!filterByDate(ret.createdAt)) return false;
+    
+    // Filter by supervisor
+    if (selectedSupervisor !== "all") {
+      const customer = customers.find((c) => c.id === ret.customerId);
+      if (!customer) return false;
+      const rep = salesReps.find((r) => r.id === (customer as any).salesRepId);
+      if (!rep || rep.supervisorId !== selectedSupervisor) return false;
+    }
+    
+    // Filter by sales rep
+    if (selectedSalesRep !== "all") {
+      const customer = customers.find((c) => c.id === ret.customerId);
+      if (!customer || (customer as any).salesRepId !== selectedSalesRep) return false;
+    }
+    
+    return true;
+  });
   const filteredShifts = shifts.filter((shift) =>
     filterByDate(shift.startTime)
   );
@@ -234,14 +277,42 @@ const Reports = () => {
     filterByDate(exp.createdAt)
   );
 
+  // Filter payments (collections) by date, supervisor, and sales rep
+  const filteredPayments = useMemo(() => {
+    return payments.filter((pay: any) => {
+      if (!pay.createdAt || !filterByDate(pay.createdAt)) return false;
+
+      // Filter by supervisor
+      if (selectedSupervisor !== "all") {
+        const customer = customers.find((c) => c.id === pay.customerId);
+        if (!customer) return false;
+        const rep = salesReps.find((r) => r.id === (customer as any).salesRepId);
+        if (!rep || rep.supervisorId !== selectedSupervisor) return false;
+      }
+
+      // Filter by sales rep
+      if (selectedSalesRep !== "all") {
+        const customer = customers.find((c) => c.id === pay.customerId);
+        if (!customer || (customer as any).salesRepId !== selectedSalesRep) return false;
+      }
+
+      return true;
+    });
+  }, [payments, startDate, endDate, selectedSupervisor, selectedSalesRep, customers, salesReps]);
+
   // Calculations
-  const totalSales = filteredInvoices.reduce((sum, inv) => sum + inv.total, 0);
+  const totalSales = filteredInvoices.reduce((sum, inv) => sum + Number(inv.total || 0), 0);
   const totalSalesReturns = filteredSalesReturns.reduce(
-    (sum, ret) => sum + ret.total,
+    (sum, ret) => sum + Number(ret.total || 0),
     0
   );
   const totalExpenses = filteredExpenses.reduce(
-    (sum, exp) => sum + exp.amount,
+    (sum, exp) => sum + Number(exp.amount || 0),
+    0
+  );
+  // Total payments = actual collections from payments store
+  const totalPayments = filteredPayments.reduce(
+    (sum: number, pay: any) => sum + Number(pay.amount || 0),
     0
   );
   const netSales = totalSales - totalSalesReturns;
@@ -331,7 +402,7 @@ const Reports = () => {
 
         customerSalesMap.set(inv.customerId, {
           name: existing.name,
-          total: existing.total + inv.total,
+          total: existing.total + Number(inv.total || 0),
           count: existing.count + 1,
           phone: existing.phone,
         });
@@ -352,7 +423,7 @@ const Reports = () => {
     >();
 
     filteredInvoices.forEach((inv) => {
-      if (inv.customerId && inv.paidAmount > 0) {
+      if (inv.customerId && Number(inv.paidAmount) > 0) {
         const customer = customers.find((c) => c.id === inv.customerId);
         const existing = customerPaymentsMap.get(inv.customerId) || {
           name: inv.customerName || "غير محدد",
@@ -363,7 +434,7 @@ const Reports = () => {
 
         customerPaymentsMap.set(inv.customerId, {
           name: existing.name,
-          totalPaid: existing.totalPaid + inv.paidAmount,
+          totalPaid: existing.totalPaid + Number(inv.paidAmount || 0),
           count: existing.count + 1,
           phone: existing.phone,
         });
@@ -379,18 +450,18 @@ const Reports = () => {
   // العملاء الأكثر ديون
   const topCustomersByDebt = useMemo(() => {
     return customers
-      .filter((c) => (c.currentBalance || 0) > 0)
+      .filter((c) => getBalance(c.id, Number(c.currentBalance || 0)) > 0)
       .map((c) => ({
         id: c.id,
         name: c.name,
         phone: c.phone || "-",
-        debt: c.currentBalance || 0,
-        creditLimit: c.creditLimit || 0,
+        debt: getBalance(c.id, Number(c.currentBalance) || 0),
+        creditLimit: Number(c.creditLimit) || 0,
       }))
       .sort((a, b) => b.debt - a.debt)
       .sort((a, b) => b.debt - a.debt);
 
-  }, [customers]);
+  }, [customers, getBalance]);
 
   // مبيعات حسب الفئات
   const salesByCategory = useMemo(() => {
@@ -410,8 +481,8 @@ const Reports = () => {
         };
         categorySales.set(categoryId, {
           name: categoryName,
-          total: existing.total + item.total,
-          quantity: existing.quantity + item.quantity,
+          total: existing.total + Number(item.total || 0),
+          quantity: existing.quantity + Number(item.quantity || 0),
         });
       });
     });
@@ -434,7 +505,7 @@ const Reports = () => {
     filteredInvoices.forEach((inv) => {
       const dateStr = inv.createdAt.split("T")[0];
       if (salesByDay.has(dateStr)) {
-        salesByDay.set(dateStr, (salesByDay.get(dateStr) || 0) + inv.total);
+        salesByDay.set(dateStr, (salesByDay.get(dateStr) || 0) + Number(inv.total || 0));
       }
     });
 
@@ -466,7 +537,7 @@ const Reports = () => {
       };
       empSales.set(empId, {
         name: empName,
-        sales: existing.sales + inv.total,
+        sales: existing.sales + Number(inv.total || 0),
         count: existing.count + 1,
       });
     });
@@ -493,7 +564,7 @@ const Reports = () => {
     });
 
     const prevTotalSales = previousInvoices.reduce(
-      (sum, inv) => sum + inv.total,
+      (sum, inv) => sum + Number(inv.total || 0),
       0
     );
     const salesChange =
@@ -694,7 +765,7 @@ const Reports = () => {
         </Card>
 
         {/* KPIs Dashboard */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">
@@ -788,6 +859,23 @@ const Reports = () => {
               </div>
               <p className="text-xs text-muted-foreground mt-1">
                 القيمة المتوسطة للفاتورة
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">
+                إجمالي المدفوعات
+              </CardTitle>
+              <CreditCard className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600">
+                {formatCurrency(totalPayments)}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                المبالغ المحصلة من الفواتير
               </p>
             </CardContent>
           </Card>
@@ -1165,7 +1253,7 @@ const Reports = () => {
                     date: formatDate(inv.createdAt),
                     customer: inv.customerName || "عميل نقدي",
                     employee: inv.userName || "-",
-                    total: inv.total,
+                    total: Number(inv.total) || 0,
                     status:
                       inv.paymentStatus === "paid"
                         ? "مدفوعة"

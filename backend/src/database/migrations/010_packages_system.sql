@@ -19,20 +19,9 @@ CREATE TABLE IF NOT EXISTS packages (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- إضافة عمود package_id لجدول licenses (MySQL compatible)
--- نتحقق أولاً إذا العمود موجود
-SET @exist := (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
-               WHERE TABLE_SCHEMA = DATABASE() 
-               AND TABLE_NAME = 'licenses' 
-               AND COLUMN_NAME = 'package_id');
-
-SET @sqlstmt := IF(@exist = 0, 
-    'ALTER TABLE licenses ADD COLUMN package_id VARCHAR(36)',
-    'SELECT "Column package_id already exists"');
-
-PREPARE stmt FROM @sqlstmt;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+-- إضافة عمود package_id لجدول licenses
+-- Will be skipped by migration runner if column already exists
+ALTER TABLE licenses ADD COLUMN package_id VARCHAR(36);
 
 -- إضافة Foreign Key (تجاهل الخطأ إذا موجود)
 -- ALTER TABLE licenses ADD CONSTRAINT fk_license_package 

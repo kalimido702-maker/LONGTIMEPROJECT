@@ -1,5 +1,5 @@
 import { RowDataPacket, ResultSetHeader } from "mysql2/promise";
-import { db } from "../config/database-factory.js";
+import { db, isUsingSQLite } from "../config/database-factory.js";
 import { logger } from "../config/logger.js";
 import { FieldMapper } from "./FieldMapper.js";
 
@@ -100,6 +100,8 @@ const SYNCABLE_TABLES = [
   "product_units",
   "supervisors",
   "sales_reps",
+  "roles",
+  "users",
 ];
 
 
@@ -195,9 +197,14 @@ export class SyncService {
           // Use normalized table name for all further operations
           const table_name = normalizedTableName;
 
+          // Tables that don't have branch_id column
+          const noBranchTables = ['roles'];
           // التحقق من وجود السجل على السيرفر - check by id only (PRIMARY KEY)
+          const selectCols = noBranchTables.includes(table_name)
+            ? 'id, server_updated_at, sync_version, is_deleted, client_id'
+            : 'id, server_updated_at, sync_version, is_deleted, client_id, branch_id';
           const [existingRows] = await connection.query<RowDataPacket[]>(
-            `SELECT id, server_updated_at, sync_version, is_deleted, client_id, branch_id 
+            `SELECT ${selectCols} 
              FROM ?? 
              WHERE id = ?`,
             [table_name, record.record_id]
@@ -383,18 +390,38 @@ export class SyncService {
     try {
       const tablesToSync = tables || SYNCABLE_TABLES;
 
+      // Tables that don't have branch_id column
+      const noBranchTables = ['roles'];
+
       for (const table_name of tablesToSync) {
         try {
-          // Use simple query; streaming API was failing in promise wrapper
-          const [rows] = await connection.query<RowDataPacket[]>(
-            `SELECT * FROM ?? 
+          let queryParams: any[];
+          let query: string;
+
+          if (noBranchTables.includes(table_name)) {
+            // Tables without branch_id - only filter by client_id
+            query = `SELECT * FROM ?? 
              WHERE client_id = ? 
-             AND branch_id = ? 
              AND server_updated_at > ? 
              ORDER BY server_updated_at ASC 
-             LIMIT ?`,
-            [table_name, client_id, branch_id, since, MAX_PULL_SIZE]
-          );
+             LIMIT ?`;
+            queryParams = [table_name, client_id, since, MAX_PULL_SIZE];
+          } else {
+            // Handle null branch_id: use IS NULL when branch_id is null, otherwise use =
+            const branchCondition = branch_id === null || branch_id === 'null' ? 'branch_id IS NULL' : 'branch_id = ?';
+            query = `SELECT * FROM ?? 
+             WHERE client_id = ? 
+             AND ${branchCondition}
+             AND server_updated_at > ? 
+             ORDER BY server_updated_at ASC 
+             LIMIT ?`;
+            queryParams = branch_id === null || branch_id === 'null'
+              ? [table_name, client_id, since, MAX_PULL_SIZE]
+              : [table_name, client_id, branch_id, since, MAX_PULL_SIZE];
+          }
+
+          // Use simple query; streaming API was failing in promise wrapper
+          const [rows] = await connection.query<RowDataPacket[]>(query, queryParams);
 
           for (const row of rows) {
             // DEBUG: Log raw row and mapped data to diagnose empty data issue
@@ -448,7 +475,7 @@ export class SyncService {
    */
   async resolveConflict(
     client_id: string | number,
-    branch_id: string | number,
+    branch_id: string | number | null,
     table_name: string,
     record_id: string,
     resolution: "accept_server" | "accept_client",
@@ -456,14 +483,21 @@ export class SyncService {
   ): Promise<void> {
     const connection = await db.getConnection();
 
+    // Handle null branch_id
+    const branchIsNull = branch_id === null || branch_id === 'null';
+    const branchCondition = branchIsNull ? 'branch_id IS NULL' : 'branch_id = ?';
+
     try {
       await connection.beginTransaction();
 
       if (resolution === "accept_client" && client_data) {
         // قبول نسخة الـ client
+        const queryParams = branchIsNull
+          ? [table_name, record_id, client_id]
+          : [table_name, record_id, client_id, branch_id];
         const [existingRows] = await connection.query<RowDataPacket[]>(
-          `SELECT sync_version FROM ?? WHERE id = ? AND client_id = ? AND branch_id = ?`,
-          [table_name, record_id, client_id, branch_id]
+          `SELECT sync_version FROM ?? WHERE id = ? AND client_id = ? AND ${branchCondition}`,
+          queryParams
         );
 
         if (existingRows.length > 0) {
@@ -537,18 +571,31 @@ export class SyncService {
     const values = Object.values(fields);
     const placeholders = columns.map(() => "?").join(", ");
 
-    // Build ON CONFLICT DO UPDATE clause (excluding id) - SQLite uses 'excluded' prefix
+    // Build upsert clause based on database type
     const updateColumns = columns.filter(col => col !== 'id');
-    const updateClause = updateColumns.map(col => `${col} = excluded.${col}`).join(", ");
 
     try {
       const now = new Date().toISOString();
-      await connection.query(
-        `INSERT INTO ?? (${columns.join(", ")}, server_updated_at, sync_version) 
-         VALUES (${placeholders}, ?, 1)
-         ON CONFLICT(id) DO UPDATE SET ${updateClause}, server_updated_at = ?, sync_version = sync_version + 1`,
-        [table_name, ...values, now, now]
-      );
+
+      if (isUsingSQLite()) {
+        // SQLite: ON CONFLICT(id) DO UPDATE SET col = excluded.col
+        const updateClause = updateColumns.map(col => `${col} = excluded.${col}`).join(", ");
+        await connection.query(
+          `INSERT INTO ?? (${columns.join(", ")}, server_updated_at, sync_version) 
+           VALUES (${placeholders}, ?, 1)
+           ON CONFLICT(id) DO UPDATE SET ${updateClause}, server_updated_at = ?, sync_version = sync_version + 1`,
+          [table_name, ...values, now, now]
+        );
+      } else {
+        // MySQL: ON DUPLICATE KEY UPDATE col = VALUES(col)
+        const updateClause = updateColumns.map(col => `${col} = VALUES(${col})`).join(", ");
+        await connection.query(
+          `INSERT INTO ?? (${columns.join(", ")}, server_updated_at, sync_version) 
+           VALUES (${placeholders}, ?, 1)
+           ON DUPLICATE KEY UPDATE ${updateClause}, server_updated_at = VALUES(server_updated_at), sync_version = sync_version + 1`,
+          [table_name, ...values, now]
+        );
+      }
     } catch (error: any) {
       // Log helpful error info
       console.error(`Upsert failed for ${table_name}:`, {
@@ -568,7 +615,7 @@ export class SyncService {
     record_id: string,
     data: Record<string, any>,
     client_id: string | number,
-    branch_id: string | number,
+    branch_id: string | number | null,
     current_version: number,
     is_deleted: boolean
   ): Promise<void> {
@@ -633,7 +680,7 @@ export class SyncService {
    */
   async getSpecificRecord(
     client_id: string | number,
-    branch_id: string | number,
+    branch_id: string | number | null,
     table_name: string,
     record_id: string
   ): Promise<Record<string, any> | null> {
@@ -649,10 +696,25 @@ export class SyncService {
     const connection = await db.getConnection();
 
     try {
+      // Handle different primary key columns for different tables
+      let primaryKeyColumn = 'id';
+      if (normalizedTableName === 'settings') {
+        primaryKeyColumn = 'key';
+      } else if (normalizedTableName === 'roles') {
+        primaryKeyColumn = 'id';
+      }
+
+      // Handle null branch_id
+      const branchIsNull = branch_id === null || branch_id === 'null';
+      const branchCondition = branchIsNull ? 'branch_id IS NULL' : 'branch_id = ?';
+      const queryParams = branchIsNull
+        ? [normalizedTableName, record_id, client_id]
+        : [normalizedTableName, record_id, client_id, branch_id];
+
       const [rows] = await connection.query<RowDataPacket[]>(
         `SELECT * FROM ?? 
-         WHERE id = ? AND client_id = ?`,
-        [normalizedTableName, record_id, client_id]
+         WHERE ?? = ? AND client_id = ? AND ${branchCondition}`,
+        [normalizedTableName, primaryKeyColumn, record_id, client_id, ...(branchIsNull ? [] : [branch_id])]
       );
 
       if (rows.length === 0) {
@@ -680,7 +742,7 @@ export class SyncService {
    */
   async getSyncStats(
     client_id: string | number,
-    branch_id: string | number
+    branch_id: string | number | null
   ): Promise<{
     pending_queue_count: number;
     last_sync_at: string | null;
@@ -688,29 +750,35 @@ export class SyncService {
   }> {
     const connection = await db.getConnection();
 
+    // Handle null branch_id
+    const branchIsNull = branch_id === null || branch_id === 'null';
+    const branchCondition = branchIsNull ? 'branch_id IS NULL' : 'branch_id = ?';
+
     try {
       // عدد السجلات في queue
+      const queueParams = branchIsNull ? [client_id] : [client_id, branch_id];
       const [queueRows] = await connection.query<RowDataPacket[]>(
         `SELECT COUNT(*) as count FROM sync_queue 
-         WHERE client_id = ? AND branch_id = ? AND processed_at IS NULL`,
-        [client_id, branch_id]
+         WHERE client_id = ? AND ${branchCondition} AND processed_at IS NULL`,
+        queueParams
       );
 
       // آخر وقت sync
       const [lastSyncRows] = await connection.query<RowDataPacket[]>(
         `SELECT MAX(created_at) as last_sync FROM sync_queue 
-         WHERE client_id = ? AND branch_id = ?`,
-        [client_id, branch_id]
+         WHERE client_id = ? AND ${branchCondition}`,
+        queueParams
       );
 
       // إحصائيات كل جدول
       const tables_stats: Array<{ table_name: string; record_count: number }> =
         [];
       for (const table of SYNCABLE_TABLES) {
+        const tableParams = branchIsNull ? [table, client_id] : [table, client_id, branch_id];
         const [countRows] = await connection.query<RowDataPacket[]>(
           `SELECT COUNT(*) as count FROM ?? 
-           WHERE client_id = ? AND branch_id = ? AND is_deleted = 0`,
-          [table, client_id, branch_id]
+           WHERE client_id = ? AND ${branchCondition} AND is_deleted = 0`,
+          tableParams
         );
         if (countRows[0].count > 0) {
           tables_stats.push({

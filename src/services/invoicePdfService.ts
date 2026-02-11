@@ -10,9 +10,11 @@ export interface InvoicePDFData {
     invoiceNumber: string;
     date: string;
     customerName: string;
+    customerAddress?: string;
     salesRepName?: string;
     items: InvoiceItemData[];
     total: number;
+    discount?: number;
     previousBalance?: number;
     currentBalance?: number;
     isReturn?: boolean; // Flag for return invoice
@@ -49,7 +51,7 @@ async function loadLogoBase64(): Promise<string | null> {
 async function generateQRCode(): Promise<string | null> {
     try {
         return await QRCode.toDataURL("https://longtimelt.com", {
-            width: 150,
+            width: 100,
             margin: 1,
             color: {
                 dark: "#000000",
@@ -81,7 +83,6 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
         <tr>
             <td class="col-index">${index + 1}</td>
             <td class="col-name">${item.productName || ""}</td>
-            <td class="col-code">${item.productCode || ""}</td>
             <td class="col-qty">${formatNum(item.quantity, 0, 0)}</td>
             <td class="col-unit">قطعة</td>
             <td class="col-price">${formatNum(item.price, 2, 2)}</td>
@@ -198,7 +199,7 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             padding: 3px 20px 3px 12px;
             font-size: 10px;
             font-weight: 600;
-            margin-top: 5px;
+            margin-top: 4px;
         }
         
         /* ===== CUSTOMER SECTION ===== */
@@ -213,7 +214,7 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             color: #000;
         }
         
-        .sales-rep {
+        .customer-address {
             font-size: 12px;
             color: #333;
             font-weight: 600;
@@ -271,19 +272,18 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             font-weight: 600;
         }
         
-        /* Column widths */
-        .col-index { width: 4%; }
-        .col-name { width: 32%; }
-        .col-code { width: 11%; }
-        .col-qty { width: 7%; }
-        .col-unit { width: 7%; }
-        .col-price { width: 11%; }
+        /* Column widths - adjusted after removing code column */
+        .col-index { width: 5%; }
+        .col-name { width: 38%; }
+        .col-qty { width: 8%; }
+        .col-unit { width: 10%; }
+        .col-price { width: 14%; }
         .col-total { width: 14%; }
-        .col-units { width: 14%; }
+        .col-units { width: 11%; }
         
-        /* ===== FOOTER ===== */
         .footer {
             display: flex;
+            flex-direction: row;
             justify-content: space-between;
             align-items: flex-start;
             margin-top: 10px;
@@ -322,8 +322,8 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
         }
         
         .qr-code {
-            width: 85px;
-            height: 85px;
+            width: 50px;
+            height: 50px;
         }
 
         .header-section {
@@ -379,7 +379,7 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
                 <!-- Customer Section -->
                 <div class="customer-section">
                     <div class="customer-name">السادة / ${data.customerName}</div>
-                    ${data.salesRepName ? `<div class="sales-rep">${data.salesRepName}</div>` : ''}
+                    ${data.customerAddress ? `<div class="customer-address">${data.customerAddress}</div>` : ''}
                 </div>
             </div>
         </div>
@@ -391,7 +391,6 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
                     <tr>
                         <th class="col-index">م</th>
                         <th class="col-name">اسم الصنف</th>
-                        <th class="col-code">الكود</th>
                         <th class="col-qty">الكمية</th>
                         <th class="col-unit">الوحدة</th>
                         <th class="col-price">الفئة</th>
@@ -413,6 +412,17 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
                     <span class="amount">${formatNum(data.total, 0, 0)}</span>
                 </div>
                 
+                ${(data.discount && data.discount > 0) ? `
+                <div class="total-row">
+                    <span>الخصم</span>
+                    <span class="amount">${formatNum(data.discount, 0, 0)}</span>
+                </div>
+                <div class="total-row">
+                    <span>الإجمالي بعد الخصم</span>
+                    <span class="amount">${formatNum(data.total - data.discount, 0, 0)}</span>
+                </div>
+                ` : ''}
+                
                 ${data.previousBalance !== undefined ? `
                 <div class="total-row">
                     <span>الرصيد السابق</span>
@@ -429,7 +439,6 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             </div>
             
             <div class="qr-section">
-                <div class="site-url">longtimelt.com</div>
                 ${qrCodeBase64
             ? `<img src="${qrCodeBase64}" class="qr-code" alt="QR Code">`
             : ''
@@ -550,11 +559,17 @@ export function convertToPDFData(
     items: any[],
     salesRep?: any
 ): InvoicePDFData {
+    const invoiceTotal = invoice.total || 0;
+    const invoiceDiscount = invoice.discount || invoice.discountAmount || 0;
+    const prevBalance = customer?.currentBalance !== undefined ? (customer.currentBalance - invoiceTotal + (invoice.paidAmount || 0)) : undefined;
+    const currBalance = customer?.currentBalance !== undefined ? customer.currentBalance : undefined;
+
     return {
         id: invoice.id || "",
         invoiceNumber: invoice.invoiceNumber || invoice.id || "",
         date: new Date(invoice.createdAt || Date.now()).toLocaleDateString("ar-EG"),
         customerName: customer?.name || invoice.customerName || "عميل",
+        customerAddress: customer?.address || "",
         salesRepName: salesRep?.name,
         items: (items || []).map((item) => {
             const qty = item.quantity || 0;
@@ -569,8 +584,9 @@ export function convertToPDFData(
                 unitsPerCarton: item.unitsPerCarton,
             };
         }),
-        total: invoice.total || 0,
-        previousBalance: customer?.previousBalance,
-        currentBalance: customer?.currentBalance,
+        total: invoiceTotal,
+        discount: invoiceDiscount,
+        previousBalance: prevBalance,
+        currentBalance: currBalance,
     };
 }

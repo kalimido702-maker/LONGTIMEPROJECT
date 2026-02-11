@@ -43,10 +43,11 @@ import {
     Check,
     X,
     Trash2,
-    Edit // Import Edit icon
+    Edit, // Import Edit icon
+    MessageSquare, // Import MessageSquare icon for WhatsApp
 } from "lucide-react";
 import { useNavigate } from "react-router-dom"; // Import useNavigate
-import { db, Invoice, Customer, PaymentMethod, SalesReturn, SalesReturnItem, Product, Shift } from "@/shared/lib/indexedDB";
+import { db, Invoice, Customer, PaymentMethod, SalesReturn, SalesReturnItem, Product, Shift, SalesRep } from "@/shared/lib/indexedDB";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -157,7 +158,7 @@ export default function Invoices() {
             // الفاتورة النقدية الي ليها طريقة دفع بس paidAmount = 0 تعتبر مدفوعة
             const hasPaymentMethod = invoice.paymentMethodIds && invoice.paymentMethodIds.length > 0;
             const isCashInvoice = invoice.paymentType === "cash";
-            if (isCashInvoice && hasPaymentMethod && (invoice.paidAmount || 0) === 0) {
+            if (isCashInvoice && hasPaymentMethod && Number(invoice.paidAmount || 0) === 0) {
                 actualStatus = "paid";
             }
             const matchesPaymentStatus =
@@ -199,7 +200,7 @@ export default function Invoices() {
         // تعتبر مدفوعة بالكامل
         const hasPaymentMethod = invoice.paymentMethodIds && invoice.paymentMethodIds.length > 0;
         const isCashInvoice = invoice.paymentType === "cash";
-        const isLegacyPaidCash = isCashInvoice && hasPaymentMethod && (invoice.paidAmount || 0) === 0;
+        const isLegacyPaidCash = isCashInvoice && hasPaymentMethod && Number(invoice.paidAmount || 0) === 0;
 
         const actualStatus = isLegacyPaidCash ? "paid" : invoice.paymentStatus;
 
@@ -338,20 +339,111 @@ export default function Invoices() {
         const hasPaymentMethod = invoice.paymentMethodIds && invoice.paymentMethodIds.length > 0;
         const isCashInvoice = invoice.paymentType === "cash";
         // لو فاتورة نقدية وليها طريقة دفع بس paidAmount = 0، يبقى مدفوعة بالكامل
-        if (isCashInvoice && hasPaymentMethod && (invoice.paidAmount || 0) === 0) {
-            return invoice.total || 0;
+        if (isCashInvoice && hasPaymentMethod && Number(invoice.paidAmount || 0) === 0) {
+            return Number(invoice.total) || 0;
         }
-        return invoice.paidAmount || 0;
+        return Number(invoice.paidAmount) || 0;
     };
 
     // حساب المتبقي الفعلي
     const getActualRemainingAmount = (invoice: Invoice): number => {
         const actualPaid = getActualPaidAmount(invoice);
-        return Math.max(0, (invoice.total || 0) - actualPaid);
+        return Math.max(0, Number(invoice.total || 0) - actualPaid);
     };
 
     // تنسيق العملة - بدون كسور عشرية
     const formatCurrency = (amount: number) => `${Math.round(amount)} ${currency}`;
+
+    // إرسال الفاتورة عبر واتساب مع PDF
+    const handleSendInvoiceWhatsApp = async (invoice: Invoice) => {
+        const customer = customers.find(c => c.id === invoice.customerId);
+        if (!customer?.phone) {
+            toast.error("العميل ليس لديه رقم هاتف");
+            return;
+        }
+
+        try {
+            toast.info("📄 جاري تجهيز الفاتورة...");
+
+            const { generateInvoicePDF, convertToPDFData } = await import("@/services/invoicePdfService");
+            const allProducts = await db.getAll("products");
+            const allReps = await db.getAll<SalesRep>("salesReps");
+
+            const items = (invoice.items || []).map((item: any) => {
+                const product = allProducts.find((p: any) => p.id === item.productId || p.name === item.productName || p.name === item.name);
+                return {
+                    ...item,
+                    unitsPerCarton: (product as any)?.unitsPerCarton || (product as any)?.cartonCount,
+                    productCode: item.productCode || (product as any)?.code || (product as any)?.sku || "-"
+                };
+            });
+
+            const rep = customer.salesRepId ? allReps.find(r => r.id === customer.salesRepId) : null;
+            const pdfData = convertToPDFData(invoice, customer, items, rep || undefined);
+
+            toast.info("🖨️ جاري توليد PDF...");
+            const pdfBlob = await generateInvoicePDF(pdfData);
+
+            toast.info("📤 جاري الإرسال عبر واتساب...");
+
+            const base64data = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(pdfBlob);
+            });
+
+            const message = `🧾 *فاتورة رقم ${invoice.invoiceNumber || invoice.id}*\n` +
+                `*العميل:* ${invoice.customerName}\n` +
+                `*الإجمالي:* ${formatCurrency(invoice.total)}\n\n` +
+                `شركة لونج تايم للصناعة الكهربائية`;
+
+            const phone = customer.phone.replace(/[^0-9]/g, "");
+
+            const accounts = await db.getAll("whatsappAccounts");
+            const activeAccount = accounts.find((a: any) => a.isActive && a.status === "connected");
+
+            if (activeAccount) {
+                const { whatsappService } = await import("@/services/whatsapp/whatsappService");
+
+                const msgId = await whatsappService.sendMessage(
+                    (activeAccount as any).id,
+                    phone,
+                    message,
+                    {
+                        type: "document",
+                        url: base64data,
+                        caption: message,
+                        filename: `فاتورة-${invoice.invoiceNumber || invoice.id}.pdf`
+                    },
+                    {
+                        invoiceId: invoice.id,
+                        customerId: customer.id,
+                        type: "invoice",
+                    }
+                );
+
+                try {
+                    const delivered = await (whatsappService as any).waitForMessage(msgId, 60000);
+                    if (delivered) {
+                        toast.success("✅ تم إرسال الفاتورة بنجاح!");
+                    } else {
+                        toast.error("❌ فشل إرسال الفاتورة");
+                    }
+                } catch {
+                    toast.success("✅ تم إرسال الفاتورة!");
+                }
+            } else {
+                // Fallback to wa.me
+                const encodedMessage = encodeURIComponent(message);
+                window.open(`https://wa.me/${phone}?text=${encodedMessage}`, "_blank");
+                toast.info("لا يوجد حساب واتساب متصل، تم فتح واتساب ويب");
+            }
+        } catch (error) {
+            console.error("WhatsApp send error:", error);
+            toast.error("حدث خطأ أثناء إرسال الفاتورة");
+        }
+    };
 
     // طباعة الفاتورة
     const handlePrintInvoice = async (invoice: Invoice) => {
@@ -556,7 +648,7 @@ export default function Invoices() {
 
     // Calculate totals
     const totalInvoices = filteredInvoices.length;
-    const totalAmount = filteredInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
+    const totalAmount = filteredInvoices.reduce((sum, inv) => sum + Number(inv.total || 0), 0);
     const totalPaid = filteredInvoices.reduce((sum, inv) => sum + getActualPaidAmount(inv), 0);
 
     return (
@@ -835,6 +927,7 @@ export default function Invoices() {
                                         </Select>
                                     </TableCell>
                                     <TableCell>
+                                        {can("returns", "create") && (
                                         <Button
                                             variant="outline"
                                             size="sm"
@@ -846,6 +939,8 @@ export default function Invoices() {
                                             <RotateCcw className="h-4 w-4 ml-1" />
                                             مرتجع
                                         </Button>
+                                        )}
+
                                         <Button
                                             size="sm"
                                             className="mr-2"
@@ -1046,7 +1141,7 @@ export default function Invoices() {
                                                     // معالجة الداتا القديمة: لو الفاتورة نقدية والمبلغ = 0، نعرض الإجمالي
                                                     let displayAmount = parseFloat(amount) || 0;
                                                     if (displayAmount === 0 && selectedInvoice.paymentType === "cash") {
-                                                        displayAmount = selectedInvoice.total || 0;
+                                                        displayAmount = Number(selectedInvoice.total) || 0;
                                                     }
 
                                                     return displayAmount > 0 ? (
@@ -1072,23 +1167,23 @@ export default function Invoices() {
                             <div className="border-t pt-4 space-y-2">
                                 <div className="flex justify-between text-lg">
                                     <span>المجموع الفرعي</span>
-                                    <span>{Math.round(selectedInvoice.subtotal || 0)} {currency}</span>
+                                    <span>{Math.round(Number(selectedInvoice.subtotal) || 0)} {currency}</span>
                                 </div>
-                                {selectedInvoice.discount > 0 && (
+                                {Number(selectedInvoice.discount) > 0 && (
                                     <div className="flex justify-between text-red-600">
                                         <span>الخصم</span>
-                                        <span>-{Math.round(selectedInvoice.discount || 0)} {currency}</span>
+                                        <span>-{Math.round(Number(selectedInvoice.discount) || 0)} {currency}</span>
                                     </div>
                                 )}
-                                {selectedInvoice.tax > 0 && (
+                                {Number(selectedInvoice.tax) > 0 && (
                                     <div className="flex justify-between">
                                         <span>الضريبة</span>
-                                        <span>{Math.round(selectedInvoice.tax || 0)} {currency}</span>
+                                        <span>{Math.round(Number(selectedInvoice.tax) || 0)} {currency}</span>
                                     </div>
                                 )}
                                 <div className="flex justify-between text-xl font-bold border-t pt-2">
                                     <span>الإجمالي</span>
-                                    <span>{Math.round(selectedInvoice.total || 0)} {currency}</span>
+                                    <span>{Math.round(Number(selectedInvoice.total) || 0)} {currency}</span>
                                 </div>
                                 <div className="flex justify-between text-green-600">
                                     <span>المدفوع</span>
@@ -1103,9 +1198,26 @@ export default function Invoices() {
                             </div>
 
                             {/* Actions */}
-                            <div className="flex gap-2 justify-end border-t pt-4">
+                            <div className="flex gap-2 justify-end border-t pt-4 flex-wrap">
                                 <Button variant="outline" onClick={() => setIsDetailsOpen(false)}>
                                     إغلاق
+                                </Button>
+                                {selectedInvoice.customerId && (
+                                    <Button
+                                        variant="outline"
+                                        className="bg-green-50 hover:bg-green-100 text-green-700 border-green-200"
+                                        onClick={() => handleSendInvoiceWhatsApp(selectedInvoice)}
+                                    >
+                                        <MessageSquare className="h-4 w-4 ml-2" />
+                                        واتساب
+                                    </Button>
+                                )}
+                                <Button
+                                    variant="outline"
+                                    onClick={() => selectedInvoice && handlePrintInvoice(selectedInvoice)}
+                                >
+                                    <Printer className="h-4 w-4 ml-2" />
+                                    طباعة
                                 </Button>
                                 {canEditInvoice && (
                                     <Button
@@ -1130,6 +1242,7 @@ export default function Invoices() {
                                         حذف الفاتورة
                                     </Button>
                                 )}
+                                {can("returns", "create") && (
                                 <Button
                                     variant="outline"
                                     onClick={() => selectedInvoice && handleOpenReturnDialog(selectedInvoice)}
@@ -1137,6 +1250,7 @@ export default function Invoices() {
                                     <RotateCcw className="h-4 w-4 ml-2" />
                                     مرتجع
                                 </Button>
+                                )}
                             </div>
                         </div>
                     )}

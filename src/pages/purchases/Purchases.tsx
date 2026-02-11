@@ -186,7 +186,7 @@ const Purchases = () => {
       const newBalance = selectedSupplier.balance + remaining;
       if (newBalance > selectedSupplier.creditLimit) {
         toast.error(
-          `تجاوز حد الائتمان! الحد المسموح: ${selectedSupplier.creditLimit.toFixed(
+          `تجاوز حد الائتمان! الحد المسموح: ${Number(selectedSupplier.creditLimit || 0).toFixed(
             2
           )} ${currency}`
         );

@@ -26,7 +26,7 @@ echo "=========================================="
 # 1. تسجيل الدخول والحصول على Token
 echo ""
 echo "🔐 الخطوة 1: تسجيل الدخول..."
-LOGIN_RESPONSE=$(curl -s -X POST "$SERVER/api/auth/login" \
+LOGIN_RESPONSE=$(curl -s -X POST "$SERVER/api/admin/login" \
   -H "Content-Type: application/json" \
   -d "{\"username\": \"$USERNAME\", \"password\": \"$PASSWORD\"}")
 

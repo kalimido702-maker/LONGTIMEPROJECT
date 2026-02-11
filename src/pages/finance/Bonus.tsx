@@ -45,6 +45,7 @@ import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useCustomerBalances } from "@/hooks/useCustomerBalances";
 
 // نوع سجل البونص
 interface BonusRecord {
@@ -80,6 +81,7 @@ export default function Bonus() {
     const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
     const [customerSearchQuery, setCustomerSearchQuery] = useState("");
     const [isLoading, setIsLoading] = useState(false);
+    const { getBalance, refresh: refreshBalances } = useCustomerBalances([customers]);
 
     // الفترة الزمنية
     const currentYear = new Date().getFullYear();
@@ -98,7 +100,7 @@ export default function Bonus() {
         const allCustomers = await db.getAll<Customer>("customers");
         // ترتيب حسب الرصيد (الأعلى رصيد أولاً)
         const sortedCustomers = allCustomers.sort(
-            (a, b) => (b.currentBalance || 0) - (a.currentBalance || 0)
+            (a, b) => (Number(b.currentBalance) || 0) - (Number(a.currentBalance) || 0)
         );
         setCustomers(sortedCustomers);
 
@@ -382,7 +384,7 @@ export default function Bonus() {
                                                 <div className="flex flex-col items-start">
                                                     <span>{selectedCustomer.name}</span>
                                                     <span className="text-xs text-muted-foreground">
-                                                        رصيد: {Math.round(selectedCustomer.currentBalance || 0)}{" "}
+                                                        رصيد: {Math.round(getBalance(selectedCustomer.id, Number(selectedCustomer.currentBalance) || 0))}{" "}
                                                         {currency}
                                                     </span>
                                                 </div>
@@ -433,12 +435,12 @@ export default function Bonus() {
                                                             </div>
                                                             <Badge
                                                                 variant={
-                                                                    (customer.currentBalance || 0) > 0
+                                                                    getBalance(customer.id, Number(customer.currentBalance) || 0) > 0
                                                                         ? "destructive"
                                                                         : "secondary"
                                                                 }
                                                             >
-                                                                {Math.round(customer.currentBalance || 0)}
+                                                                {Math.round(getBalance(customer.id, Number(customer.currentBalance) || 0))}
                                                             </Badge>
                                                         </CommandItem>
                                                     ))}

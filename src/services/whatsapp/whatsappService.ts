@@ -580,7 +580,7 @@ class WhatsAppService {
       }
 
       const message = `فاتورة رقم: ${(invoice as any).id}\nالمبلغ الإجمالي: ${(invoice as any).total
-        }\nشكراً لتعاملكم معنا 🙏`;
+        }\nشركة لونج تايم للصناعة الكهربائية`;
 
       await this.sendMessage(
         activeAccount.id,

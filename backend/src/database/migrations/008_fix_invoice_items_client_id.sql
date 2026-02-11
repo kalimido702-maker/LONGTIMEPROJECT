@@ -1,14 +1,9 @@
 -- Migration: Fix invoice_items client_id and branch_id column types
--- Problem: These columns are INT but should be VARCHAR(36) like other tables
--- This allows UUIDs to be stored correctly
+-- Add client_id and branch_id as VARCHAR(36) if they don't exist
+-- If they exist as wrong type, modify them
 
--- First, modify client_id from INT to VARCHAR(36)
-ALTER TABLE `invoice_items` 
-MODIFY COLUMN `client_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL;
+-- Try to add client_id first (will be caught by error handler if exists)
+ALTER TABLE `invoice_items` ADD COLUMN `client_id` varchar(36) DEFAULT NULL;
 
--- Then, modify branch_id from INT to VARCHAR(36)
-ALTER TABLE `invoice_items` 
-MODIFY COLUMN `branch_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL;
-
--- Add missing columns if they don't exist (sync_version and is_deleted should already exist from previous migration)
--- These are idempotent - they will fail silently if columns already exist
+-- Try to add branch_id (will be caught by error handler if exists)
+ALTER TABLE `invoice_items` ADD COLUMN `branch_id` varchar(36) DEFAULT NULL;

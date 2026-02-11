@@ -229,7 +229,7 @@ const Suppliers = () => {
                           حد الائتمان:
                         </span>
                         <span className="font-semibold">
-                          {supplier.creditLimit.toFixed(2)} {currency}
+                          {Number(supplier.creditLimit || 0).toFixed(2)} {currency}
                         </span>
                       </div>
                       <div className="flex justify-between text-sm">
@@ -237,12 +237,12 @@ const Suppliers = () => {
                           الرصيد المتاح:
                         </span>
                         <span
-                          className={`font-semibold ${supplier.creditLimit - supplier.balance > 0
+                          className={`font-semibold ${Number(supplier.creditLimit || 0) - Number(supplier.balance || 0) > 0
                               ? "text-green-600"
                               : "text-red-600"
                             }`}
                         >
-                          {(supplier.creditLimit - supplier.balance).toFixed(2)}{" "}
+                          {(Number(supplier.creditLimit || 0) - Number(supplier.balance || 0)).toFixed(2)}{" "}
                           {currency}
                         </span>
                       </div>
@@ -498,7 +498,7 @@ const Suppliers = () => {
                       حد الائتمان
                     </Label>
                     <p className="text-2xl font-bold">
-                      {selectedSupplier.creditLimit.toFixed(2)} {currency}
+                      {Number(selectedSupplier.creditLimit || 0).toFixed(2)} {currency}
                     </p>
                   </Card>
                   <Card className="p-4">
@@ -507,7 +507,7 @@ const Suppliers = () => {
                     </Label>
                     <p className="text-2xl font-bold text-green-600">
                       {(
-                        selectedSupplier.creditLimit - selectedSupplier.balance
+                        Number(selectedSupplier.creditLimit || 0) - Number(selectedSupplier.balance || 0)
                       ).toFixed(2)}{" "}
                       {currency}
                     </p>

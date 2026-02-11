@@ -159,11 +159,29 @@ const RolesPermissions = () => {
         create: "إدارة الطاولات",
       },
     },
+    collections: {
+      name: "القبض",
+      actions: {
+        view: "عرض القبض",
+        create: "إنشاء قبض",
+        edit: "تعديل قبض",
+        delete: "حذف قبض",
+      },
+    },
     returns: {
       name: "المرتجعات",
       actions: {
         view: "عرض المرتجعات",
         create: "إنشاء مرتجع",
+        edit: "تعديل مرتجع",
+        delete: "حذف مرتجع",
+      },
+    },
+    payments: {
+      name: "المدفوعات",
+      actions: {
+        view: "عرض المدفوعات",
+        edit: "تعديل مدفوعات",
       },
     },
     depositSources: {

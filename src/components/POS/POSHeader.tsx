@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSettingsContext } from "@/contexts/SettingsContext";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -57,6 +57,7 @@ export const POSHeader = () => {
   const [statementWhatsAppOpen, setStatementWhatsAppOpen] = useState(false);
   // المميزات المفعلة من الباقة (null = كل المميزات متاحة)
   const [enabledFeatures, setEnabledFeatures] = useState<string[] | null>(null);
+  const featuresLoadedRef = useRef(false);
 
   const storeName = getSetting("storeName") || "نظام نقاط البيع";
 
@@ -107,6 +108,9 @@ export const POSHeader = () => {
 
   // تحميل المميزات المفعلة من localStorage
   useEffect(() => {
+    if (featuresLoadedRef.current) return;
+    featuresLoadedRef.current = true;
+
     const loadFeatures = async () => {
       console.log('[POSHeader] Loading package features...');
 
@@ -291,6 +295,24 @@ export const POSHeader = () => {
     {
       title: "المالية",
       items: [
+        {
+          name: "القبض السريع",
+          icon: FileText,
+          path: "/collections",
+          check: () => can("collections", "view"),
+        },
+        {
+          name: "البونص",
+          icon: FileText,
+          path: "/bonus",
+          check: () => can("collections", "view"),
+        },
+        {
+          name: "بونص المشرفين",
+          icon: FileText,
+          path: "/supervisor-bonus",
+          check: () => can("collections", "view"),
+        },
         {
           name: "مصادر الإيداعات",
           icon: FileText,

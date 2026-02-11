@@ -6,6 +6,14 @@ import { env } from "../config/env.js";
 import { AlertService } from "../services/AlertService.js";
 import { authMiddleware } from "../middlewares/auth.js";
 
+// MySQL-compatible datetime format (YYYY-MM-DD HH:MM:SS)
+function mysqlNow(): string {
+  return new Date().toISOString().slice(0, 19).replace('T', ' ');
+}
+function toMysqlDate(date: Date): string {
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
 // Validation schemas
 const activateSchema = z.object({
   licenseKey: z
@@ -140,12 +148,12 @@ export default async function licenseRoutes(fastify: FastifyInstance) {
           [license.id, body.deviceId]
         );
 
-        const now = new Date().toISOString();
+        const now = mysqlNow();
         const gracePeriodEndsDate = new Date();
         gracePeriodEndsDate.setDate(
           gracePeriodEndsDate.getDate() + env.LICENSE_GRACE_PERIOD_DAYS
         );
-        const gracePeriodEnds = gracePeriodEndsDate.toISOString();
+        const gracePeriodEnds = toMysqlDate(gracePeriodEndsDate);
 
         if (existingDevice.length > 0) {
           // Device already registered, update last_verified_at

@@ -118,6 +118,7 @@ rebuild_docker() {
             -p 3031:3031 \
             --restart unless-stopped \
             --env-file .env \
+            --add-host=host.docker.internal:host-gateway \
             -v ${REMOTE_PATH}/data:/app/data \
             -v ${REMOTE_PATH}/logs:/app/logs \
             ${CONTAINER_NAME}
