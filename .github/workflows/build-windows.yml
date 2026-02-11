@@ -1,0 +1,180 @@
+name: Build Windows App
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build application
+        run: npm run electron:build:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List build output
+        run: |
+          echo "=== Release folder contents ==="
+          dir release
+        shell: cmd
+
+      - name: Upload artifacts to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: mahaly-pos-windows
+          path: |
+            release/*.exe
+            release/*.msi
+          retention-days: 30
+
+      # --------- رفع على GoFile (تخزين مجاني + رابط مباشر) ---------
+      - name: Find installer file
+        id: find_file
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path release -Filter "*.exe" | Select-Object -First 1
+          if ($exe) {
+            echo "FILE_PATH=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+            echo "FILE_NAME=$($exe.Name)" >> $env:GITHUB_OUTPUT
+            echo "Found: $($exe.Name)"
+          } else {
+            echo "No .exe found, looking for portable..."
+            $portable = Get-ChildItem -Path release -Filter "*.exe" -Recurse | Select-Object -First 1
+            if ($portable) {
+              echo "FILE_PATH=$($portable.FullName)" >> $env:GITHUB_OUTPUT
+              echo "FILE_NAME=$($portable.Name)" >> $env:GITHUB_OUTPUT
+            }
+          }
+
+      - name: Upload to GoFile
+        id: gofile
+        if: steps.find_file.outputs.FILE_PATH != ''
+        shell: pwsh
+        run: |
+          $filePath = "${{ steps.find_file.outputs.FILE_PATH }}"
+          echo "Uploading $filePath to GoFile..."
+
+          # الحصول على أفضل سيرفر
+          $server = (Invoke-RestMethod -Uri "https://api.gofile.io/servers").data.servers[0].name
+          echo "Using server: $server"
+
+          # رفع الملف
+          $response = Invoke-RestMethod -Uri "https://$server.gofile.io/contents/uploadfile" -Method Post -Form @{
+            file = Get-Item -Path $filePath
+          }
+
+          $downloadPage = $response.data.downloadPage
+          $fileId = $response.data.fileId
+          $fileName = $response.data.fileName
+
+          echo "DOWNLOAD_PAGE=$downloadPage" >> $env:GITHUB_OUTPUT
+          echo "FILE_ID=$fileId" >> $env:GITHUB_OUTPUT
+
+          echo ""
+          echo "=========================================="
+          echo "  DOWNLOAD LINK (GoFile)"
+          echo "=========================================="
+          echo "  File: $fileName"
+          echo "  Link: $downloadPage"
+          echo "=========================================="
+
+      - name: Upload to Pixeldrain
+        id: pixeldrain
+        if: steps.find_file.outputs.FILE_PATH != ''
+        shell: pwsh
+        run: |
+          $filePath = "${{ steps.find_file.outputs.FILE_PATH }}"
+          $fileName = "${{ steps.find_file.outputs.FILE_NAME }}"
+          echo "Uploading $fileName to Pixeldrain..."
+
+          try {
+            $response = Invoke-RestMethod -Uri "https://pixeldrain.com/api/file/$fileName" -Method Put -InFile $filePath
+            $fileId = $response.id
+            $directLink = "https://pixeldrain.com/u/$fileId"
+            $apiLink = "https://pixeldrain.com/api/file/$fileId?download"
+
+            echo "DIRECT_LINK=$directLink" >> $env:GITHUB_OUTPUT
+            echo "API_LINK=$apiLink" >> $env:GITHUB_OUTPUT
+
+            echo ""
+            echo "=========================================="
+            echo "  DOWNLOAD LINK (Pixeldrain)"
+            echo "=========================================="
+            echo "  Page:   $directLink"
+            echo "  Direct: $apiLink"
+            echo "=========================================="
+          } catch {
+            echo "Pixeldrain upload failed: $_"
+            echo "DIRECT_LINK=" >> $env:GITHUB_OUTPUT
+            echo "API_LINK=" >> $env:GITHUB_OUTPUT
+          }
+
+      # --------- ملخص الروابط ---------
+      - name: "📥 Download Links Summary"
+        if: always()
+        shell: pwsh
+        run: |
+          echo ""
+          echo "╔══════════════════════════════════════════════════╗"
+          echo "║           🔗 DOWNLOAD LINKS                     ║"
+          echo "╠══════════════════════════════════════════════════╣"
+          echo "║                                                  ║"
+          echo "║  📦 File: ${{ steps.find_file.outputs.FILE_NAME }}"
+          echo "║                                                  ║"
+          if ("${{ steps.gofile.outputs.DOWNLOAD_PAGE }}" -ne "") {
+            echo "║  🌐 GoFile:     ${{ steps.gofile.outputs.DOWNLOAD_PAGE }}"
+          }
+          if ("${{ steps.pixeldrain.outputs.DIRECT_LINK }}" -ne "") {
+            echo "║  🌐 Pixeldrain: ${{ steps.pixeldrain.outputs.DIRECT_LINK }}"
+            echo "║  ⬇️  Direct:    ${{ steps.pixeldrain.outputs.API_LINK }}"
+          }
+          echo "║                                                  ║"
+          echo "╚══════════════════════════════════════════════════╝"
+
+          # Write to job summary
+          echo "## 📥 Download Links" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          echo "**File:** ``${{ steps.find_file.outputs.FILE_NAME }}``" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          if ("${{ steps.gofile.outputs.DOWNLOAD_PAGE }}" -ne "") {
+            echo "🌐 **GoFile:** ${{ steps.gofile.outputs.DOWNLOAD_PAGE }}" >> $env:GITHUB_STEP_SUMMARY
+          }
+          if ("${{ steps.pixeldrain.outputs.DIRECT_LINK }}" -ne "") {
+            echo "🌐 **Pixeldrain:** ${{ steps.pixeldrain.outputs.DIRECT_LINK }}" >> $env:GITHUB_STEP_SUMMARY
+            echo "" >> $env:GITHUB_STEP_SUMMARY
+            echo "⬇️ **Direct Download:** ${{ steps.pixeldrain.outputs.API_LINK }}" >> $env:GITHUB_STEP_SUMMARY
+          }
+
+      # --------- GitHub Release (عند عمل tag) ---------
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            release/*.exe
+            release/*.msi
+          draft: false
+          prerelease: false
+          body: |
+            ## 📥 Download Links
+
+            **GoFile:** ${{ steps.gofile.outputs.DOWNLOAD_PAGE }}
+            **Pixeldrain:** ${{ steps.pixeldrain.outputs.DIRECT_LINK }}
+            **Direct Download:** ${{ steps.pixeldrain.outputs.API_LINK }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
