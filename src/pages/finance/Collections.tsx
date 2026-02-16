@@ -63,7 +63,7 @@ import {
     Edit,
     ShieldAlert,
 } from "lucide-react";
-import { db, Customer, PaymentMethod, SalesRep } from "@/shared/lib/indexedDB";
+import { db, Customer, PaymentMethod, SalesRep, Supervisor } from "@/shared/lib/indexedDB";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -122,7 +122,7 @@ export default function Collections() {
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
     // Supervisors and sales reps
-    const [supervisors, setSupervisors] = useState<SalesRep[]>([]);
+    const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
     const [salesReps, setSalesReps] = useState<SalesRep[]>([]);
 
     // Edit dialog state
@@ -153,8 +153,8 @@ export default function Collections() {
         // تحميل المندوبين والمشرفين
         const allReps = await db.getAll<SalesRep>("salesReps");
         setSalesReps(allReps);
-        const supervisorReps = allReps.filter((r: any) => r.role === "supervisor" || r.isSupervisor);
-        setSupervisors(supervisorReps);
+        const allSupervisors = await db.getAll<Supervisor>("supervisors");
+        setSupervisors(allSupervisors.filter(s => s.isActive));
 
         // تحميل آخر عمليات القبض
         await loadRecentCollections();
@@ -823,7 +823,7 @@ export default function Collections() {
 
     // حذف عملية قبض
     const handleDeleteCollection = async (collection: CollectionRecord) => {
-        if (!confirm(`هل أنت متأكد من حذف عملية القبض بمبلغ ${collection.amount.toFixed(2)} ${currency} من ${collection.customerName}؟`)) {
+        if (!confirm(`هل أنت متأكد من حذف عملية القبض بمبلغ ${Number(collection.amount || 0).toFixed(2)} ${currency} من ${collection.customerName}؟`)) {
             return;
         }
         try {
@@ -1295,7 +1295,7 @@ export default function Collections() {
                                                 {collection.customerName}
                                             </TableCell>
                                             <TableCell className="text-green-600 font-bold">
-                                                {collection.amount.toFixed(2)} {currency}
+                                                {Number(collection.amount || 0).toFixed(2)} {currency}
                                             </TableCell>
                                             <TableCell>{collection.paymentMethodName}</TableCell>
                                             <TableCell className="text-muted-foreground">

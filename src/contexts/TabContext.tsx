@@ -63,6 +63,7 @@ export const pathToTabInfo: Record<string, { title: string; iconName: string }> 
     '/pos': { title: 'نقطة البيع', iconName: 'ShoppingCart' },
     '/customers': { title: 'العملاء', iconName: 'Users' },
     '/invoices': { title: 'الفواتير', iconName: 'FileText' },
+    '/quotes': { title: 'عروض الأسعار', iconName: 'FileText' },
     '/inventory': { title: 'المخزون', iconName: 'Package' },
     '/product-categories': { title: 'التصنيفات', iconName: 'FolderOpen' },
     '/suppliers': { title: 'الموردين', iconName: 'Truck' },

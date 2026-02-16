@@ -182,7 +182,7 @@ const Reports = () => {
     if (Number.isInteger(num)) {
       return `${num} ${currency}`;
     }
-    return `${num.toFixed(2)} ${currency}`;
+    return `${Number(num || 0).toFixed(2)} ${currency}`;
   };
 
   const formatDate = (date: string) =>

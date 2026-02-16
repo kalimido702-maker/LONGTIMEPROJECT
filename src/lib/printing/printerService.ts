@@ -58,7 +58,7 @@ export async function printBarcodeLabels(
           <div class="product-name">${label.productName}</div>
           <svg class="barcode" id="barcode-${barcodeIndex}"></svg>
           <div class="barcode-number">${label.barcode}</div>
-          ${options.showPrice && label.price !== undefined ? `<div class="price">${label.price.toFixed(2)} ${label.currency || 'EGP'}</div>` : ''}
+          ${options.showPrice && label.price !== undefined ? `<div class="price">${Number(label.price || 0).toFixed(2)} ${label.currency || 'EGP'}</div>` : ''}
         </div>
       `;
       barcodeIndex++;
@@ -169,8 +169,8 @@ function generateInvoiceHTML(data: InvoiceReceiptData, options: InvoiceReceiptOp
     <tr>
       <td>${item.name}</td>
       <td style="text-align: center;">${item.quantity}</td>
-      <td style="text-align: left;">${item.price.toFixed(2)}</td>
-      <td style="text-align: left;">${item.total.toFixed(2)}</td>
+      <td style="text-align: left;">${Number(item.price || 0).toFixed(2)}</td>
+      <td style="text-align: left;">${Number(item.total || 0).toFixed(2)}</td>
     </tr>
   `).join('');
 
@@ -220,23 +220,23 @@ function generateInvoiceHTML(data: InvoiceReceiptData, options: InvoiceReceiptOp
       <div class="totals">
         <div class="total-row">
           <span>المجموع الفرعي:</span>
-          <span>${subtotal.toFixed(2)} ${currency}</span>
+          <span>${Number(subtotal || 0).toFixed(2)} ${currency}</span>
         </div>
-        ${discount > 0 ? `
+        ${Number(discount) > 0 ? `
           <div class="total-row">
             <span>الخصم:</span>
-            <span style="color: red;">-${discount.toFixed(2)} ${currency}</span>
+            <span style="color: red;">-${Number(discount || 0).toFixed(2)} ${currency}</span>
           </div>
         ` : ''}
-        ${tax > 0 ? `
+        ${Number(tax) > 0 ? `
           <div class="total-row">
             <span>الضريبة:</span>
-            <span>${tax.toFixed(2)} ${currency}</span>
+            <span>${Number(tax || 0).toFixed(2)} ${currency}</span>
           </div>
         ` : ''}
         <div class="total-row final">
           <span>الإجمالي:</span>
-          <span>${total.toFixed(2)} ${currency}</span>
+          <span>${Number(total || 0).toFixed(2)} ${currency}</span>
         </div>
         ${paymentMethod ? `
           <div class="total-row">
@@ -247,13 +247,13 @@ function generateInvoiceHTML(data: InvoiceReceiptData, options: InvoiceReceiptOp
         ${paidAmount !== undefined ? `
           <div class="total-row">
             <span>المدفوع:</span>
-            <span>${paidAmount.toFixed(2)} ${currency}</span>
+            <span>${Number(paidAmount || 0).toFixed(2)} ${currency}</span>
           </div>
         ` : ''}
-        ${change !== undefined && change > 0 ? `
+        ${change !== undefined && Number(change) > 0 ? `
           <div class="total-row">
             <span>الباقي:</span>
-            <span>${change.toFixed(2)} ${currency}</span>
+            <span>${Number(change || 0).toFixed(2)} ${currency}</span>
           </div>
         ` : ''}
       </div>

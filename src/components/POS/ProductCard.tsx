@@ -71,7 +71,7 @@ export const ProductCard = ({
 
         <div className="flex items-center justify-between gap-2">
           <div className="text-2xl font-bold text-primary">
-            {price.toFixed(2)} <span className="text-sm">{currency}</span>
+            {Number(price || 0).toFixed(2)} <span className="text-sm">{currency}</span>
           </div>
           <Button
             onClick={handleAdd}

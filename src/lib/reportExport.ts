@@ -175,57 +175,110 @@ export const exportToPDF = (options: ExportOptions) => {
  * تصدير تقرير بصيغة Excel
  */
 export const exportToExcel = (options: ExportOptions) => {
-  const { title, fileName, data, columns, summary } = options;
+  const { title, subtitle, fileName, data, columns, summary } = options;
 
-  // تحويل البيانات إلى صف مناسب لـ Excel
-  const excelData = data.map((row) => {
-    const newRow: any = {};
-    columns.forEach((col) => {
-      newRow[col.header] = row[col.dataKey];
+  const colCount = columns.length;
+  const lastColLetter = String.fromCharCode(64 + colCount); // A=65, so col 1 = A
+
+  // بناء الصفوف يدوياً بالترتيب الصحيح
+  const allRows: any[][] = [];
+
+  // صف 1: العنوان الرئيسي (مدمج عبر كل الأعمدة)
+  const titleRow = [title];
+  for (let i = 1; i < colCount; i++) titleRow.push("");
+  allRows.push(titleRow);
+
+  // صف 2: العنوان الفرعي أو التاريخ
+  const now = new Date().toLocaleString("ar-EG", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const subtitleText = subtitle ? `${subtitle}  |  تاريخ الطباعة: ${now}` : `تاريخ الطباعة: ${now}`;
+  const subtitleRow = [subtitleText];
+  for (let i = 1; i < colCount; i++) subtitleRow.push("");
+  allRows.push(subtitleRow);
+
+  // صف 3: فارغ للفصل
+  allRows.push([]);
+
+  // صف 4: هيدر الجدول
+  allRows.push(columns.map((col) => col.header));
+
+  // صفوف البيانات (بداية من صف 5)
+  data.forEach((row, rowIndex) => {
+    const dataRow = columns.map((col) => {
+      const value = row[col.dataKey];
+      if (value === undefined || value === null) return "";
+      return value;
     });
-    return newRow;
+    allRows.push(dataRow);
   });
 
-  // إنشاء worksheet
-  const ws = XLSX.utils.json_to_sheet(excelData);
+  // صف فارغ قبل الملخص
+  allRows.push([]);
 
-  // إضافة عنوان في أول صف
-  XLSX.utils.sheet_add_aoa(ws, [[title]], { origin: "A1" });
-
-  // إضافة التاريخ
-  const now = new Date().toLocaleString("ar-EG");
-  XLSX.utils.sheet_add_aoa(ws, [[`تاريخ الطباعة: ${now}`]], { origin: "A2" });
-
-  // إضافة صف فارغ
-  XLSX.utils.sheet_add_aoa(ws, [[]], { origin: "A3" });
-
-  // إضافة الملخص إذا كان موجوداً
+  // صفوف الملخص
   if (summary && summary.length > 0) {
-    const summaryStartRow = data.length + 5;
-    XLSX.utils.sheet_add_aoa(ws, [["الملخص"]], {
-      origin: `A${summaryStartRow}`,
-    });
+    // صف عنوان الملخص
+    const summaryTitleRow = ["الملخص"];
+    for (let i = 1; i < colCount; i++) summaryTitleRow.push("");
+    allRows.push(summaryTitleRow);
 
-    summary.forEach((item, index) => {
-      const row = summaryStartRow + index + 1;
-      XLSX.utils.sheet_add_aoa(
-        ws,
-        [
-          [
-            item.label,
-            typeof item.value === "number" ? item.value.toFixed(2) : item.value,
-          ],
-        ],
-        { origin: `A${row}` }
-      );
+    summary.forEach((item) => {
+      const sRow: any[] = [
+        item.label,
+        typeof item.value === "number"
+          ? Number(item.value.toFixed(2))
+          : item.value,
+      ];
+      allRows.push(sRow);
     });
   }
 
-  // تنسيق الأعمدة
-  const colWidths = columns.map((col) => ({
-    wch: Math.max(col.header.length, 15),
-  }));
+  // إنشاء worksheet من المصفوفة
+  const ws = XLSX.utils.aoa_to_sheet(allRows);
+
+  // دمج خلايا العنوان (صف 1)
+  if (!ws["!merges"]) ws["!merges"] = [];
+  ws["!merges"].push({ s: { r: 0, c: 0 }, e: { r: 0, c: colCount - 1 } }); // عنوان
+  ws["!merges"].push({ s: { r: 1, c: 0 }, e: { r: 1, c: colCount - 1 } }); // تاريخ
+
+  // دمج عنوان الملخص
+  if (summary && summary.length > 0) {
+    const summaryTitleRowIndex = data.length + 4; // +4 = title + subtitle + empty + header rows, then +1 empty
+    ws["!merges"].push({
+      s: { r: summaryTitleRowIndex, c: 0 },
+      e: { r: summaryTitleRowIndex, c: colCount - 1 },
+    });
+  }
+
+  // تنسيق عرض الأعمدة بشكل ذكي
+  const colWidths = columns.map((col, colIndex) => {
+    // حساب أقصى عرض بناءً على البيانات الفعلية
+    let maxLen = col.header.length;
+    data.forEach((row) => {
+      const val = row[col.dataKey];
+      if (val !== undefined && val !== null) {
+        const strVal = typeof val === "number"
+          ? val.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          : String(val);
+        maxLen = Math.max(maxLen, strVal.length);
+      }
+    });
+    return { wch: Math.max(maxLen + 4, 14) }; // +4 padding, minimum 14
+  });
   ws["!cols"] = colWidths;
+
+  // تنسيق ارتفاع الصفوف
+  ws["!rows"] = [
+    { hpt: 30 },  // صف العنوان - أطول
+    { hpt: 22 },  // صف التاريخ
+    { hpt: 10 },  // صف فارغ
+    { hpt: 24 },  // صف الهيدر - أطول
+  ];
 
   // إنشاء workbook
   const wb = XLSX.utils.book_new();

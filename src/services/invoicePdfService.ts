@@ -71,9 +71,11 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
     const logoBase64 = await loadLogoBase64();
     const qrCodeBase64 = await generateQRCode();
 
-    const formatNum = (num: number | undefined | null, minDecimals = 0, maxDecimals = 2): string => {
-        if (num === undefined || num === null) return "";
-        return (num).toLocaleString("en-US", {
+    const formatNum = (num: number | string | undefined | null, minDecimals = 0, maxDecimals = 2): string => {
+        if (num === undefined || num === null || num === "") return "";
+        const n = Number(num);
+        if (isNaN(n)) return "0";
+        return n.toLocaleString("en-US", {
             minimumFractionDigits: minDecimals,
             maximumFractionDigits: maxDecimals
         });
@@ -412,14 +414,14 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
                     <span class="amount">${formatNum(data.total, 0, 0)}</span>
                 </div>
                 
-                ${(data.discount && data.discount > 0) ? `
+                ${(data.discount && Number(data.discount) > 0) ? `
                 <div class="total-row">
                     <span>الخصم</span>
                     <span class="amount">${formatNum(data.discount, 0, 0)}</span>
                 </div>
                 <div class="total-row">
                     <span>الإجمالي بعد الخصم</span>
-                    <span class="amount">${formatNum(data.total - data.discount, 0, 0)}</span>
+                    <span class="amount">${formatNum(Number(data.total || 0) - Number(data.discount || 0), 0, 0)}</span>
                 </div>
                 ` : ''}
                 
@@ -559,10 +561,12 @@ export function convertToPDFData(
     items: any[],
     salesRep?: any
 ): InvoicePDFData {
-    const invoiceTotal = invoice.total || 0;
-    const invoiceDiscount = invoice.discount || invoice.discountAmount || 0;
-    const prevBalance = customer?.currentBalance !== undefined ? (customer.currentBalance - invoiceTotal + (invoice.paidAmount || 0)) : undefined;
-    const currBalance = customer?.currentBalance !== undefined ? customer.currentBalance : undefined;
+    const invoiceTotal = Number(invoice.total) || 0;
+    const invoiceDiscount = Number(invoice.discount || invoice.discountAmount) || 0;
+    const invoicePaid = Number(invoice.paidAmount) || 0;
+    const customerBalance = customer?.currentBalance !== undefined ? Number(customer.currentBalance) : undefined;
+    const prevBalance = customerBalance !== undefined ? (customerBalance - invoiceTotal + invoicePaid) : undefined;
+    const currBalance = customerBalance;
 
     return {
         id: invoice.id || "",
@@ -572,16 +576,16 @@ export function convertToPDFData(
         customerAddress: customer?.address || "",
         salesRepName: salesRep?.name,
         items: (items || []).map((item) => {
-            const qty = item.quantity || 0;
-            const price = item.price || item.unitPrice || 0;
-            const total = item.total || (qty * price);
+            const qty = Number(item.quantity) || 0;
+            const price = Number(item.price || item.unitPrice) || 0;
+            const total = Number(item.total) || (qty * price);
             return {
                 productName: item.productName || item.name || "-",
                 productCode: item.productCode || item.sku || item.barcode || "-",
                 quantity: qty,
                 price: price,
                 total: total,
-                unitsPerCarton: item.unitsPerCarton,
+                unitsPerCarton: item.unitsPerCarton ? Number(item.unitsPerCarton) : undefined,
             };
         }),
         total: invoiceTotal,

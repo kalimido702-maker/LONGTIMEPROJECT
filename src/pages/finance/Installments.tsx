@@ -187,7 +187,7 @@ export default function Installments() {
                     إجمالي المتبقي
                   </p>
                   <p className="text-2xl font-bold">
-                    {getTotalPending().toFixed(2)} ر.س
+                    {Number(getTotalPending() || 0).toFixed(2)} ر.س
                   </p>
                 </div>
                 <Calendar className="h-8 w-8 text-primary" />
@@ -198,7 +198,7 @@ export default function Installments() {
                 <div>
                   <p className="text-sm text-muted-foreground">المتأخرات</p>
                   <p className="text-2xl font-bold text-destructive">
-                    {getTotalOverdue().toFixed(2)} ر.س
+                    {Number(getTotalOverdue() || 0).toFixed(2)} ر.س
                   </p>
                 </div>
                 <XCircle className="h-8 w-8 text-destructive" />
@@ -236,10 +236,10 @@ export default function Installments() {
                       {invoice.id.slice(0, 8)}
                     </TableCell>
                     <TableCell>{invoice.customerName || "غير محدد"}</TableCell>
-                    <TableCell>{invoice.total.toFixed(2)} ر.س</TableCell>
-                    <TableCell>{invoice.paidAmount.toFixed(2)} ر.س</TableCell>
+                    <TableCell>{Number(invoice.total || 0).toFixed(2)} ر.س</TableCell>
+                    <TableCell>{Number(invoice.paidAmount || 0).toFixed(2)} ر.س</TableCell>
                     <TableCell className="text-destructive font-semibold">
-                      {invoice.remainingAmount.toFixed(2)} ر.س
+                      {Number(invoice.remainingAmount || 0).toFixed(2)} ر.س
                     </TableCell>
                     <TableCell>
                       {
@@ -320,7 +320,7 @@ export default function Installments() {
                         المبلغ الإجمالي
                       </p>
                       <p className="font-semibold">
-                        {selectedInvoice.total.toFixed(2)} ر.س
+                        {Number(selectedInvoice.total || 0).toFixed(2)} ر.س
                       </p>
                     </div>
                     <div>
@@ -378,7 +378,7 @@ export default function Installments() {
                                 )}
                               </TableCell>
                               <TableCell>
-                                {payment.amount.toFixed(2)} ر.س
+                                {Number(payment.amount || 0).toFixed(2)} ر.س
                               </TableCell>
                               <TableCell>
                                 <Badge

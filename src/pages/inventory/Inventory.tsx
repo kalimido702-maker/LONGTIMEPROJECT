@@ -762,16 +762,17 @@ const Inventory = () => {
     let lowStock = 0;
 
     products.forEach((product) => {
-      const cost = (product.costPrice || 0) * product.stock;
+      const cost = Number(product.costPrice || 0) * Number(product.stock || 0);
       totalCost += cost;
 
       const defaultPriceType = priceTypes.find((pt) => pt.isDefault);
       const priceTypeId = product.defaultPriceTypeId || defaultPriceType?.id;
-      const sellPrice =
+      const sellPrice = Number(
         priceTypeId && product.prices?.[priceTypeId]
           ? product.prices[priceTypeId]
-          : product.price || 0;
-      totalValue += sellPrice * product.stock;
+          : product.price || 0
+      );
+      totalValue += sellPrice * Number(product.stock || 0);
 
       itemsCount++;
       if (product.stock === 0) outOfStock++;
@@ -1073,7 +1074,7 @@ const Inventory = () => {
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">التكلفة:</span>
                     <span className="font-medium">
-                      {(product.costPrice || 0).toFixed(2)} {currency}
+                      {Number(product.costPrice || 0).toFixed(2)} {currency}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -1089,7 +1090,7 @@ const Inventory = () => {
                           priceTypeId && product.prices?.[priceTypeId]
                             ? product.prices[priceTypeId]
                             : product.price || 0;
-                        return `${displayPrice.toFixed(2)} ${currency}`;
+                        return `${Number(displayPrice).toFixed(2)} ${currency}`;
                       })()}
                     </span>
                   </div>

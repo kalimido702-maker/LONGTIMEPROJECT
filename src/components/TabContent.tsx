@@ -13,6 +13,7 @@ const Home = lazy(() => import('@/pages/Home'));
 const Restaurant = lazy(() => import('@/pages/pos/Restaurant'));
 const Customers = lazy(() => import('@/pages/sales/Customers'));
 const Invoices = lazy(() => import('@/pages/sales/Invoices'));
+const Quotes = lazy(() => import('@/pages/sales/Quotes'));
 const SalesReturns = lazy(() => import('@/pages/sales/SalesReturns'));
 const Promotions = lazy(() => import('@/pages/sales/Promotions'));
 const Suppliers = lazy(() => import('@/pages/purchases/Suppliers'));
@@ -55,6 +56,7 @@ const pathToComponent: Record<string, React.ComponentType> = {
     '/restaurant': Restaurant,
     '/customers': Customers,
     '/invoices': Invoices,
+    '/quotes': Quotes,
     '/sales-returns': SalesReturns,
     '/promotions': Promotions,
     '/suppliers': Suppliers,

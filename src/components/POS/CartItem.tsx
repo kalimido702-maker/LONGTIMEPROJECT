@@ -37,7 +37,7 @@ export const CartItem = ({
   onRemove,
   onPriceTypeChange,
 }: CartItemProps) => {
-  const total = price * quantity;
+  const total = Number(price || 0) * Number(quantity || 0);
   const { getSetting } = useSettingsContext();
 
   const currency = getSetting("currency") || "EGP";
@@ -48,7 +48,7 @@ export const CartItem = ({
         <div className="flex-1 min-w-0">
           <h4 className="font-semibold text-sm truncate">{nameAr}</h4>
           <p className="text-xs text-muted-foreground">
-            {price.toFixed(2)} {currency} × {quantity}
+            {Number(price || 0).toFixed(2)} {currency} × {quantity}
             {unitName && <span className="mr-1">({unitName})</span>}
           </p>
         </div>
@@ -102,7 +102,7 @@ export const CartItem = ({
             <SelectContent>
               {priceTypes.map((pt) => (
                 <SelectItem key={pt.id} value={pt.id} className="text-xs">
-                  {pt.name} - {prices[pt.id]?.toFixed(2) || "0.00"} {currency}
+                  {pt.name} - {Number(prices[pt.id] || 0).toFixed(2)} {currency}
                 </SelectItem>
               ))}
             </SelectContent>

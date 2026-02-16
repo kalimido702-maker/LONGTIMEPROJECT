@@ -87,6 +87,7 @@ const POSv2 = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const editingInvoiceId = searchParams.get("invoiceId"); // Check for edit mode
+  const fromQuote = searchParams.get("fromQuote"); // Check if loading from quote
 
 
   // States
@@ -297,6 +298,13 @@ const POSv2 = () => {
     }
   }, [editingInvoiceId, products, customers]);
 
+  // Load quote data if navigated from Quotes page
+  useEffect(() => {
+    if (fromQuote && products.length > 0 && customers.length > 0) {
+      loadFromQuote();
+    }
+  }, [fromQuote, products, customers]);
+
   // Auto-set delivery status for return invoices
   useEffect(() => {
     if (mode === "return") {
@@ -351,6 +359,26 @@ const POSv2 = () => {
       setDiscountAmount(invoice.discount?.toString() || "");
       // If tax was included/calculated, might need logic. Assuming defaults for now or invoice.tax
 
+      // Load notes
+      if (invoice.notes) {
+        setInvoiceNotes(invoice.notes);
+      }
+
+      // Load delivery status
+      if (invoice.deliveryStatus) {
+        setDeliveryStatus(invoice.deliveryStatus);
+      }
+
+      // Load warehouse
+      if (invoice.warehouseId) {
+        setSelectedWarehouseId(invoice.warehouseId);
+      }
+
+      // Load paid amount
+      if (invoice.paidAmount) {
+        setPaidAmount(invoice.paidAmount.toString());
+      }
+
       // Keep original date if needed
       if (invoice.createdAt) {
         setInvoiceDate(new Date(invoice.createdAt).toISOString().split('T')[0]);
@@ -360,6 +388,69 @@ const POSv2 = () => {
     } catch (e) {
       console.error("Error loading invoice:", e);
       toast({ title: "خطأ في تحميل بيانات الفاتورة", variant: "destructive" });
+    }
+  };
+
+  // Load quote data from sessionStorage (when creating invoice from quote)
+  const loadFromQuote = () => {
+    try {
+      const raw = sessionStorage.getItem("pos-quote-data");
+      if (!raw) return;
+
+      const quote = JSON.parse(raw);
+      sessionStorage.removeItem("pos-quote-data"); // Clean up
+
+      // Set customer
+      if (quote.customerId && quote.customerId !== "cash") {
+        const customer = customers.find((c) => c.id === quote.customerId);
+        if (customer) setSelectedCustomer(customer.id);
+      }
+
+      // Set cart items
+      if (quote.items && quote.items.length > 0) {
+        const items: CartItem[] = quote.items.map((item: any) => ({
+          id: item.id,
+          name: item.name || "",
+          nameAr: item.nameAr || "",
+          price: item.price,
+          stock: item.stock || 0,
+          quantity: item.quantity,
+          customPrice: item.customPrice,
+          priceTypeId: item.priceTypeId,
+          priceTypeName: item.priceTypeName,
+          unitId: item.unitId,
+          unitName: item.unitName,
+          productUnitId: item.productUnitId,
+          conversionFactor: item.conversionFactor,
+          selectedUnitName: item.selectedUnitName,
+          prices: item.prices,
+        }));
+        setCartItems(items);
+      }
+
+      // Set discount
+      if (quote.discountPercent) {
+        setDiscountPercent(quote.discountPercent);
+        setDiscountAmount("");
+      } else if (quote.discountAmount) {
+        setDiscountAmount(quote.discountAmount);
+        setDiscountPercent("");
+      }
+
+      // Set price type
+      if (quote.selectedPriceTypeId) {
+        setSelectedPriceTypeId(quote.selectedPriceTypeId);
+      }
+
+      // Set warehouse
+      if (quote.selectedWarehouseId) {
+        setSelectedWarehouseId(quote.selectedWarehouseId);
+      }
+
+      toast({ title: "تم تحميل بيانات عرض السعر" });
+    } catch (e) {
+      console.error("Error loading quote data:", e);
+      toast({ title: "خطأ في تحميل بيانات عرض السعر", variant: "destructive" });
     }
   };
 
@@ -806,6 +897,7 @@ const POSv2 = () => {
 
     try {
       const { generateInvoiceHTML } = await import("@/services/invoicePdfService");
+      const { saveQuoteToStorage } = await import("@/pages/sales/Quotes");
       const allProducts = await db.getAll("products");
 
       const customerData = selectedCustomer !== "cash"
@@ -836,11 +928,46 @@ const POSv2 = () => {
         items: items,
         total: total,
         discount: discount > 0 ? discount : undefined,
-        previousBalance: customerData?.currentBalance,
+        previousBalance: customerData?.currentBalance, // الرصيد السابق بدون قيمة عرض السعر
         currentBalance: undefined, // لا يتجمع مع عرض السعر
         isReturn: false,
         isQuote: true,
       };
+
+      // Save quote to log
+      saveQuoteToStorage({
+        id: Date.now().toString(),
+        quoteNumber,
+        customerId: selectedCustomer,
+        customerName: customerData?.name || "عميل",
+        items: cartItems.map((item) => ({
+          id: item.id,
+          name: item.name,
+          nameAr: item.nameAr,
+          price: item.price,
+          quantity: item.quantity,
+          customPrice: item.customPrice,
+          priceTypeId: item.priceTypeId,
+          priceTypeName: item.priceTypeName,
+          unitId: item.unitId,
+          unitName: item.unitName,
+          productUnitId: item.productUnitId,
+          conversionFactor: item.conversionFactor,
+          selectedUnitName: item.selectedUnitName,
+          stock: item.stock,
+          prices: item.prices,
+        })),
+        subtotal,
+        discount,
+        discountPercent,
+        discountAmount,
+        tax,
+        total,
+        createdAt: new Date().toISOString(),
+        notes: invoiceNotes || undefined,
+        selectedPriceTypeId,
+        selectedWarehouseId,
+      });
 
       // Generate HTML using invoice template
       let html = await generateInvoiceHTML(pdfData as any);
@@ -858,6 +985,8 @@ const POSv2 = () => {
           printWindow.print();
         };
       }
+
+      toast({ title: "تم حفظ عرض السعر في السجل" });
     } catch (error) {
       console.error("Error generating quote:", error);
       toast({ title: "حدث خطأ أثناء إنشاء عرض السعر", variant: "destructive" });
@@ -2449,9 +2578,9 @@ const POSv2 = () => {
           {productForQuantity && (() => {
             // Calculate correct price using same logic as product cards
             const priceTypeId = selectedPriceTypeId || (priceTypes.find((pt) => pt.isDefault) || priceTypes[0])?.id || "";
-            const displayPrice = priceTypeId && productForQuantity.prices?.[priceTypeId]
+            const displayPrice = Number(priceTypeId && productForQuantity.prices?.[priceTypeId]
               ? productForQuantity.prices[priceTypeId]
-              : productForQuantity.price || 0;
+              : productForQuantity.price) || 0;
 
             return (
               <div className="space-y-4">

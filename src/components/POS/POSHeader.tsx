@@ -66,6 +66,7 @@ export const POSHeader = () => {
     "/": "pos",
     "/customers": "customers",
     "/invoices": "invoices",
+    "/quotes": "invoices",
     "/reports": "reports",
     "/inventory": "inventory",
     "/product-categories": "categories",
@@ -205,6 +206,12 @@ export const POSHeader = () => {
           name: "سجل الفواتير",
           icon: FileText,
           path: "/invoices",
+          check: () => can("invoices", "view"),
+        },
+        {
+          name: "سجل عروض الأسعار",
+          icon: FileText,
+          path: "/quotes",
           check: () => can("invoices", "view"),
         },
         {
@@ -654,7 +661,7 @@ export const POSHeader = () => {
                       إجمالي المبيعات
                     </p>
                     <p className="text-2xl font-bold text-green-600">
-                      {dailySummary.totalSales.toFixed(2)} جنيه
+                      {Number(dailySummary.totalSales || 0).toFixed(2)} جنيه
                     </p>
                   </div>
                 </div>
@@ -675,7 +682,7 @@ export const POSHeader = () => {
                             className="flex justify-between items-center bg-white p-2 rounded"
                           >
                             <span className="text-sm">{data.name}</span>
-                            <strong>{data.amount.toFixed(2)} جنيه</strong>
+                            <strong>{Number(data.amount || 0).toFixed(2)} جنيه</strong>
                           </div>
                         )
                     )}
@@ -689,7 +696,7 @@ export const POSHeader = () => {
                     📤 المصروفات
                   </h3>
                   <p className="text-xl font-bold text-red-600">
-                    {dailySummary.totalExpenses.toFixed(2)} جنيه
+                    {Number(dailySummary.totalExpenses || 0).toFixed(2)} جنيه
                   </p>
                 </div>
                 <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
@@ -697,7 +704,7 @@ export const POSHeader = () => {
                     ↩️ المرتجعات
                   </h3>
                   <p className="text-xl font-bold text-orange-600">
-                    {dailySummary.totalReturns.toFixed(2)} جنيه
+                    {Number(dailySummary.totalReturns || 0).toFixed(2)} جنيه
                   </p>
                 </div>
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
@@ -739,7 +746,7 @@ export const POSHeader = () => {
                     : "text-red-600"
                     }`}
                 >
-                  {dailySummary.netProfit.toFixed(2)} جنيه
+                  {Number(dailySummary.netProfit || 0).toFixed(2)} جنيه
                 </p>
                 <p className="text-xs text-center text-muted-foreground mt-2">
                   (المبيعات - المصروفات - المرتجعات - الآجل غير المحصّل)

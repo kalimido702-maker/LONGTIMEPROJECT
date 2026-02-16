@@ -203,16 +203,16 @@ export const CustomerDetailsDialog = ({
                             </Card>
                             <Card className="p-3 text-center">
                                 <p className="text-xs text-muted-foreground">إجمالي المشتريات</p>
-                                <p className="text-2xl font-bold text-blue-600">{totalPurchases.toFixed(2)}</p>
+                                <p className="text-2xl font-bold text-blue-600">{Number(totalPurchases || 0).toFixed(2)}</p>
                             </Card>
                             <Card className="p-3 text-center">
                                 <p className="text-xs text-muted-foreground">إجمالي المدفوع</p>
-                                <p className="text-2xl font-bold text-green-600">{totalPaid.toFixed(2)}</p>
+                                <p className="text-2xl font-bold text-green-600">{Number(totalPaid || 0).toFixed(2)}</p>
                             </Card>
                             <Card className="p-3 text-center">
                                 <p className="text-xs text-muted-foreground">الرصيد المستحق</p>
                                 <p className={`text-2xl font-bold ${totalRemaining > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                    {totalRemaining.toFixed(2)}
+                                    {Number(totalRemaining || 0).toFixed(2)}
                                 </p>
                             </Card>
                         </div>
@@ -230,7 +230,7 @@ export const CustomerDetailsDialog = ({
                                             <div className="flex justify-between items-center">
                                                 <div>
                                                     <p className="font-semibold text-green-700">
-                                                        {payment.amount.toFixed(2)} {currency}
+                                                        {Number(payment.amount || 0).toFixed(2)} {currency}
                                                     </p>
                                                     <p className="text-xs text-muted-foreground">
                                                         {payment.paymentMethodName} - {formatDate(payment.createdAt)}
@@ -296,7 +296,7 @@ export const CustomerDetailsDialog = ({
                                                                 {getPaymentTypeBadge(invoice)}
                                                                 {getStatusBadge(invoice)}
                                                                 <span className="font-bold text-lg">
-                                                                    {invoice.total.toFixed(2)} {currency}
+                                                                    {Number(invoice.total || 0).toFixed(2)} {currency}
                                                                 </span>
                                                             </div>
                                                         </div>
@@ -321,7 +321,7 @@ export const CustomerDetailsDialog = ({
                                                                             {item.productName} x {item.quantity}
                                                                         </span>
                                                                         <span className="font-semibold">
-                                                                            {item.total?.toFixed(2)} {currency}
+                                                                            {Number(item.total || 0).toFixed(2)} {currency}
                                                                         </span>
                                                                     </div>
                                                                 ))}
@@ -360,19 +360,19 @@ export const CustomerDetailsDialog = ({
                                                                 <div className="space-y-1 text-sm">
                                                                     <div className="flex justify-between bg-white dark:bg-slate-900 p-2 rounded">
                                                                         <span>الإجمالي</span>
-                                                                        <span className="font-semibold">{invoice.total?.toFixed(2)} {currency}</span>
+                                                                        <span className="font-semibold">{Number(invoice.total || 0).toFixed(2)} {currency}</span>
                                                                     </div>
                                                                     <div className="flex justify-between bg-green-50 dark:bg-green-950/30 p-2 rounded">
                                                                         <span>المدفوع</span>
                                                                         <span className="font-semibold text-green-600">
-                                                                            {invoice.paidAmount?.toFixed(2)} {currency}
+                                                                            {Number(invoice.paidAmount || 0).toFixed(2)} {currency}
                                                                         </span>
                                                                     </div>
                                                                     {invoice.remainingAmount > 0 && (
                                                                         <div className="flex justify-between bg-red-50 dark:bg-red-950/30 p-2 rounded">
                                                                             <span>المتبقي</span>
                                                                             <span className="font-semibold text-red-600">
-                                                                                {invoice.remainingAmount?.toFixed(2)} {currency}
+                                                                                {Number(invoice.remainingAmount || 0).toFixed(2)} {currency}
                                                                             </span>
                                                                         </div>
                                                                     )}

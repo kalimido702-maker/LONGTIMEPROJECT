@@ -221,7 +221,7 @@ const Suppliers = () => {
                               : "text-green-600"
                             }`}
                         >
-                          {supplier.balance.toFixed(2)} {currency}
+                          {Number(supplier.balance || 0).toFixed(2)} {currency}
                         </span>
                       </div>
                       <div className="flex justify-between text-sm">
@@ -490,7 +490,7 @@ const Suppliers = () => {
                       الرصيد المستحق
                     </Label>
                     <p className="text-2xl font-bold text-red-600">
-                      {selectedSupplier.balance.toFixed(2)} {currency}
+                      {Number(selectedSupplier.balance || 0).toFixed(2)} {currency}
                     </p>
                   </Card>
                   <Card className="p-4">
@@ -574,15 +574,15 @@ const Suppliers = () => {
                               </div>
                               <div className="text-left">
                                 <p className="text-xl font-bold text-blue-600">
-                                  {purchase.total.toFixed(2)} {currency}
+                                  {Number(purchase.total || 0).toFixed(2)} {currency}
                                 </p>
                                 <p className="text-sm text-green-600">
-                                  مدفوع: {purchase.paidAmount.toFixed(2)}{" "}
+                                  مدفوع: {Number(purchase.paidAmount || 0).toFixed(2)}{" "}
                                   {currency}
                                 </p>
-                                {purchase.remainingAmount > 0 && (
+                                {Number(purchase.remainingAmount || 0) > 0 && (
                                   <p className="text-sm text-red-600 font-semibold">
-                                    متبقي: {purchase.remainingAmount.toFixed(2)}{" "}
+                                    متبقي: {Number(purchase.remainingAmount || 0).toFixed(2)}{" "}
                                     {currency}
                                   </p>
                                 )}

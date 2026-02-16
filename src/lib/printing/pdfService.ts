@@ -45,8 +45,8 @@ function generatePDFHTML(data: InvoiceReceiptData, options: InvoiceReceiptOption
 
   // Calculate current balance if not provided
   const calcCurrentBalance = currentBalance !== undefined
-    ? currentBalance
-    : previousBalance + total - (paidAmount || 0);
+    ? Number(currentBalance)
+    : Number(previousBalance || 0) + Number(total || 0) - Number(paidAmount || 0);
 
   // Format invoice number to 6 digits
   const formattedInvoiceNumber = invoiceNumber.toString().padStart(6, '0');
@@ -370,33 +370,33 @@ function generatePDFHTML(data: InvoiceReceiptData, options: InvoiceReceiptOption
           <div class="summary-section">
             <div class="summary-row">
               <span class="summary-label">المجموع:</span>
-              <span class="summary-value">${Math.round(subtotal)} ${currency}</span>
+              <span class="summary-value">${Math.round(Number(subtotal) || 0)} ${currency}</span>
             </div>
-            ${discount > 0 ? `
+            ${Number(discount) > 0 ? `
             <div class="summary-row">
               <span class="summary-label">الخصم:</span>
-              <span class="summary-value" style="color: #dc2626;">-${Math.round(discount)} ${currency}</span>
+              <span class="summary-value" style="color: #dc2626;">-${Math.round(Number(discount) || 0)} ${currency}</span>
             </div>
             ` : ''}
-            ${tax > 0 ? `
+            ${Number(tax) > 0 ? `
             <div class="summary-row">
               <span class="summary-label">الضريبة:</span>
-              <span class="summary-value">${Math.round(tax)} ${currency}</span>
+              <span class="summary-value">${Math.round(Number(tax) || 0)} ${currency}</span>
             </div>
             ` : ''}
             <div class="summary-row total">
               <span>الإجمالي:</span>
-              <span>${Math.round(total)} ${currency}</span>
+              <span>${Math.round(Number(total) || 0)} ${currency}</span>
             </div>
             ${previousBalance !== undefined && previousBalance !== 0 ? `
             <div class="summary-row balance previous">
               <span class="summary-label">الرصيد السابق:</span>
-              <span class="summary-value">${Math.round(previousBalance)} ${currency}</span>
+              <span class="summary-value">${Math.round(Number(previousBalance) || 0)} ${currency}</span>
             </div>
             ` : ''}
             <div class="summary-row balance current">
               <span class="summary-label">الرصيد الحالي:</span>
-              <span class="summary-value">${Math.round(calcCurrentBalance)} ${currency}</span>
+              <span class="summary-value">${Math.round(Number(calcCurrentBalance) || 0)} ${currency}</span>
             </div>
           </div>
         </div>

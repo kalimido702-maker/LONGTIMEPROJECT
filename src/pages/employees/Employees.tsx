@@ -456,14 +456,14 @@ const Employees = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredEmployees.map((employee) => {
             const daysUntilSalary = getDaysUntilSalary(employee.salaryDay || 1);
-            const fixedDeductions = employee.deductions || 0;
+            const fixedDeductions = Number(employee.deductions || 0);
 
             // حساب خصومات السلف الشهرية للموظف
             const advanceDeductions = advances
               .filter(
                 (a) => a.employeeId === employee.id && a.status === "approved"
               )
-              .reduce((sum, a) => sum + (a.amount || 0), 0);
+              .reduce((sum, a) => sum + Number(a.amount || 0), 0);
 
             // حساب الخصومات النشطة للموظف من جدول employeeDeductions
             // الخصومات الثابتة: فقط active
@@ -507,7 +507,7 @@ const Employees = () => {
             );
 
             const activeDeductions = employeeActiveDeductions.reduce(
-              (sum, d) => sum + d.amount,
+              (sum, d) => sum + Number(d.amount || 0),
               0
             );
 
@@ -517,7 +517,7 @@ const Employees = () => {
 
             const totalDeductions =
               fixedDeductions + advanceDeductions + activeDeductions;
-            const netSalary = employee.salary - totalDeductions;
+            const netSalary = Number(employee.salary || 0) - totalDeductions;
 
             return (
               <Card key={employee.id} className="p-4">
@@ -578,7 +578,7 @@ const Employees = () => {
                           الراتب الإجمالي:
                         </span>
                         <span className="font-semibold text-primary">
-                          {employee.salary.toFixed(2)} {currency}
+                          {Number(employee.salary || 0).toFixed(2)} {currency}
                         </span>
                       </div>
                       {fixedDeductions > 0 && (
@@ -621,7 +621,7 @@ const Employees = () => {
                                 • {d.reason}
                                 {d.type === "oneTime" && " (مرة واحدة)"}
                               </span>
-                              <span>- {d.amount.toFixed(2)}</span>
+                              <span>- {Number(d.amount || 0).toFixed(2)}</span>
                             </div>
                           ))}
                         </div>

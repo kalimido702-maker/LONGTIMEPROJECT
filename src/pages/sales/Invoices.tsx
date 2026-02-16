@@ -1117,9 +1117,9 @@ export default function Invoices() {
                                         <div className="flex justify-between items-center mt-2 pt-2 border-t border-orange-200 dark:border-orange-800">
                                             <span className="font-semibold text-green-700 dark:text-green-300">الصافي بعد المرتجعات:</span>
                                             <span className="font-bold text-green-700 dark:text-green-300">
-                                                {Math.round(selectedInvoice.total - selectedInvoice.items.reduce((sum, item) => {
-                                                    const returnedQty = item.returnedQuantity || 0;
-                                                    return sum + (returnedQty * item.price);
+                                                {Math.round(Number(selectedInvoice.total || 0) - selectedInvoice.items.reduce((sum, item) => {
+                                                    const returnedQty = Number(item.returnedQuantity || 0);
+                                                    return sum + (returnedQty * Number(item.price || 0));
                                                 }, 0))} {currency}
                                             </span>
                                         </div>
@@ -1196,6 +1196,17 @@ export default function Invoices() {
                                     </div>
                                 )}
                             </div>
+
+                            {/* Notes */}
+                            {selectedInvoice.notes && (
+                                <div className="border-t pt-4">
+                                    <h3 className="font-semibold mb-2 flex items-center gap-2">
+                                        <FileText className="h-5 w-5" />
+                                        ملاحظات
+                                    </h3>
+                                    <p className="text-sm bg-muted/30 p-3 rounded-lg">{selectedInvoice.notes}</p>
+                                </div>
+                            )}
 
                             {/* Actions */}
                             <div className="flex gap-2 justify-end border-t pt-4 flex-wrap">

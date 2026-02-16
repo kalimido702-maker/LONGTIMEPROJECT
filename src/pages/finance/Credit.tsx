@@ -477,7 +477,7 @@ export default function Credit() {
                             إجمالي الدين:
                           </span>
                           <span className="font-bold text-destructive">
-                            {totalDebt.toFixed(2)} جنيه
+                            {Number(totalDebt || 0).toFixed(2)} جنيه
                           </span>
                         </div>
                         {can("credit", "edit") && (
@@ -678,12 +678,12 @@ export default function Credit() {
                           "غير محدد"
                         )}
                       </TableCell>
-                      <TableCell>{invoice.total.toFixed(2)} جنيه</TableCell>
+                      <TableCell>{Number(invoice.total || 0).toFixed(2)} جنيه</TableCell>
                       <TableCell>
-                        {invoice.paidAmount.toFixed(2)} جنيه
+                        {Number(invoice.paidAmount || 0).toFixed(2)} جنيه
                       </TableCell>
                       <TableCell className="text-destructive font-semibold">
-                        {invoice.remainingAmount.toFixed(2)} جنيه
+                        {Number(invoice.remainingAmount || 0).toFixed(2)} جنيه
                       </TableCell>
                       <TableCell>
                         <Badge
@@ -764,7 +764,7 @@ export default function Credit() {
                         المبلغ المتبقي
                       </p>
                       <p className="font-semibold text-destructive">
-                        {selectedInvoice.remainingAmount.toFixed(2)} جنيه
+                        {Number(selectedInvoice.remainingAmount || 0).toFixed(2)} جنيه
                       </p>
                     </div>
                     <div>
@@ -772,7 +772,7 @@ export default function Credit() {
                         المبلغ المدفوع
                       </p>
                       <p className="font-semibold">
-                        {selectedInvoice.paidAmount.toFixed(2)} جنيه
+                        {Number(selectedInvoice.paidAmount || 0).toFixed(2)} جنيه
                       </p>
                     </div>
                   </div>

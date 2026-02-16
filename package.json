@@ -118,7 +118,7 @@
   },
   "build": {
     "appId": "com.masrpos.app.custom",
-    "productName": "Mahaly | محلي",
+    "productName": "Long time | لونج تايم",
     "publish": {
       "provider": "generic",
       "url": "http://localhost:3030/api/updates"

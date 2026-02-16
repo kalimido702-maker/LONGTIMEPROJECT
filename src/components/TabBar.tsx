@@ -33,6 +33,7 @@ const menuGroups = [
             { path: '/', permission: 'invoices', name: 'نقطة البيع' },
             { path: '/customers', permission: 'customers', name: 'العملاء' },
             { path: '/invoices', permission: 'invoices', name: 'سجل الفواتير' },
+            { path: '/quotes', permission: 'invoices', name: 'سجل عروض الأسعار' },
             { path: '/reports', permission: 'reports', name: 'التقارير' },
             { path: '/sales-rep-report', permission: 'reports', name: 'مبيعات المندوبين' },
         ],
