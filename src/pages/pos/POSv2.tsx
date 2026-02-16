@@ -1410,7 +1410,7 @@ const POSv2 = () => {
         try {
           const { printInvoice, convertToPDFData } = await import("@/services/invoicePdfService");
           const cust = customers.find(c => c.id === invoice.customerId) || { name: getCustomerName(invoice.customerId) };
-          const pdfData = convertToPDFData(invoice, cust, invoice.items, { name: user.name });
+          const pdfData = await convertToPDFData(invoice, cust, invoice.items, { name: user.name });
           await printInvoice(pdfData);
         } catch (error) {
           console.error("Print error:", error);
@@ -1483,7 +1483,7 @@ const POSv2 = () => {
       const rep = customer.salesRepId ? salesReps.find(r => r.id === customer.salesRepId) : null;
 
       // Convert to PDF data format
-      const pdfData = convertToPDFData(
+      const pdfData = await convertToPDFData(
         savedInvoiceForWhatsApp,
         customer,
         items,
@@ -1635,7 +1635,7 @@ const POSv2 = () => {
       const items = savedInvoiceForWhatsApp.items || [];
 
       // Convert to PDF data format
-      const pdfData = convertToPDFData(
+      const pdfData = await convertToPDFData(
         savedInvoiceForWhatsApp,
         customer,
         items,

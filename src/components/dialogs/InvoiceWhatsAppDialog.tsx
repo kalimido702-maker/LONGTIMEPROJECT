@@ -174,7 +174,7 @@ export const InvoiceWhatsAppDialog = ({
                 });
 
                 // Prepare PDF Data
-                const pdfData = convertToPDFData(
+                const pdfData = await convertToPDFData(
                     inv,
                     customer || { name: inv.customerName } as any,
                     enrichedItems,

@@ -379,7 +379,7 @@ export default function Invoices() {
             });
 
             const rep = customer.salesRepId ? allReps.find(r => r.id === customer.salesRepId) : null;
-            const pdfData = convertToPDFData(invoice, customer, items, rep || undefined);
+            const pdfData = await convertToPDFData(invoice, customer, items, rep || undefined);
 
             toast.info("🖨️ جاري توليد PDF...");
             const pdfBlob = await generateInvoicePDF(pdfData);
@@ -455,7 +455,7 @@ export default function Invoices() {
             const customer = customers.find(c => c.id === invoice.customerId) || { name: invoice.customerName || "عميل" };
 
             // تحويل البيانات للتنسيق الجديد
-            const pdfData = convertToPDFData(
+            const pdfData = await convertToPDFData(
                 invoice,
                 customer,
                 invoice.items || [],

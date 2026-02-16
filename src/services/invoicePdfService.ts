@@ -554,19 +554,129 @@ export async function printInvoice(data: InvoicePDFData): Promise<void> {
 
 /**
  * Convert invoice from POS format to PDF format
+ * حساب الأرصدة يتم الآن بشكل فعلي من الحركات بدلاً من التخمين
  */
-export function convertToPDFData(
+export async function convertToPDFData(
     invoice: any,
     customer: any,
     items: any[],
     salesRep?: any
-): InvoicePDFData {
+): Promise<InvoicePDFData> {
     const invoiceTotal = Number(invoice.total) || 0;
     const invoiceDiscount = Number(invoice.discount || invoice.discountAmount) || 0;
-    const invoicePaid = Number(invoice.paidAmount) || 0;
-    const customerBalance = customer?.currentBalance !== undefined ? Number(customer.currentBalance) : undefined;
-    const prevBalance = customerBalance !== undefined ? (customerBalance - invoiceTotal + invoicePaid) : undefined;
-    const currBalance = customerBalance;
+
+    // حساب الرصيد الفعلي قبل وبعد هذه الفاتورة من كشف الحساب
+    let prevBalance: number | undefined = undefined;
+    let currBalance: number | undefined = undefined;
+
+    if (customer?.id) {
+        try {
+            const { db } = await import("@/shared/lib/indexedDB");
+
+            // الرصيد الافتتاحي
+            const openingBalance = Number(customer.previousStatement) || 0;
+
+            // جلب كل الحركات
+            const [allInvoices, allPayments, allReturns] = await Promise.all([
+                db.getAll<any>("invoices"),
+                db.getAll<any>("payments"),
+                db.getAll<any>("salesReturns"),
+            ]);
+
+            // جلب البونص
+            let allBonuses: any[] = [];
+            try {
+                const saved = localStorage.getItem("pos-bonuses");
+                if (saved) allBonuses = JSON.parse(saved);
+            } catch { /* ignore */ }
+
+            // تجميع كل الحركات مع أنواعها
+            interface Movement { date: Date; type: string; amount: number; id: string; }
+            const movements: Movement[] = [];
+
+            allInvoices
+                .filter((inv: any) => inv.customerId === customer.id)
+                .forEach((inv: any) => {
+                    movements.push({
+                        date: new Date(inv.createdAt),
+                        type: "debit",
+                        amount: Number(inv.total) || 0,
+                        id: inv.id,
+                    });
+                });
+
+            allPayments
+                .filter((pay: any) => pay.customerId === customer.id)
+                .forEach((pay: any) => {
+                    movements.push({
+                        date: new Date(pay.createdAt),
+                        type: "credit",
+                        amount: Number(pay.amount) || 0,
+                        id: pay.id,
+                    });
+                });
+
+            allReturns
+                .filter((ret: any) => ret.customerId === customer.id)
+                .forEach((ret: any) => {
+                    movements.push({
+                        date: new Date(ret.createdAt),
+                        type: "credit",
+                        amount: Number(ret.total || ret.amount) || 0,
+                        id: ret.id,
+                    });
+                });
+
+            allBonuses
+                .filter((b: any) => b.customerId === customer.id)
+                .forEach((b: any) => {
+                    movements.push({
+                        date: new Date(b.createdAt),
+                        type: "credit",
+                        amount: Number(b.bonusAmount || b.amount) || 0,
+                        id: b.id,
+                    });
+                });
+
+            // ترتيب حسب التاريخ
+            movements.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+            // حساب الرصيد التراكمي حتى ما قبل هذه الفاتورة
+            let runningBalance = openingBalance;
+            let foundInvoice = false;
+
+            for (const mov of movements) {
+                if (mov.id === invoice.id) {
+                    // هذه هي الفاتورة المطلوبة - الرصيد قبلها
+                    prevBalance = runningBalance;
+                    // تطبيق هذه الفاتورة
+                    if (mov.type === "debit") {
+                        runningBalance += mov.amount;
+                    } else {
+                        runningBalance -= mov.amount;
+                    }
+                    currBalance = runningBalance;
+                    foundInvoice = true;
+                    break;
+                }
+                // تطبيق الحركة
+                if (mov.type === "debit") {
+                    runningBalance += mov.amount;
+                } else {
+                    runningBalance -= mov.amount;
+                }
+            }
+
+            // لو الفاتورة مش موجودة في الحركات (جديدة لسه مترفعتش)
+            if (!foundInvoice) {
+                prevBalance = runningBalance;
+                currBalance = runningBalance + invoiceTotal;
+            }
+        } catch (error) {
+            console.error("Error calculating invoice balances:", error);
+            // fallback: no balances
+        }
+    }
 
     return {
         id: invoice.id || "",
