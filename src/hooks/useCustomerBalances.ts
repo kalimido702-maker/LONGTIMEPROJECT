@@ -39,34 +39,38 @@ export async function calculateAllCustomerBalances(): Promise<CustomerBalanceMap
 
     // تهيئة الأرصدة من الرصيد السابق
     customers.forEach((c) => {
-      balanceMap[c.id] = Number(c.previousStatement) || 0;
+      balanceMap[String(c.id)] = Number(c.previousStatement) || 0;
     });
 
     // إضافة الفواتير (عليه / مدين)
     invoices.forEach((inv) => {
-      if (inv.customerId && balanceMap[inv.customerId] !== undefined) {
-        balanceMap[inv.customerId] += Number(inv.total) || 0;
+      const cid = String(inv.customerId);
+      if (inv.customerId && balanceMap[cid] !== undefined) {
+        balanceMap[cid] += Number(inv.total) || 0;
       }
     });
 
     // خصم المدفوعات (له / دائن)
     payments.forEach((pay: any) => {
-      if (pay.customerId && balanceMap[pay.customerId] !== undefined) {
-        balanceMap[pay.customerId] -= Number(pay.amount) || 0;
+      const cid = String(pay.customerId);
+      if (pay.customerId && balanceMap[cid] !== undefined) {
+        balanceMap[cid] -= Number(pay.amount) || 0;
       }
     });
 
     // خصم المرتجعات (له / دائن)
     salesReturns.forEach((ret: any) => {
-      if (ret.customerId && balanceMap[ret.customerId] !== undefined) {
-        balanceMap[ret.customerId] -= Number(ret.total || ret.amount) || 0;
+      const cid = String(ret.customerId);
+      if (ret.customerId && balanceMap[cid] !== undefined) {
+        balanceMap[cid] -= Number(ret.total || ret.amount) || 0;
       }
     });
 
     // خصم البونص (له / دائن)
     allBonuses.forEach((bonus: any) => {
-      if (bonus.customerId && balanceMap[bonus.customerId] !== undefined) {
-        balanceMap[bonus.customerId] -= Number(bonus.bonusAmount || bonus.amount) || 0;
+      const cid = String(bonus.customerId);
+      if (bonus.customerId && balanceMap[cid] !== undefined) {
+        balanceMap[cid] -= Number(bonus.bonusAmount || bonus.amount) || 0;
       }
     });
   } catch (error) {
@@ -81,7 +85,7 @@ export async function calculateAllCustomerBalances(): Promise<CustomerBalanceMap
  */
 export async function calculateSingleCustomerBalance(customerId: string): Promise<number> {
   const map = await calculateAllCustomerBalances();
-  return map[customerId] || 0;
+  return map[String(customerId)] || 0;
 }
 
 /**
@@ -123,8 +127,9 @@ export function useCustomerBalances(dependencies: any[] = []) {
    */
   const getBalance = useCallback(
     (customerId: string, fallback: number = 0): number => {
-      if (balanceMap[customerId] !== undefined) {
-        return balanceMap[customerId];
+      const key = String(customerId);
+      if (balanceMap[key] !== undefined) {
+        return balanceMap[key];
       }
       return fallback;
     },

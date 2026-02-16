@@ -89,6 +89,7 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             <td class="col-unit">قطعة</td>
             <td class="col-price">${formatNum(item.price, 2, 2)}</td>
             <td class="col-total">${formatNum(item.total, 2, 2)}</td>
+            <td class="col-spacer"></td>
             <td class="col-units">${item.unitsPerCarton ? formatNum(item.unitsPerCarton, 0, 0) : ""}</td>
         </tr>
     `).join("");
@@ -131,13 +132,20 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             padding: 10mm 12mm 12mm 12mm;
         }
         
-        /* ===== HEADER: Logo (Right) + Meta Table (Left) ===== */
+        /* ===== HEADER SECTION: Logo+Meta (Left) + Company+Customer (Right) ===== */
+        .header-section {
+            display: flex;
+            flex-direction: row-reverse;
+            align-items: flex-start;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
         .header-top {
             display: flex;
-            justify-content: space-between;
-            align-items: flex-end;
-            margin-bottom: 0;
             flex-direction: column-reverse;
+            align-items: flex-start;
+            margin-bottom: 0;
         }
         
         .logo-section {
@@ -153,8 +161,9 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             height: auto;
         }
         
+        /* ===== META TABLE (below logo) - no column borders ===== */
         .meta-section {
-            margin-top: 25px;
+            margin-top: 15px;
         }
         
         .meta-table {
@@ -178,11 +187,11 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             font-size: 12px;
             font-weight: 700;
             text-align: center;
-            border: 2px solid #2d8a9e;
-            border-top: none;
+            border: none;
+            border-bottom: 4px solid #2d8a9e;
         }
         
-        /* ===== COMPANY NAME & INVOICE TYPE BAR (Right Side) ===== */
+        /* ===== COMPANY NAME & INVOICE TYPE BAR ===== */
         .company-section {
             text-align: right;
             margin-bottom: 10px;
@@ -197,16 +206,17 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
         .invoice-type-bar {
             background: #2d8a9e;
             color: white;
-            display: inline-block;
-            padding: 3px 20px 3px 12px;
-            font-size: 10px;
+            display: block;
+            padding: 4px 20px 4px 12px;
+            font-size: 11px;
             font-weight: 600;
             margin-top: 4px;
         }
         
         /* ===== CUSTOMER SECTION ===== */
         .customer-section {
-            margin-bottom: 15px;
+            margin-bottom: 8px;
+            margin-top: 8px;
             text-align: right;
         }
         
@@ -220,7 +230,7 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             font-size: 12px;
             color: #333;
             font-weight: 600;
-            margin-top: 2px;
+            margin-top: 3px;
         }
         
         /* ===== ITEMS TABLE ===== */
@@ -231,28 +241,34 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
         .items-table {
             width: 100%;
             border-collapse: collapse;
-            border: 2px solid #2d8a9e;
         }
         
         .items-table th {
             background: #2d8a9e;
             color: white;
-            padding: 6px 3px;
-            font-size: 10px;
+            padding: 7px 4px;
+            font-size: 11px;
             font-weight: 700;
             text-align: center;
             border: 1px solid rgba(255,255,255,0.3);
             border-bottom: 2px solid #2d8a9e;
         }
         
+        /* Outer borders for main table columns only */
+        .items-table th.col-index { border-top: 2px solid #2d8a9e; }
+        .items-table th.col-total { border-top: 2px solid #2d8a9e; }
+        
         .items-table th.col-name {
             text-align: right;
-            padding-right: 8px;
+            padding-right: 10px;
         }
         
+        /* Fixed row height, bigger text, vertical centering */
         .items-table td {
-            padding: 5px 3px;
-            font-size: 11px;
+            padding: 0 4px;
+            height: 32px;
+            font-size: 12px;
+            font-weight: 600;
             text-align: center;
             vertical-align: middle;
             color: #000;
@@ -262,8 +278,8 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
         
         .items-table td.col-name {
             text-align: right;
-            padding-right: 8px;
-            font-size: 10px;
+            padding-right: 10px;
+            font-size: 11px;
         }
         
         .items-table td.col-index {
@@ -271,28 +287,91 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
         }
         
         .items-table td.col-total {
-            font-weight: 600;
+            font-weight: 700;
         }
         
-        /* Column widths - adjusted after removing code column */
+        /* Column widths */
         .col-index { width: 5%; }
-        .col-name { width: 38%; }
+        .col-name { width: 35%; }
         .col-qty { width: 8%; }
         .col-unit { width: 10%; }
-        .col-price { width: 14%; }
-        .col-total { width: 14%; }
-        .col-units { width: 11%; }
+        .col-price { width: 13%; }
+        .col-total { width: 13%; }
         
+        /* Main table outer border (right side = col-index, left side = col-total) */
+        .items-table th.col-index,
+        .items-table td.col-index {
+            border-right: 2px solid #2d8a9e;
+        }
+        .items-table th.col-total,
+        .items-table td.col-total {
+            border-left: 2px solid #2d8a9e;
+        }
+        /* Top border for header */
+        .items-table thead th.col-index,
+        .items-table thead th.col-name,
+        .items-table thead th.col-qty,
+        .items-table thead th.col-unit,
+        .items-table thead th.col-price,
+        .items-table thead th.col-total {
+            border-top: 2px solid #2d8a9e;
+        }
+        /* Bottom border for last row */
+        .items-table tbody tr:last-child td.col-index,
+        .items-table tbody tr:last-child td.col-name,
+        .items-table tbody tr:last-child td.col-qty,
+        .items-table tbody tr:last-child td.col-unit,
+        .items-table tbody tr:last-child td.col-price,
+        .items-table tbody tr:last-child td.col-total {
+            border-bottom: 2px solid #2d8a9e;
+        }
+        
+        /* Spacer column - completely invisible, no borders at all */
+        .col-spacer {
+            width: 5%;
+            border: none !important;
+            background: #fff !important;
+            padding: 0 !important;
+        }
+        .items-table th.col-spacer {
+            background: #fff !important;
+            border: none !important;
+        }
+        .items-table td.col-spacer {
+            border: none !important;
+            background: #fff !important;
+        }
+        
+        /* Carton column - separate visual block */
+        .col-units { 
+            width: 11%; 
+        }
+        .items-table th.col-units {
+            border: 2px solid #2d8a9e;
+            border-bottom: 2px solid #2d8a9e;
+        }
+        .items-table td.col-units {
+            border-right: 2px solid #2d8a9e;
+            border-left: 2px solid #2d8a9e;
+            border-bottom: 1px solid #aaa;
+        }
+        .items-table tbody tr:last-child td.col-units {
+            border-bottom: 2px solid #2d8a9e;
+        }
+        
+        /* ===== FOOTER: QR (right) + Totals (left) ===== */
         .footer {
             display: flex;
             flex-direction: row;
             justify-content: space-between;
             align-items: flex-start;
-            margin-top: 10px;
+            margin-top: 12px;
         }
         
+        /* Totals on the LEFT side */
         .totals-block {
             width: 260px;
+            order: 2;
         }
         
         .total-row {
@@ -309,38 +388,25 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             font-weight: 800;
         }
         
+        /* QR on the RIGHT side with website link to its left */
         .qr-section {
-            text-align: center;
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             align-items: center;
+            gap: 12px;
+            order: 1;
         }
         
         .site-url {
-            font-size: 12px;
+            font-size: 13px;
             font-weight: 700;
-            color: #000;
-            margin-bottom: 4px;
+            color: #2d8a9e;
+            text-decoration: none;
         }
         
         .qr-code {
-            width: 50px;
-            height: 50px;
-        }
-
-        .header-section {
-            display: flex;
-            flex-direction: row-reverse;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 10px;
-        }
-
-        /*col-units should sperated column so should have space from right between the ful  l width of the table*/
-        .col-units {
-            width: 14%;
-            border-left: 1px solid #aaa;
-            border-right: 1px solid #aaa;
+            width: 55px;
+            height: 55px;
         }
         
     </style>
@@ -397,6 +463,7 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
                         <th class="col-unit">الوحدة</th>
                         <th class="col-price">الفئة</th>
                         <th class="col-total">الإجمالي</th>
+                        <th class="col-spacer"></th>
                         <th class="col-units">العدد في<br>الكرتونة</th>
                     </tr>
                 </thead>
@@ -406,8 +473,16 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             </table>
         </div>
         
-        <!-- Footer -->
+        <!-- Footer: QR (right) + Totals (left) -->
         <div class="footer">
+            <div class="qr-section">
+                ${qrCodeBase64
+            ? `<img src="${qrCodeBase64}" class="qr-code" alt="QR Code">`
+            : ''
+        }
+                <a href="https://longtimeit.com" class="site-url">longtimeit.com</a>
+            </div>
+
             <div class="totals-block">
                 <div class="total-row">
                     <span>الإجمالي</span>
@@ -438,13 +513,6 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
                     <span class="amount">${formatNum(data.currentBalance, 0, 0)}</span>
                 </div>
                 ` : ''}
-            </div>
-            
-            <div class="qr-section">
-                ${qrCodeBase64
-            ? `<img src="${qrCodeBase64}" class="qr-code" alt="QR Code">`
-            : ''
-        }
             </div>
         </div>
     </div>
@@ -573,8 +641,15 @@ export async function convertToPDFData(
         try {
             const { db } = await import("@/shared/lib/indexedDB");
 
+            // جلب بيانات العميل الأحدث من IndexedDB مباشرة
+            const freshCustomer = await db.get<any>("customers", customer.id);
+            const customerData = freshCustomer || customer;
+            const custId = String(customer.id);
+
             // الرصيد الافتتاحي
-            const openingBalance = Number(customer.previousStatement) || 0;
+            const openingBalance = Number(customerData.previousStatement) || 0;
+            
+            console.log("[convertToPDFData] Customer:", customerData.name, "| id:", custId, "| previousStatement:", customerData.previousStatement, "| openingBalance:", openingBalance);
 
             // جلب كل الحركات
             const [allInvoices, allPayments, allReturns] = await Promise.all([
@@ -590,63 +665,67 @@ export async function convertToPDFData(
                 if (saved) allBonuses = JSON.parse(saved);
             } catch { /* ignore */ }
 
-            // تجميع كل الحركات مع أنواعها
+            // تجميع كل الحركات مع أنواعها - استخدام String() للمقارنة الآمنة
             interface Movement { date: Date; type: string; amount: number; id: string; }
             const movements: Movement[] = [];
 
             allInvoices
-                .filter((inv: any) => inv.customerId === customer.id)
+                .filter((inv: any) => String(inv.customerId) === custId)
                 .forEach((inv: any) => {
                     movements.push({
                         date: new Date(inv.createdAt),
                         type: "debit",
                         amount: Number(inv.total) || 0,
-                        id: inv.id,
+                        id: String(inv.id),
                     });
                 });
 
             allPayments
-                .filter((pay: any) => pay.customerId === customer.id)
+                .filter((pay: any) => String(pay.customerId) === custId)
                 .forEach((pay: any) => {
                     movements.push({
                         date: new Date(pay.createdAt),
                         type: "credit",
                         amount: Number(pay.amount) || 0,
-                        id: pay.id,
+                        id: String(pay.id),
                     });
                 });
 
             allReturns
-                .filter((ret: any) => ret.customerId === customer.id)
+                .filter((ret: any) => String(ret.customerId) === custId)
                 .forEach((ret: any) => {
                     movements.push({
                         date: new Date(ret.createdAt),
                         type: "credit",
                         amount: Number(ret.total || ret.amount) || 0,
-                        id: ret.id,
+                        id: String(ret.id),
                     });
                 });
 
             allBonuses
-                .filter((b: any) => b.customerId === customer.id)
+                .filter((b: any) => String(b.customerId) === custId)
                 .forEach((b: any) => {
                     movements.push({
                         date: new Date(b.createdAt),
                         type: "credit",
                         amount: Number(b.bonusAmount || b.amount) || 0,
-                        id: b.id,
+                        id: String(b.id),
                     });
                 });
 
             // ترتيب حسب التاريخ
             movements.sort((a, b) => a.date.getTime() - b.date.getTime());
+            
+            console.log("[convertToPDFData] Total movements for customer:", movements.length, "| Invoice ID:", String(invoice.id));
+            movements.forEach((m, i) => console.log(`  [${i}] ${m.type} | ${m.amount} | id: ${m.id} | date: ${m.date.toISOString()}`));
 
             // حساب الرصيد التراكمي حتى ما قبل هذه الفاتورة
+            const invoiceIdStr = String(invoice.id);
             let runningBalance = openingBalance;
             let foundInvoice = false;
 
             for (const mov of movements) {
-                if (mov.id === invoice.id) {
+                if (mov.id === invoiceIdStr) {
                     // هذه هي الفاتورة المطلوبة - الرصيد قبلها
                     prevBalance = runningBalance;
                     // تطبيق هذه الفاتورة
@@ -672,9 +751,16 @@ export async function convertToPDFData(
                 prevBalance = runningBalance;
                 currBalance = runningBalance + invoiceTotal;
             }
+            
+            console.log("[convertToPDFData] foundInvoice:", foundInvoice, "| prevBalance:", prevBalance, "| currBalance:", currBalance);
         } catch (error) {
             console.error("Error calculating invoice balances:", error);
-            // fallback: no balances
+            // fallback: استخدام currentBalance إذا متاح
+            const cb = Number(customer.currentBalance);
+            if (!isNaN(cb)) {
+                currBalance = cb;
+                prevBalance = cb - invoiceTotal;
+            }
         }
     }
 
