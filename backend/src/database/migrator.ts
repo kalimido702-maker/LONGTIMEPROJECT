@@ -52,9 +52,8 @@ export async function runMigrations(): Promise<void> {
 
       const connection = await pool.getConnection();
       try {
-        await connection.beginTransaction();
-
         // Read and execute SQL file
+        // NOTE: No transaction for DDL (ALTER TABLE) — MySQL auto-commits DDL
         const sql = readFileSync(migration.path, "utf8");
         const statements = sql
           .split(";")
@@ -65,7 +64,17 @@ export async function runMigrations(): Promise<void> {
           if (statement.toLowerCase().includes("insert into migrations")) {
             continue; // Skip migration record from SQL file
           }
-          await connection.query(statement);
+          try {
+            await connection.query(statement);
+          } catch (stmtError: any) {
+            // Ignore duplicate column/table errors (idempotent migrations)
+            const code = stmtError.code || "";
+            if (code === "ER_DUP_FIELDNAME" || code === "ER_TABLE_EXISTS_ERROR" || code === "ER_DUP_KEYNAME") {
+              logger.info(`⚠️ Skipping (${code}): ${statement.substring(0, 80)}...`);
+            } else {
+              throw stmtError;
+            }
+          }
         }
 
         // Record migration
@@ -74,10 +83,8 @@ export async function runMigrations(): Promise<void> {
           [migration.name]
         );
 
-        await connection.commit();
         logger.info(`✅ Migration ${migration.name} completed`);
       } catch (error) {
-        await connection.rollback();
         logger.error({ error }, `❌ Migration ${migration.name} failed`);
         throw error;
       } finally {
