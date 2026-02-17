@@ -433,8 +433,8 @@ export default function Collections() {
             await db.add("payments", dbPaymentRecord);
 
             // حفظ سجل الدفع في localStorage أيضاً
-            const existingCollections = localStorage.getItem('pos-collections');
-            const collections: CollectionRecord[] = existingCollections ? JSON.parse(existingCollections) : [];
+            const savedCollections = localStorage.getItem('pos-collections');
+            const collections: CollectionRecord[] = savedCollections ? JSON.parse(savedCollections) : [];
             collections.unshift(paymentRecord);
             // الاحتفاظ بآخر 100 سجل فقط
             localStorage.setItem('pos-collections', JSON.stringify(collections.slice(0, 100)));
