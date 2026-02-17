@@ -26,6 +26,27 @@ function skipBase64(val: string): string | null {
     return val;
 }
 
+// Helper: Serialize object to JSON string for MySQL storage
+function toJsonString(val: any): string | null {
+    if (!val || typeof val !== 'object') return null;
+    try {
+        return JSON.stringify(val);
+    } catch {
+        return null;
+    }
+}
+
+// Helper: Parse JSON string from MySQL to object
+function fromJsonString(val: any): any {
+    if (!val) return null;
+    if (typeof val === 'object') return val; // already parsed
+    try {
+        return JSON.parse(val);
+    } catch {
+        return null;
+    }
+}
+
 // Helper: Validate ID format (UUID, numeric, or compound IDs with underscores)
 function validateId(val: string): string | null {
     if (!val) return null;
@@ -44,6 +65,7 @@ interface FieldMapping {
     serverField: string;
     defaultValue?: any;
     transform?: (value: any) => any;
+    reverseTransform?: (value: any) => any; // Transform when going server→client
     clientToServerOnly?: boolean; // If true, this mapping is only used for client→server, not reversed
 }
 
@@ -98,10 +120,15 @@ const PRODUCTS_MAPPING: TableMapping = {
         { clientField: 'category', serverField: 'category_id', transform: validateId, clientToServerOnly: true },
         { clientField: 'categoryId', serverField: 'category_id', transform: validateId },
         { clientField: 'imageUrl', serverField: 'image_url', transform: skipBase64 },
+        { clientField: 'prices', serverField: 'prices_json', transform: toJsonString, reverseTransform: fromJsonString },
+        { clientField: 'unitId', serverField: 'unit_id', transform: validateId },
+        { clientField: 'defaultPriceTypeId', serverField: 'default_price_type_id', transform: validateId },
+        { clientField: 'expiryDate', serverField: 'expiry_date', transform: toMySQLDateTime },
+        { clientField: 'hasMultipleUnits', serverField: 'has_multiple_units', defaultValue: false },
         { clientField: 'createdAt', serverField: 'created_at', transform: toMySQLDateTime },
         { clientField: 'updatedAt', serverField: 'updated_at', transform: toMySQLDateTime },
     ],
-    clientOnlyFields: ['local_updated_at', 'prices', 'unitId', 'defaultPriceTypeId', 'expiryDate', 'hasMultipleUnits', 'userId'],
+    clientOnlyFields: ['local_updated_at', 'userId'],
 };
 
 // Customers - MySQL: name, phone, email, address, credit_limit, balance, notes, sales_rep_id, bonus_balance, etc.
@@ -182,9 +209,13 @@ const INVOICES_MAPPING: TableMapping = {
         { clientField: 'createdAt', serverField: 'invoice_date', transform: toMySQLDateTime },
         { clientField: 'notes', serverField: 'notes' },
         { clientField: 'userId', serverField: 'created_by' },
+        { clientField: 'salesRepId', serverField: 'sales_rep_id', transform: validateId },
+        { clientField: 'shiftId', serverField: 'shift_id', transform: validateId },
+        { clientField: 'paymentType', serverField: 'payment_type' },
+        { clientField: 'subtotal', serverField: 'subtotal', defaultValue: 0 },
     ],
     serverDefaults: { invoice_number: () => `INV-${Date.now()}` },
-    clientOnlyFields: ['local_updated_at', 'items', 'userName', 'shiftId', 'paymentType', 'paymentMethodIds', 'paymentMethodAmounts', 'subtotal', 'updatedAt'],
+    clientOnlyFields: ['local_updated_at', 'items', 'userName', 'paymentMethodIds', 'paymentMethodAmounts', 'updatedAt'],
 };
 
 // Purchases - MySQL: purchase_number, supplier_id, total, discount, tax, net_total, paid_amount, remaining_amount, payment_status, purchase_date, notes, created_by
@@ -316,11 +347,15 @@ const PAYMENTS_MAPPING: TableMapping = {
         { clientField: 'invoiceId', serverField: 'invoice_id', transform: validateId },
         { clientField: 'customerId', serverField: 'customer_id', transform: validateId },
         { clientField: 'amount', serverField: 'amount' },
-        { clientField: 'method', serverField: 'method' },
+        { clientField: 'paymentMethodId', serverField: 'payment_method_id', transform: validateId },
+        { clientField: 'paymentDate', serverField: 'payment_date', transform: toMySQLDateTime },
+        { clientField: 'createdAt', serverField: 'payment_date', transform: toMySQLDateTime },
+        { clientField: 'paymentType', serverField: 'payment_type' },
+        { clientField: 'referenceNumber', serverField: 'reference_number' },
+        { clientField: 'userId', serverField: 'user_id' },
         { clientField: 'notes', serverField: 'notes' },
-        { clientField: 'createdAt', serverField: 'created_at', transform: toMySQLDateTime },
     ],
-    clientOnlyFields: ['local_updated_at'],
+    clientOnlyFields: ['local_updated_at', 'method', 'customerName', 'paymentMethodName', 'userName'],
 };
 
 // Settings - MySQL: id, setting_key, setting_value, setting_group, description
@@ -554,17 +589,20 @@ const TABLE_MAPPINGS: Record<string, TableMapping> = {
         ],
         clientOnlyFields: ['local_updated_at'],
     },
-    // Deposits - SQLite: deposit_source_id, user_id, shift_id, amount, notes
+    // Deposits - MySQL: customer_id, deposit_source_id, amount, deposit_date, user_id, shift_id, notes
     deposits: {
         fields: [
             { clientField: 'id', serverField: 'id' },
+            { clientField: 'customerId', serverField: 'customer_id', transform: validateId },
             { clientField: 'sourceId', serverField: 'deposit_source_id', transform: validateId },
             { clientField: 'depositSourceId', serverField: 'deposit_source_id', transform: validateId },
             { clientField: 'userId', serverField: 'user_id' },
+            { clientField: 'createdBy', serverField: 'created_by' },
             { clientField: 'shiftId', serverField: 'shift_id' },
             { clientField: 'amount', serverField: 'amount' },
+            { clientField: 'depositDate', serverField: 'deposit_date', transform: toMySQLDateTime },
+            { clientField: 'createdAt', serverField: 'deposit_date', transform: toMySQLDateTime },
             { clientField: 'notes', serverField: 'notes' },
-            { clientField: 'createdAt', serverField: 'created_at', transform: toMySQLDateTime },
         ],
         clientOnlyFields: ['local_updated_at', 'sourceName', 'userName'],
     },
@@ -847,7 +885,10 @@ export class FieldMapper {
             const serverValue = serverData[fieldMap.serverField];
 
             if (serverValue !== undefined) {
-                clientData[fieldMap.clientField] = serverValue;
+                // Apply reverse transform if defined (e.g., parse JSON strings)
+                clientData[fieldMap.clientField] = fieldMap.reverseTransform
+                    ? fieldMap.reverseTransform(serverValue)
+                    : serverValue;
             }
         }
 

@@ -172,10 +172,11 @@ const SupervisorBonus = () => {
     const categoryBonusMap = useMemo(() => {
         const map: Record<string, number> = {};
         categories.forEach(c => {
+            const bp = Number(c.bonusPercentage) || 0;
             // Match by name or id
-            map[c.id] = c.bonusPercentage || 0;
-            map[c.name] = c.bonusPercentage || 0;
-            if (c.nameAr) map[c.nameAr] = c.bonusPercentage || 0;
+            map[c.id] = bp;
+            map[c.name] = bp;
+            if (c.nameAr) map[c.nameAr] = bp;
         });
         return map;
     }, [categories]);
@@ -227,24 +228,24 @@ const SupervisorBonus = () => {
             // Use resolved salesRepId (from invoice or customer)
             const repId = inv.salesRepId || customerSalesRepMap[inv.customerId || ""] || "";
             if (repId) {
-                salesByRep[repId] = (salesByRep[repId] || 0) + (inv.total || 0);
+                salesByRep[repId] = (salesByRep[repId] || 0) + (Number(inv.total) || 0);
             }
 
             // Process items for category bonus
             const items = inv.items || [];
             // حساب إجمالي الأصناف قبل الخصم
             const itemsSubtotal = items.reduce((sum: number, item: any) => {
-                return sum + (item.total || (item.price * (item.quantity || 1)));
+                return sum + (Number(item.total) || (Number(item.price) * (Number(item.quantity) || 1)));
             }, 0);
             // نسبة الخصم من الفاتورة (لتوزيعها على الأصناف)
-            const invoiceDiscount = Number(inv.discount || inv.discountAmount) || 0;
+            const invoiceDiscount = Number(inv.discount || (inv as any).discountAmount) || 0;
             const discountRatio = itemsSubtotal > 0 ? (1 - invoiceDiscount / itemsSubtotal) : 1;
             
             items.forEach((item: any) => {
                 const productId = item.productId || "";
                 const categoryName = productCategoryMap[productId] || "بدون تصنيف";
-                const catBonusPercent = categoryBonusMap[categoryName] || 0;
-                const itemTotal = item.total || (item.price * (item.quantity || 1));
+                const catBonusPercent = Number(categoryBonusMap[categoryName]) || 0;
+                const itemTotal = Number(item.total) || (Number(item.price) * (Number(item.quantity) || 1));
                 // احتساب البونص على المبلغ بعد الخصم
                 const itemTotalAfterDiscount = Math.round(itemTotal * discountRatio);
                 const itemBonus = Math.round(itemTotalAfterDiscount * (catBonusPercent / 100));

@@ -360,6 +360,14 @@ export class SmartSyncManager extends EventEmitter {
             result.conflicts = pullResult.conflicts;
             result.errors.push(...pullResult.errors);
 
+            // 5. Post-pull: reconstruct invoice items arrays
+            console.log('[SmartSync] 🔗 Reconstructing invoice items...');
+            try {
+                await this.reconstructInvoiceItems();
+            } catch (e) {
+                console.warn('[SmartSync] ⚠️ Failed to reconstruct invoice items:', e);
+            }
+
             console.log(`[SmartSync] ✅ Force server overwrite complete: pulled ${result.pulled} records`);
 
             // 5. Restart periodic sync
@@ -621,11 +629,13 @@ export class SmartSyncManager extends EventEmitter {
             return;
         }
 
-        // For products: resolve category_id to category name
-        if (tableName === 'products' && record.category) {
-            const catVal = String(record.category);
-            // If category looks like a numeric ID, resolve it to the actual category name
-            if (/^\d+$/.test(catVal)) {
+        // ===== Post-process server records =====
+
+        // For products: resolve category_id to category name and ensure numeric fields
+        if (tableName === 'products') {
+            // Resolve categoryId to category name
+            const catVal = String(record.categoryId || record.category || '');
+            if (catVal && /^\d+$/.test(catVal)) {
                 try {
                     const catRepo = db.getRepository('productCategories');
                     const categories = await catRepo.getAll();
@@ -635,14 +645,50 @@ export class SmartSyncManager extends EventEmitter {
                         record.categoryId = catVal;
                         console.log(`[SmartSync] Resolved category ID ${catVal} → "${record.category}" for product ${record.id}`);
                     } else {
-                        // Category not found locally yet, keep the ID for now
                         record.categoryId = catVal;
-                        console.log(`[SmartSync] Category ID ${catVal} not found locally for product ${record.id}`);
                     }
                 } catch (e) {
                     console.warn(`[SmartSync] Error resolving category for product ${record.id}:`, e);
                 }
             }
+            // Ensure numeric fields are actual numbers
+            if (record.price !== undefined) record.price = Number(record.price) || 0;
+            if (record.costPrice !== undefined) record.costPrice = Number(record.costPrice) || 0;
+            if (record.stock !== undefined) record.stock = Number(record.stock) || 0;
+            if (record.minStock !== undefined) record.minStock = Number(record.minStock) || 0;
+        }
+
+        // For invoices: ensure numeric fields
+        if (tableName === 'invoices') {
+            if (record.total !== undefined) record.total = Number(record.total) || 0;
+            if (record.discount !== undefined) record.discount = Number(record.discount) || 0;
+            if (record.tax !== undefined) record.tax = Number(record.tax) || 0;
+            if (record.netTotal !== undefined) record.netTotal = Number(record.netTotal) || 0;
+            if (record.paidAmount !== undefined) record.paidAmount = Number(record.paidAmount) || 0;
+            if (record.remainingAmount !== undefined) record.remainingAmount = Number(record.remainingAmount) || 0;
+            if (record.subtotal !== undefined) record.subtotal = Number(record.subtotal) || 0;
+        }
+
+        // For invoice_items: ensure numeric fields
+        if (tableName === 'invoice_items') {
+            if (record.quantity !== undefined) record.quantity = Number(record.quantity) || 0;
+            if (record.price !== undefined) record.price = Number(record.price) || 0;
+            if (record.discount !== undefined) record.discount = Number(record.discount) || 0;
+            if (record.total !== undefined) record.total = Number(record.total) || 0;
+        }
+
+        // For payments: ensure numeric fields
+        if (tableName === 'payments') {
+            if (record.amount !== undefined) record.amount = Number(record.amount) || 0;
+        }
+
+        // For customers: ensure numeric fields
+        if (tableName === 'customers') {
+            if (record.balance !== undefined) record.balance = Number(record.balance) || 0;
+            if (record.currentBalance !== undefined) record.currentBalance = Number(record.currentBalance) || 0;
+            if (record.creditLimit !== undefined) record.creditLimit = Number(record.creditLimit) || 0;
+            if (record.bonusBalance !== undefined) record.bonusBalance = Number(record.bonusBalance) || 0;
+            if (record.previousStatement !== undefined) record.previousStatement = Number(record.previousStatement) || 0;
         }
 
         // DEBUG: Log incoming record details
@@ -694,6 +740,62 @@ export class SmartSyncManager extends EventEmitter {
 
         // Server is newer → apply update
         return serverTime > localTime;
+    }
+
+    /**
+     * Reconstruct invoice items arrays from separate invoiceItems store
+     * After pulling from server, invoices don't have embedded items array
+     * This fetches all invoice_items and attaches them to their parent invoices
+     */
+    private async reconstructInvoiceItems(): Promise<void> {
+        const db = getDatabaseService();
+        try {
+            const invoiceRepo = db.getRepository('invoices');
+            const itemsRepo = db.getRepository('invoiceItems');
+            const productsRepo = db.getRepository('products');
+
+            const allInvoices = await invoiceRepo.getAll();
+            const allItems = await itemsRepo.getAll();
+            const allProducts = await productsRepo.getAll();
+
+            // Build product lookup
+            const productMap: Record<string, any> = {};
+            allProducts.forEach((p: any) => { productMap[p.id] = p; });
+
+            // Group items by invoice ID
+            const itemsByInvoice: Record<string, any[]> = {};
+            allItems.forEach((item: any) => {
+                const invId = item.invoiceId;
+                if (invId) {
+                    if (!itemsByInvoice[invId]) itemsByInvoice[invId] = [];
+                    // Enrich item with product name if missing
+                    if (!item.productName && item.productId && productMap[item.productId]) {
+                        item.productName = productMap[item.productId].nameAr || productMap[item.productId].name;
+                    }
+                    // Ensure numeric fields
+                    item.quantity = Number(item.quantity) || 0;
+                    item.price = Number(item.price) || 0;
+                    item.discount = Number(item.discount) || 0;
+                    item.total = Number(item.total) || (item.price * item.quantity);
+                    itemsByInvoice[invId].push(item);
+                }
+            });
+
+            // Attach items to invoices that don't have them
+            let updatedCount = 0;
+            for (const invoice of allInvoices) {
+                const inv = invoice as any;
+                if ((!inv.items || inv.items.length === 0) && itemsByInvoice[inv.id]) {
+                    inv.items = itemsByInvoice[inv.id];
+                    await invoiceRepo.updateFromServer(inv.id, inv);
+                    updatedCount++;
+                }
+            }
+
+            console.log(`[SmartSync] 🔗 Reconstructed items for ${updatedCount} invoices`);
+        } catch (error) {
+            console.error('[SmartSync] Error reconstructing invoice items:', error);
+        }
     }
 
     // ==================== Push (Local → Server) ====================
