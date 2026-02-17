@@ -7,7 +7,6 @@ import {
     TrendingUp,
     Settings,
     Wallet,
-    Clock,
     Printer,
     Shield,
     LogOut,
@@ -72,14 +71,6 @@ const Home = () => {
             color: "text-indigo-600",
             bgColor: "bg-indigo-100",
             description: "تقارير المبيعات والأرباح والديون"
-        },
-        {
-            title: "الورديات",
-            icon: Clock,
-            path: "/shifts",
-            color: "text-cyan-600",
-            bgColor: "bg-cyan-100",
-            description: "إدارة الورديات وتقفيل الوردية"
         },
         {
             title: "الإعدادات",

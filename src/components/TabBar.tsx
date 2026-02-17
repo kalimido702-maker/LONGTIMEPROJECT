@@ -68,9 +68,8 @@ const menuGroups = [
         ],
     },
     {
-        label: 'الورديات والمرتجعات',
+        label: 'المرتجعات',
         items: [
-            { path: '/shifts', permission: 'shifts', name: 'إدارة الورديات' },
             { path: '/sales-returns', permission: 'returns', name: 'مرتجع المبيعات' },
             { path: '/purchase-returns', permission: 'returns', name: 'مرتجع المشتريات' },
         ],

@@ -87,7 +87,6 @@ export const pathToTabInfo: Record<string, { title: string; iconName: string }> 
     '/payment-methods': { title: 'طرق الدفع', iconName: 'CreditCard' },
     '/reports': { title: 'التقارير', iconName: 'TrendingUp' },
     '/sales-rep-report': { title: 'مبيعات المندوبين', iconName: 'BarChart3' },
-    '/shifts': { title: 'الورديات', iconName: 'Clock' },
     '/promotions': { title: 'العروض', iconName: 'DollarSign' },
     '/units': { title: 'الوحدات', iconName: 'Ruler' },
     '/warehouses': { title: 'المخازن', iconName: 'Landmark' },

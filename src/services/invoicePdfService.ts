@@ -481,7 +481,7 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             ? `<img src="${qrCodeBase64}" class="qr-code" alt="QR Code">`
             : ''
         }
-                <a href="https://longtimeit.com" class="site-url">longtimeit.com</a>
+                <a href="https://longtimelt.com" class="site-url">longtimelt.com</a>
             </div>
 
             <div class="totals-block">
@@ -769,6 +769,18 @@ export async function convertToPDFData(
         }
     }
 
+    // جلب بيانات المنتجات لـ unitsPerCarton
+    let productsMap: Record<string, any> = {};
+    try {
+        const { db: dbInstance } = await import("@/shared/lib/indexedDB");
+        const allProducts = await dbInstance.getAll<any>("products");
+        allProducts.forEach((p: any) => {
+            productsMap[p.id] = p;
+        });
+    } catch (e) {
+        console.error("Error loading products for PDF:", e);
+    }
+
     return {
         id: invoice.id || "",
         invoiceNumber: invoice.invoiceNumber || invoice.id || "",
@@ -780,13 +792,16 @@ export async function convertToPDFData(
             const qty = Number(item.quantity) || 0;
             const price = Number(item.price || item.unitPrice) || 0;
             const total = Number(item.total) || (qty * price);
+            // Look up unitsPerCarton from the product if not on the item
+            const productData = productsMap[item.productId || item.id] || {};
+            const upc = item.unitsPerCarton ? Number(item.unitsPerCarton) : (productData.unitsPerCarton ? Number(productData.unitsPerCarton) : undefined);
             return {
                 productName: item.productName || item.name || "-",
                 productCode: item.productCode || item.sku || item.barcode || "-",
                 quantity: qty,
                 price: price,
                 total: total,
-                unitsPerCarton: item.unitsPerCarton ? Number(item.unitsPerCarton) : undefined,
+                unitsPerCarton: upc,
             };
         }),
         subtotal: Number(invoice.subtotal) || (invoiceTotal + invoiceDiscount),

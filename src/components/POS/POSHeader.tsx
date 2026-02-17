@@ -82,7 +82,6 @@ export const POSHeader = () => {
     "/deposits": "deposits",
     "/expense-categories": "expense_categories",
     "/expenses": "expenses",
-    "/shifts": "shifts",
     "/sales-returns": "sales_returns",
     "/purchase-returns": "purchase_returns",
     "/restaurant": "restaurant",
@@ -347,7 +346,7 @@ export const POSHeader = () => {
       ],
     },
     {
-      title: "الورديات والمرتجعات",
+      title: "المرتجعات",
       items: [
         {
           name: "مرتجع المبيعات",

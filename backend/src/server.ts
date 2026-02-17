@@ -68,14 +68,15 @@ async function registerPlugins() {
     optionsSuccessStatus: 204,
   });
 
-  // Rate Limiting (except for sync endpoints)
+  // Rate Limiting (except for sync and update endpoints)
   await fastify.register(fastifyRateLimit, {
     max: env.RATE_LIMIT_MAX,
     timeWindow: env.RATE_LIMIT_TIMEWINDOW,
     skipOnError: true,
     allowList: (req) => {
-      // Skip rate limiting for sync endpoints
-      return req.url?.startsWith(`${env.API_PREFIX}/sync`) || false;
+      // Skip rate limiting for sync and update endpoints
+      const url = req.url || "";
+      return url.startsWith(`${env.API_PREFIX}/sync`) || url.startsWith(`${env.API_PREFIX}/updates`) || false;
     },
   });
 

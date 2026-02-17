@@ -375,9 +375,36 @@ export default function Collections() {
             };
             await db.update("customers", updatedCustomer);
 
-            // إنشاء سجل الدفع وحفظه في localStorage
+            // إنشاء رقم إيصال تسلسلي
+            const existingCollections = localStorage.getItem('pos-collections');
+            const prevCollections: CollectionRecord[] = existingCollections ? JSON.parse(existingCollections) : [];
+            
+            // حساب أعلى رقم إيصال موجود
+            let maxReceiptNum = 0;
+            prevCollections.forEach((c: CollectionRecord) => {
+                const num = parseInt(c.id.replace('collection_', ''), 10);
+                if (!isNaN(num) && num > maxReceiptNum && num < 1000000000) {
+                    maxReceiptNum = num;
+                }
+            });
+            
+            // أيضاً التحقق من سجلات الدفع في IndexedDB
+            try {
+                const allPayments = await db.getAll<any>("payments");
+                allPayments.forEach((p: any) => {
+                    if (p.id && typeof p.id === 'string' && p.id.startsWith('collection_')) {
+                        const num = parseInt(p.id.replace('collection_', ''), 10);
+                        if (!isNaN(num) && num > maxReceiptNum && num < 1000000000) {
+                            maxReceiptNum = num;
+                        }
+                    }
+                });
+            } catch (_e) { /* ignore */ }
+            
+            const nextReceiptNum = maxReceiptNum + 1;
+            
             const paymentRecord: CollectionRecord = {
-                id: `collection_${Date.now()}`,
+                id: `collection_${nextReceiptNum}`,
                 customerId: selectedCustomerId,
                 customerName: customer.name,
                 amount: amountValue,
@@ -445,7 +472,8 @@ export default function Collections() {
         const receiptDate = new Date(record.createdAt).toLocaleDateString("ar-EG");
         const customer = customers.find(c => c.id === record.customerId);
         const customerCode = customer?.id?.slice(-8) || '';
-        const receiptNumber = record.id.replace('collection_', '');
+        const rawNum = record.id.replace('collection_', '');
+        const receiptNumber = parseInt(rawNum, 10) > 1000000000 ? String(parseInt(rawNum, 10) % 100000) : rawNum;
 
         // Load logo & QR
         let logoBase64: string | null = null;
@@ -807,7 +835,8 @@ export default function Collections() {
                 `شركة لونج تايم للصناعة الكهربائية`;
 
             const phone = customer.phone.replace(/[^0-9]/g, "");
-            const receiptNumber = collection.id.replace('collection_', '');
+            const rawNum2 = collection.id.replace('collection_', '');
+            const receiptNumber = parseInt(rawNum2, 10) > 1000000000 ? String(parseInt(rawNum2, 10) % 100000) : rawNum2;
 
             // البحث عن حساب واتساب نشط
             const accounts = await db.getAll("whatsappAccounts");

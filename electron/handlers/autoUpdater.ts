@@ -49,7 +49,7 @@ export function initAutoUpdater(window: BrowserWindow, backendUrl?: string) {
     // Check for updates after app is ready
     setTimeout(() => {
         checkForUpdates();
-    }, 5000); // Wait 5 seconds after startup
+    }, 30000); // Wait 30 seconds after startup
 }
 
 /**

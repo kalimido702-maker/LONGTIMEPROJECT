@@ -121,14 +121,6 @@ const RolesPermissions = () => {
         edit: "تعديل الإعدادات",
       },
     },
-    shifts: {
-      name: "الورديات",
-      actions: {
-        view: "عرض الورديات",
-        create: "فتح وردية",
-        close: "إغلاق وردية",
-      },
-    },
     credit: {
       name: "المبيعات الآجلة",
       actions: {

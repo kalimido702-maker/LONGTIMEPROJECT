@@ -135,14 +135,37 @@ const SupervisorBonus = () => {
         return salesReps.filter(rep => rep.supervisorId === selectedSupervisorId);
     }, [selectedSupervisorId, salesReps]);
 
-    // Build product -> category map
+    // Build product -> category name map (always resolve to display name)
     const productCategoryMap = useMemo(() => {
+        // Build category ID → name lookup
+        const catIdToName: Record<string, string> = {};
+        categories.forEach(c => {
+            catIdToName[String(c.id)] = c.nameAr || c.name || String(c.id);
+        });
+
         const map: Record<string, string> = {};
         products.forEach(p => {
-            map[p.id] = String(p.category || p.categoryId || "");
+            // If product.category is a name (not matching any ID), use it directly
+            // If it looks like an ID or is missing, resolve from categories
+            const catName = p.category || "";
+            const catId = String(p.categoryId || (p as any).category_id || "");
+            
+            // Check if category field already has a real name (not an ID)
+            if (catName && !catIdToName[catName]) {
+                // It's a real name, use it
+                map[p.id] = catName;
+            } else if (catName && catIdToName[catName]) {
+                // category field contains an ID, resolve it
+                map[p.id] = catIdToName[catName];
+            } else if (catId && catIdToName[catId]) {
+                // Use categoryId to resolve name
+                map[p.id] = catIdToName[catId];
+            } else {
+                map[p.id] = catName || "";
+            }
         });
         return map;
-    }, [products]);
+    }, [products, categories]);
 
     // Build category bonus map
     const categoryBonusMap = useMemo(() => {
@@ -208,17 +231,27 @@ const SupervisorBonus = () => {
 
             // Process items for category bonus
             const items = inv.items || [];
+            // حساب إجمالي الأصناف قبل الخصم
+            const itemsSubtotal = items.reduce((sum: number, item: any) => {
+                return sum + (item.total || (item.price * (item.quantity || 1)));
+            }, 0);
+            // نسبة الخصم من الفاتورة (لتوزيعها على الأصناف)
+            const invoiceDiscount = Number(inv.discount || inv.discountAmount) || 0;
+            const discountRatio = itemsSubtotal > 0 ? (1 - invoiceDiscount / itemsSubtotal) : 1;
+            
             items.forEach((item: any) => {
                 const productId = item.productId || "";
                 const categoryName = productCategoryMap[productId] || "بدون تصنيف";
                 const catBonusPercent = categoryBonusMap[categoryName] || 0;
                 const itemTotal = item.total || (item.price * (item.quantity || 1));
-                const itemBonus = Math.round(itemTotal * (catBonusPercent / 100));
+                // احتساب البونص على المبلغ بعد الخصم
+                const itemTotalAfterDiscount = Math.round(itemTotal * discountRatio);
+                const itemBonus = Math.round(itemTotalAfterDiscount * (catBonusPercent / 100));
 
                 if (!byCategorySales[categoryName]) {
                     byCategorySales[categoryName] = { sales: 0, bonus: 0, percentage: catBonusPercent };
                 }
-                byCategorySales[categoryName].sales += itemTotal;
+                byCategorySales[categoryName].sales += itemTotalAfterDiscount;
                 byCategorySales[categoryName].bonus += itemBonus;
                 categoryBonus += itemBonus;
             });
@@ -287,12 +320,14 @@ const SupervisorBonus = () => {
                 periodStart: dateFrom,
                 periodEnd: dateTo,
                 totalTeamSales: teamSalesData.total,
-                bonusPercentage: parseFloat(bonusPercentage) || 0,
+                bonusPercentage: useCategoryBonus
+                    ? (teamSalesData.total > 0 ? parseFloat((bonusAmount / teamSalesData.total * 100).toFixed(2)) : 0)
+                    : (parseFloat(bonusPercentage) || 0),
                 bonusAmount,
                 createdAt: new Date().toISOString(),
                 userId: user?.id || "",
                 userName: user?.username || user?.name || "",
-                notes,
+                notes: useCategoryBonus ? `${notes ? notes + " | " : ""}بونص حسب القسم` : notes,
                 salesReps: teamSalesData.byRep,
             };
 

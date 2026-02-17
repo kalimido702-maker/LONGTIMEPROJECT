@@ -112,35 +112,6 @@ const BackupSettings = () => {
         return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
     };
 
-    const handleDeleteOldShifts = async (beforeDate: string) => {
-        if (!beforeDate) {
-            toast.error("يرجى اختيار التاريخ");
-            return;
-        }
-
-        if (!confirm(`⚠️ تحذير: سيتم حذف جميع الورديات المغلقة قبل ${beforeDate}\n\nهل أنت متأكد؟`)) {
-            return;
-        }
-
-        try {
-            const allShifts = await db.getAll<any>("shifts");
-            const cutoffDate = new Date(beforeDate);
-            let deletedCount = 0;
-
-            for (const shift of allShifts) {
-                if (shift.closedAt && new Date(shift.closedAt) < cutoffDate) {
-                    await db.delete("shifts", shift.id);
-                    deletedCount++;
-                }
-            }
-
-            toast.success(`تم حذف ${deletedCount} وردية بنجاح`);
-        } catch (error) {
-            console.error("Delete error:", error);
-            toast.error("حدث خطأ أثناء حذف البيانات");
-        }
-    };
-
     const handleResetDatabase = async () => {
         if (!confirm("⚠️ تحذير: سيتم حذف قاعدة البيانات القديمة وإنشاء واحدة جديدة!\n\nسيتم فقد جميع البيانات التي لم يتم عمل نسخة احتياطية منها.\n\nهل أنت متأكد تماماً؟")) {
             return;
@@ -292,24 +263,6 @@ const BackupSettings = () => {
                     </CardHeader>
                     <CardContent className="space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-3">
-                                <Label>حذف الورديات القديمة</Label>
-                                <div className="flex gap-2">
-                                    <Input
-                                        type="date"
-                                        onChange={(e) => {
-                                            if (e.target.value) {
-                                                handleDeleteOldShifts(e.target.value);
-                                                e.target.value = ""; // Reset
-                                            }
-                                        }}
-                                    />
-                                </div>
-                                <p className="text-sm text-muted-foreground">
-                                    حذف الورديات المغلقة قبل التاريخ المحدد لتوفير المساحة
-                                </p>
-                            </div>
-
                             <div className="space-y-3">
                                 <Label>إعادة ضبط المصنع</Label>
                                 <Button
