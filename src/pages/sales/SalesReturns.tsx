@@ -352,7 +352,7 @@ const SalesReturns = () => {
   // طباعة فاتورة المرتجع - نفس شكل فاتورة البيع مع عنوان "مرتجع"
   const handlePrintReturn = async (returnDoc: SalesReturn) => {
     try {
-      const { printInvoice } = await import("@/services/invoicePdfService");
+      const { printInvoice, convertToPDFData } = await import("@/services/invoicePdfService");
       const items = (returnDoc.items || []);
       
       if (items.length === 0) {
@@ -360,24 +360,34 @@ const SalesReturns = () => {
         return;
       }
 
-      await printInvoice({
+      // Build an invoice-like object so convertToPDFData can resolve unitsPerCarton from products
+      const returnAsInvoice = {
         id: returnDoc.id,
         invoiceNumber: returnDoc.id,
-        date: new Date(returnDoc.createdAt).toLocaleDateString("ar-EG"),
+        createdAt: returnDoc.createdAt,
+        customerId: returnDoc.customerId,
         customerName: returnDoc.customerName || "عميل",
-        salesRepName: returnDoc.userName,
+        subtotal: returnDoc.subtotal || returnDoc.total,
+        total: returnDoc.total,
+        discount: 0,
         items: items.map((item) => ({
+          productId: item.productId,
           productName: item.productName,
-          productCode: item.productId?.substring(0, 8) || "",
           quantity: item.quantity,
           price: item.price,
           total: item.total,
         })),
-        subtotal: returnDoc.subtotal || returnDoc.total,
-        total: returnDoc.total,
-        discount: 0,
         isReturn: true,
-      });
+      };
+
+      const pdfData = await convertToPDFData(
+        returnAsInvoice,
+        { id: returnDoc.customerId, name: returnDoc.customerName || "عميل" },
+        returnAsInvoice.items,
+        { name: returnDoc.userName }
+      );
+      pdfData.isReturn = true;
+      await printInvoice(pdfData);
     } catch (error) {
       console.error("Print return error:", error);
       toast.error("فشل في طباعة المرتجع");

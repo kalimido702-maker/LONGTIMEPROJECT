@@ -1213,37 +1213,37 @@ const POSv2 = () => {
           await db.update("customers", customerData);
         }
 
-        // Print return invoice if requested
+        // Print return invoice if requested (same format as sales invoice)
         if (print) {
           try {
-            const storeLogo = getSetting("storeLogo");
-            await downloadInvoicePDF(
-              {
-                invoiceNumber: returnId,
-                date: new Date().toLocaleDateString("ar-EG"),
-                customerName: customerData?.name || "عميل",
-                items: returnData.items.map((item, index) => ({
-                  name: item.productName,
-                  quantity: item.quantity,
-                  price: item.price,
-                  total: item.total,
-                  productCode: item.productId.substring(0, 8),
-                })),
-                subtotal: subtotal,
-                tax: taxAmt,
-                total: totalAmt,
-                isReturn: true,
-                salesRepName: user.name,
-              },
-              {
-                storeName,
-                storeAddress,
-                storePhone,
-                currency,
-                storeLogo,
-                showQRCode: true,
-              }
+            const { printInvoice, convertToPDFData } = await import("@/services/invoicePdfService");
+            const returnInvoiceLike = {
+              id: returnId,
+              invoiceNumber: returnId,
+              createdAt: new Date().toISOString(),
+              customerId: selectedCustomer,
+              customerName: customerData?.name || "عميل",
+              subtotal: subtotal,
+              total: totalAmt,
+              discount: 0,
+              items: cartItems.map((item) => ({
+                productId: item.id,
+                productName: item.nameAr || item.name,
+                quantity: item.quantity,
+                price: item.customPrice || item.price,
+                total: (item.customPrice || item.price) * item.quantity,
+                unitsPerCarton: item.unitsPerCarton,
+              })),
+              isReturn: true,
+            };
+            const pdfData = await convertToPDFData(
+              returnInvoiceLike,
+              customerData || { name: customerData?.name || "عميل" },
+              returnInvoiceLike.items,
+              { name: user.name }
             );
+            pdfData.isReturn = true;
+            await printInvoice(pdfData);
           } catch (error) {
             console.error("Print return error:", error);
             toast({ title: "فشل في طباعة المرتجع", variant: "destructive" });
