@@ -308,17 +308,24 @@ export class SmartSyncManager extends EventEmitter {
                 this.syncTimer = null;
             }
 
-            // 1.5. Push ALL pending local changes to server first (so nothing is lost)
-            console.log('[SmartSync] ⬆️ Pushing pending changes to server before clearing...');
+            // 1.5. Force push ALL local records to server (not just unsynced)
+            // This ensures new server columns (prices_json, unit_id, etc.) get populated
+            console.log('[SmartSync] ⬆️ Force pushing ALL records to server before clearing...');
             try {
-                const pushResult = await this.pushChanges();
-                result.pushed = pushResult.pushed;
-                console.log(`[SmartSync] ⬆️ Pushed ${pushResult.pushed} pending records to server`);
-                if (pushResult.errors.length > 0) {
-                    console.warn('[SmartSync] ⚠️ Some push errors:', pushResult.errors);
+                const forceResult = await this.forceRePushAllRecords();
+                result.pushed = forceResult.pushed;
+                console.log(`[SmartSync] ⬆️ Force pushed ${forceResult.pushed} records to server`);
+                if (forceResult.errors.length > 0) {
+                    console.warn('[SmartSync] ⚠️ Some push errors:', forceResult.errors);
                 }
             } catch (pushError: any) {
-                console.warn('[SmartSync] ⚠️ Push before clear failed (continuing anyway):', pushError.message);
+                console.warn('[SmartSync] ⚠️ Force push failed, trying regular push...', pushError.message);
+                try {
+                    const pushResult = await this.pushChanges();
+                    result.pushed = pushResult.pushed;
+                } catch (e: any) {
+                    console.warn('[SmartSync] ⚠️ Regular push also failed (continuing anyway):', e.message);
+                }
             }
 
             // 2. Clear ALL local syncable stores
@@ -368,7 +375,15 @@ export class SmartSyncManager extends EventEmitter {
                 console.warn('[SmartSync] ⚠️ Failed to reconstruct invoice items:', e);
             }
 
-            // 6. Post-pull: recalculate customer balances from invoices & payments
+            // 6. Post-pull: fix products (category names, prices, units)
+            console.log('[SmartSync] 📦 Post-processing products...');
+            try {
+                await this.postProcessProducts();
+            } catch (e) {
+                console.warn('[SmartSync] ⚠️ Failed to post-process products:', e);
+            }
+
+            // 7. Post-pull: recalculate customer balances from invoices & payments
             console.log('[SmartSync] 💰 Recalculating customer balances...');
             try {
                 await this.recalculateCustomerBalances();
@@ -427,6 +442,9 @@ export class SmartSyncManager extends EventEmitter {
         // 3. Perform Pull
         console.log('[SmartSync] Pulling all data from server...');
         const pullResult = await this.pullChanges();
+
+        // 3.5 Post-process products (resolve categories, prices, units)
+        try { await this.postProcessProducts(); } catch { /* ignore */ }
 
         // 4. Perform Push
         console.log('[SmartSync] Pushing all data to server...');
@@ -639,70 +657,18 @@ export class SmartSyncManager extends EventEmitter {
 
         // ===== Post-process server records =====
 
-        // For products: resolve category_id to category name and ensure numeric fields
+        // For products: only safe numeric coercion here
+        // Category resolution, prices reconstruction, unit assignment happen in postProcessProducts()
         if (tableName === 'products') {
-            // Resolve categoryId to category name
-            const catVal = String(record.categoryId || record.category || '');
-            if (catVal && /^\d+$/.test(catVal)) {
-                try {
-                    const catRepo = db.getRepository('productCategories');
-                    const categories = await catRepo.getAll();
-                    const matchedCat = categories.find((c: any) => String(c.id) === catVal);
-                    if (matchedCat) {
-                        record.category = matchedCat.nameAr || matchedCat.name || catVal;
-                        record.categoryId = catVal;
-                        console.log(`[SmartSync] Resolved category ID ${catVal} → "${record.category}" for product ${record.id}`);
-                    } else {
-                        record.categoryId = catVal;
-                    }
-                } catch (e) {
-                    console.warn(`[SmartSync] Error resolving category for product ${record.id}:`, e);
-                }
-            }
-            // Ensure numeric fields are actual numbers
             if (record.price !== undefined) record.price = Number(record.price) || 0;
             if (record.sellingPrice !== undefined) record.sellingPrice = Number(record.sellingPrice) || 0;
             if (record.costPrice !== undefined) record.costPrice = Number(record.costPrice) || 0;
             if (record.stock !== undefined) record.stock = Number(record.stock) || 0;
             if (record.minStock !== undefined) record.minStock = Number(record.minStock) || 0;
-
-            // Reconstruct prices object if null/empty (for products that were stored before prices_json migration)
-            if (!record.prices || (typeof record.prices === 'object' && Object.keys(record.prices).length === 0)) {
-                const basePrice = Number(record.sellingPrice) || Number(record.price) || 0;
-                if (basePrice > 0) {
-                    try {
-                        const priceTypesRepo = db.getRepository('priceTypes');
-                        const priceTypes = await priceTypesRepo.getAll();
-                        const defaultPriceType = priceTypes.find((pt: any) => pt.isDefault) || priceTypes[0];
-                        if (defaultPriceType) {
-                            record.prices = { [defaultPriceType.id]: basePrice };
-                            record.defaultPriceTypeId = record.defaultPriceTypeId || defaultPriceType.id;
-                            console.log(`[SmartSync] Reconstructed prices for product ${record.id}: ${JSON.stringify(record.prices)}`);
-                        }
-                    } catch (e) {
-                        console.warn(`[SmartSync] Could not reconstruct prices for product ${record.id}:`, e);
-                    }
-                }
-            }
-            // Ensure prices values are numbers
+            // Ensure prices values are numbers if they exist
             if (record.prices && typeof record.prices === 'object') {
                 for (const key of Object.keys(record.prices)) {
                     record.prices[key] = Number(record.prices[key]) || 0;
-                }
-            }
-
-            // Resolve unitId - if null, try to assign default unit
-            if (!record.unitId) {
-                try {
-                    const unitsRepo = db.getRepository('units');
-                    const units = await unitsRepo.getAll();
-                    const defaultUnit = units.find((u: any) => u.isDefault || u.isBase) || units[0];
-                    if (defaultUnit) {
-                        record.unitId = defaultUnit.id;
-                        console.log(`[SmartSync] Assigned default unit ${defaultUnit.id} (${defaultUnit.name}) to product ${record.id}`);
-                    }
-                } catch (e) {
-                    console.warn(`[SmartSync] Could not resolve unit for product ${record.id}:`, e);
                 }
             }
         }
@@ -925,7 +891,146 @@ export class SmartSyncManager extends EventEmitter {
         }
     }
 
+    /**
+     * Post-process products after ALL tables have been pulled.
+     * Resolves category IDs to names, reconstructs prices from sellingPrice,
+     * and assigns default units — all dependent on other stores being populated first.
+     */
+    private async postProcessProducts(): Promise<void> {
+        const db = getDatabaseService();
+        try {
+            const productsRepo = db.getRepository('products');
+            const allProducts = await productsRepo.getAll();
+
+            if (allProducts.length === 0) return;
+
+            // Load lookup data
+            let categories: any[] = [];
+            let priceTypes: any[] = [];
+            let units: any[] = [];
+            try { categories = await db.getRepository('productCategories').getAll(); } catch { /* empty */ }
+            try { priceTypes = await db.getRepository('priceTypes').getAll(); } catch { /* empty */ }
+            try { units = await db.getRepository('units').getAll(); } catch { /* empty */ }
+
+            const categoryMap: Record<string, any> = {};
+            categories.forEach((c: any) => { categoryMap[String(c.id)] = c; });
+
+            const defaultPriceType = priceTypes.find((pt: any) => pt.isDefault) || priceTypes[0];
+            const defaultUnit = units.find((u: any) => u.isDefault || u.isBase) || units[0];
+
+            let updatedCount = 0;
+
+            for (const product of allProducts) {
+                const p = product as any;
+                let changed = false;
+
+                // 1. Resolve category ID to category name
+                const catVal = String(p.categoryId || p.category || '');
+                if (catVal && /^\d+$/.test(catVal) && categoryMap[catVal]) {
+                    const cat = categoryMap[catVal];
+                    p.category = cat.nameAr || cat.name || catVal;
+                    p.categoryId = catVal;
+                    changed = true;
+                }
+
+                // 2. Reconstruct prices if null/empty
+                if (!p.prices || (typeof p.prices === 'object' && Object.keys(p.prices).length === 0)) {
+                    const basePrice = Number(p.sellingPrice) || Number(p.price) || 0;
+                    if (basePrice > 0 && defaultPriceType) {
+                        p.prices = { [defaultPriceType.id]: basePrice };
+                        p.defaultPriceTypeId = p.defaultPriceTypeId || defaultPriceType.id;
+                        changed = true;
+                        console.log(`[SmartSync] 📦 Reconstructed prices for "${p.name}": ${JSON.stringify(p.prices)}`);
+                    }
+                }
+
+                // 3. Assign default unit if missing
+                if (!p.unitId && defaultUnit) {
+                    p.unitId = defaultUnit.id;
+                    changed = true;
+                    console.log(`[SmartSync] 📦 Assigned unit "${defaultUnit.name}" to "${p.name}"`);
+                }
+
+                // 4. Ensure numeric fields
+                if (p.prices && typeof p.prices === 'object') {
+                    for (const key of Object.keys(p.prices)) {
+                        p.prices[key] = Number(p.prices[key]) || 0;
+                    }
+                }
+
+                if (changed) {
+                    await productsRepo.updateFromServer(p.id, p);
+                    updatedCount++;
+                }
+            }
+
+            console.log(`[SmartSync] 📦 Post-processed ${updatedCount}/${allProducts.length} products (categories: ${categories.length}, priceTypes: ${priceTypes.length}, units: ${units.length})`);
+        } catch (error) {
+            console.error('[SmartSync] Error post-processing products:', error);
+        }
+    }
+
     // ==================== Push (Local → Server) ====================
+
+    /**
+     * Force re-push ALL records to server (not just unsynced ones)
+     * This is used before forceServerOverwrite to ensure new server columns
+     * (like prices_json, unit_id, etc.) get populated from existing local data.
+     */
+    private async forceRePushAllRecords(): Promise<SyncResult> {
+        console.log('[SmartSync] ⬆️ Force re-pushing ALL records...');
+
+        const result: SyncResult = {
+            pulled: 0,
+            pushed: 0,
+            conflicts: 0,
+            errors: [],
+        };
+
+        try {
+            const db = getDatabaseService();
+            const allRecords: Array<{ table: string; record: any }> = [];
+
+            for (const tableName of SYNCABLE_TABLES) {
+                try {
+                    const storeName = getStoreName(tableName);
+                    const repo = db.getRepository(storeName);
+                    const records = await repo.getAll();
+
+                    for (const record of records) {
+                        allRecords.push({ table: tableName, record });
+                    }
+                    console.log(`[SmartSync] 📦 ${tableName}: ${records.length} records to push`);
+                } catch (e) {
+                    console.warn(`[SmartSync] ⚠️ Could not read ${tableName} for re-push`);
+                }
+            }
+
+            if (allRecords.length === 0) {
+                console.log('[SmartSync] No records to re-push');
+                return result;
+            }
+
+            console.log(`[SmartSync] ⬆️ Force re-pushing ${allRecords.length} total records...`);
+
+            // Send in batches
+            const batches = this.createBatches(allRecords, this.config.batchSize);
+
+            for (const batch of batches) {
+                const batchResult = await this.pushBatch(batch);
+                result.pushed += batchResult.pushed;
+                result.conflicts += batchResult.conflicts;
+                result.errors.push(...batchResult.errors);
+            }
+
+            console.log(`[SmartSync] ✅ Force re-pushed ${result.pushed} records`);
+        } catch (error: any) {
+            console.error('[SmartSync] Force re-push failed:', error);
+            result.errors.push(error.message);
+        }
+
+        return result;
+    }
 
     /**
      * Push local changes to server

@@ -424,12 +424,32 @@ export class SyncService {
           const [rows] = await connection.query<RowDataPacket[]>(query, queryParams);
 
           for (const row of rows) {
-            // DEBUG: Log raw row and mapped data to diagnose empty data issue
             const mappedData = FieldMapper.serverToClient(table_name, row);
-            console.log(`[SyncService DEBUG] Table: ${table_name}`);
-            console.log(`[SyncService DEBUG] Raw row keys:`, Object.keys(row));
-            console.log(`[SyncService DEBUG] Raw row.id:`, row.id);
-            console.log(`[SyncService DEBUG] Mapped data:`, JSON.stringify(mappedData));
+
+            // For products: if prices is null/empty, reconstruct from selling_price
+            if (table_name === 'products') {
+              // Log for debugging
+              logger.info({
+                id: row.id,
+                name: row.name,
+                raw_prices_json: row.prices_json,
+                mapped_prices: mappedData.prices,
+                selling_price: row.selling_price,
+                unit_id: row.unit_id,
+                category_id: row.category_id,
+              }, '[DEBUG] Product PULL - raw vs mapped');
+
+              // Ensure sellingPrice is set (maps from selling_price)
+              if (mappedData.sellingPrice !== undefined) {
+                mappedData.sellingPrice = Number(mappedData.sellingPrice) || 0;
+              }
+              if (mappedData.price !== undefined) {
+                mappedData.price = Number(mappedData.price) || 0;
+              }
+              if (mappedData.costPrice !== undefined) {
+                mappedData.costPrice = Number(mappedData.costPrice) || 0;
+              }
+            }
 
             response.changes.push({
               table_name,
@@ -544,6 +564,19 @@ export class SyncService {
     branch_id: string | number,
     is_deleted: boolean
   ): Promise<void> {
+    // DEBUG: Log raw client data for products
+    if (table_name === 'products') {
+      logger.info({
+        record_id,
+        raw_prices: data.prices,
+        raw_unitId: data.unitId,
+        raw_category: data.category,
+        raw_categoryId: data.categoryId,
+        raw_defaultPriceTypeId: data.defaultPriceTypeId,
+        raw_keys: Object.keys(data).filter(k => ['prices', 'unitId', 'category', 'categoryId', 'defaultPriceTypeId', 'price', 'sellingPrice', 'costPrice', 'expiryDate', 'hasMultipleUnits'].includes(k)),
+      }, `[DEBUG] Product push - RAW client data`);
+    }
+
     // Transform client data to server format (includes client_id, branch_id)
     const transformedData = FieldMapper.clientToServer(
       table_name,
@@ -551,6 +584,20 @@ export class SyncService {
       client_id,
       branch_id
     );
+
+    // DEBUG: Log transformed data for products
+    if (table_name === 'products') {
+      logger.info({
+        record_id,
+        prices_json: transformedData.prices_json,
+        unit_id: transformedData.unit_id,
+        category_id: transformedData.category_id,
+        default_price_type_id: transformedData.default_price_type_id,
+        selling_price: transformedData.selling_price,
+        has_multiple_units: transformedData.has_multiple_units,
+        transformed_keys: Object.keys(transformedData),
+      }, `[DEBUG] Product push - TRANSFORMED server data`);
+    }
 
     // Add metadata fields (id and is_deleted)
     // Note: transformedData already has client_id and branch_id
@@ -626,6 +673,19 @@ export class SyncService {
       client_id,
       branch_id
     );
+
+    // DEBUG: Log transformed data for products on update
+    if (table_name === 'products') {
+      logger.info({
+        record_id,
+        raw_prices: data.prices,
+        raw_unitId: data.unitId,
+        prices_json: transformedData.prices_json,
+        unit_id: transformedData.unit_id,
+        default_price_type_id: transformedData.default_price_type_id,
+        transformed_keys: Object.keys(transformedData),
+      }, `[DEBUG] Product UPDATE - transformed data`);
+    }
 
     // Remove fields that shouldn't be updated manually
     delete transformedData.id;
