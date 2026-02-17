@@ -38,8 +38,8 @@ jobs:
         with:
           name: mahaly-pos-windows
           path: |
-            release/*.exe
-            release/*.msi
+            release/*setup*.exe
+            release/*Setup*.exe
           retention-days: 30
 
       # --------- رفع على GoFile (تخزين مجاني + رابط مباشر) ---------
@@ -47,18 +47,19 @@ jobs:
         id: find_file
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -Path release -Filter "*.exe" | Select-Object -First 1
-          if ($exe) {
-            echo "FILE_PATH=$($exe.FullName)" >> $env:GITHUB_OUTPUT
-            echo "FILE_NAME=$($exe.Name)" >> $env:GITHUB_OUTPUT
-            echo "Found: $($exe.Name)"
+          # البحث عن ملف Setup فقط (الملف الوحيد اللي بيشتغل)
+          $setup = Get-ChildItem -Path release -Filter "*setup*.exe" | Select-Object -First 1
+          if (-not $setup) {
+            $setup = Get-ChildItem -Path release -Filter "*Setup*.exe" | Select-Object -First 1
+          }
+          if ($setup) {
+            echo "FILE_PATH=$($setup.FullName)" >> $env:GITHUB_OUTPUT
+            echo "FILE_NAME=$($setup.Name)" >> $env:GITHUB_OUTPUT
+            echo "Found Setup: $($setup.Name)"
           } else {
-            echo "No .exe found, looking for portable..."
-            $portable = Get-ChildItem -Path release -Filter "*.exe" -Recurse | Select-Object -First 1
-            if ($portable) {
-              echo "FILE_PATH=$($portable.FullName)" >> $env:GITHUB_OUTPUT
-              echo "FILE_NAME=$($portable.Name)" >> $env:GITHUB_OUTPUT
-            }
+            echo "No Setup .exe found!"
+            echo "Available files:"
+            Get-ChildItem -Path release -Filter "*.exe" | ForEach-Object { echo "  - $($_.Name)" }
           }
 
       - name: Upload to GoFile
@@ -166,8 +167,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            release/*.exe
-            release/*.msi
+            release/*setup*.exe
+            release/*Setup*.exe
           draft: false
           prerelease: false
           body: |
