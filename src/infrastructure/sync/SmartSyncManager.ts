@@ -308,6 +308,19 @@ export class SmartSyncManager extends EventEmitter {
                 this.syncTimer = null;
             }
 
+            // 1.5. Push ALL pending local changes to server first (so nothing is lost)
+            console.log('[SmartSync] ⬆️ Pushing pending changes to server before clearing...');
+            try {
+                const pushResult = await this.pushChanges();
+                result.pushed = pushResult.pushed;
+                console.log(`[SmartSync] ⬆️ Pushed ${pushResult.pushed} pending records to server`);
+                if (pushResult.errors.length > 0) {
+                    console.warn('[SmartSync] ⚠️ Some push errors:', pushResult.errors);
+                }
+            } catch (pushError: any) {
+                console.warn('[SmartSync] ⚠️ Push before clear failed (continuing anyway):', pushError.message);
+            }
+
             // 2. Clear ALL local syncable stores
             console.log('[SmartSync] 🗑️ Clearing all local data...');
             const db = getDatabaseService();

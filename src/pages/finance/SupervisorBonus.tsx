@@ -59,6 +59,7 @@ interface SupervisorBonusRecord {
     userName: string;
     notes?: string;
     salesReps: { id: string; name: string; sales: number }[];
+    invoiceIds?: string[]; // track individual invoices to prevent duplicates
 }
 
 const SupervisorBonus = () => {
@@ -297,14 +298,36 @@ const SupervisorBonus = () => {
             localStorage.getItem("supervisorBonuses") || "[]"
         ) as SupervisorBonusRecord[];
 
-        const duplicateBonus = existingBonuses.find(
-            b => b.supervisorId === selectedSupervisorId &&
-                b.periodStart === dateFrom &&
-                b.periodEnd === dateTo
-        );
+        // Collect invoice IDs for this bonus period
+        const startDate = new Date(dateFrom);
+        const endDate = new Date(dateTo + "T23:59:59");
+        const teamRepIds = teamMembers.map(rep => rep.id);
+        const periodInvoiceIds = invoices
+            .filter(inv => {
+                const invDate = new Date(inv.createdAt);
+                const isInPeriod = invDate >= startDate && invDate <= endDate;
+                const invoiceSalesRepId = inv.salesRepId || customerSalesRepMap[inv.customerId || ""] || "";
+                const isTeamInvoice = teamRepIds.includes(invoiceSalesRepId);
+                return isInPeriod && isTeamInvoice;
+            })
+            .map(inv => String(inv.id));
 
-        if (duplicateBonus) {
-            toast.error("يوجد بونص مُسجل بالفعل لهذا المشرف في نفس الفترة");
+        // Check if ANY of these invoices were already bonused
+        const alreadyBonusedInvoiceIds = new Set<string>();
+        existingBonuses.forEach(b => {
+            if (b.invoiceIds) {
+                b.invoiceIds.forEach(id => alreadyBonusedInvoiceIds.add(id));
+            }
+        });
+
+        const duplicateInvoiceIds = periodInvoiceIds.filter(id => alreadyBonusedInvoiceIds.has(id));
+        if (duplicateInvoiceIds.length > 0) {
+            toast.error(`${duplicateInvoiceIds.length} فاتورة من هذه الفترة تم احتساب بونص عليها مسبقاً. لا يمكن تسجيل بونص مكرر.`);
+            return;
+        }
+
+        if (periodInvoiceIds.length === 0) {
+            toast.error("لا توجد فواتير لتسجيل بونص عليها");
             return;
         }
 
@@ -329,6 +352,7 @@ const SupervisorBonus = () => {
                 userName: user?.username || user?.name || "",
                 notes: useCategoryBonus ? `${notes ? notes + " | " : ""}بونص حسب القسم` : notes,
                 salesReps: teamSalesData.byRep,
+                invoiceIds: periodInvoiceIds,
             };
 
             // Save to localStorage (use existingBonuses already loaded for duplicate check)
