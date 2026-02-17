@@ -234,7 +234,17 @@ const POSv2 = () => {
       db.getAll<SalesRep>("salesReps"),
     ]);
 
-    setProducts(productsData);
+    setProducts(productsData.map((p) => {
+      if (p.category && /^\d+$/.test(String(p.category))) {
+        const matchedCat = categoriesData.find(
+          (c) => String(c.id) === String(p.category)
+        );
+        if (matchedCat) {
+          return { ...p, category: matchedCat.nameAr || matchedCat.name || p.category, categoryId: String(p.category) };
+        }
+      }
+      return p;
+    }));
     setCategories(categoriesData.filter((c) => c.active));
     setCustomers(customersData);
     setSalesReps(salesRepsData);

@@ -621,6 +621,30 @@ export class SmartSyncManager extends EventEmitter {
             return;
         }
 
+        // For products: resolve category_id to category name
+        if (tableName === 'products' && record.category) {
+            const catVal = String(record.category);
+            // If category looks like a numeric ID, resolve it to the actual category name
+            if (/^\d+$/.test(catVal)) {
+                try {
+                    const catRepo = db.getRepository('productCategories');
+                    const categories = await catRepo.getAll();
+                    const matchedCat = categories.find((c: any) => String(c.id) === catVal);
+                    if (matchedCat) {
+                        record.category = matchedCat.nameAr || matchedCat.name || catVal;
+                        record.categoryId = catVal;
+                        console.log(`[SmartSync] Resolved category ID ${catVal} → "${record.category}" for product ${record.id}`);
+                    } else {
+                        // Category not found locally yet, keep the ID for now
+                        record.categoryId = catVal;
+                        console.log(`[SmartSync] Category ID ${catVal} not found locally for product ${record.id}`);
+                    }
+                } catch (e) {
+                    console.warn(`[SmartSync] Error resolving category for product ${record.id}:`, e);
+                }
+            }
+        }
+
         // DEBUG: Log incoming record details
         console.log(`[SmartSync DEBUG] Applying record to ${tableName} (store: ${storeName}):`, {
             id: record.id,

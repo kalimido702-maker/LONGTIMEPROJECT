@@ -124,13 +124,30 @@ const Inventory = () => {
   const loadData = async () => {
     await db.init();
     const productsData = await db.getAll<Product>("products");
-    setProducts(productsData);
 
     const categoriesData = await db.getAll<ProductCategory>(
       "productCategories"
     );
     const activeCategories = categoriesData.filter((c) => c.active);
     setCategories(activeCategories);
+
+    // Resolve category IDs to names for products that have numeric category values
+    const resolvedProducts = productsData.map((p) => {
+      if (p.category && /^\d+$/.test(String(p.category))) {
+        const matchedCat = categoriesData.find(
+          (c) => String(c.id) === String(p.category)
+        );
+        if (matchedCat) {
+          return {
+            ...p,
+            category: matchedCat.nameAr || matchedCat.name || p.category,
+            categoryId: String(p.category),
+          };
+        }
+      }
+      return p;
+    });
+    setProducts(resolvedProducts);
 
     const unitsData = await db.getAll<Unit>("units");
     setUnits(unitsData);

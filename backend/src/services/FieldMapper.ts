@@ -44,6 +44,7 @@ interface FieldMapping {
     serverField: string;
     defaultValue?: any;
     transform?: (value: any) => any;
+    clientToServerOnly?: boolean; // If true, this mapping is only used for client→server, not reversed
 }
 
 interface TableMapping {
@@ -94,7 +95,7 @@ const PRODUCTS_MAPPING: TableMapping = {
         { clientField: 'taxRate', serverField: 'tax_rate', defaultValue: 0 },
         { clientField: 'discountRate', serverField: 'discount_rate', defaultValue: 0 },
         { clientField: 'active', serverField: 'active', defaultValue: true },
-        { clientField: 'category', serverField: 'category_id', transform: validateId },
+        { clientField: 'category', serverField: 'category_id', transform: validateId, clientToServerOnly: true },
         { clientField: 'categoryId', serverField: 'category_id', transform: validateId },
         { clientField: 'imageUrl', serverField: 'image_url', transform: skipBase64 },
         { clientField: 'createdAt', serverField: 'created_at', transform: toMySQLDateTime },
@@ -840,6 +841,9 @@ export class FieldMapper {
 
         // Reverse mapping
         for (const fieldMap of mapping.fields) {
+            // Skip client-to-server-only mappings (e.g., category name → category_id)
+            if (fieldMap.clientToServerOnly) continue;
+
             const serverValue = serverData[fieldMap.serverField];
 
             if (serverValue !== undefined) {

@@ -146,7 +146,18 @@ const Reports = () => {
         ]);
       setInvoices(inv);
       setCustomers(cust);
-      setProducts(prod);
+      // Resolve category IDs to names for products
+      setProducts(prod.map((p: Product) => {
+        if (p.category && /^\d+$/.test(String(p.category))) {
+          const matchedCat = cats.find(
+            (c: ProductCategory) => String(c.id) === String(p.category)
+          );
+          if (matchedCat) {
+            return { ...p, category: matchedCat.nameAr || matchedCat.name || p.category, categoryId: String(p.category) };
+          }
+        }
+        return p;
+      }));
       setSalesReturns(salesRet);
       setShifts(shft);
       setEmployees(emp);
