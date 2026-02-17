@@ -1213,7 +1213,42 @@ const POSv2 = () => {
           await db.update("customers", customerData);
         }
 
-
+        // Print return invoice if requested
+        if (print) {
+          try {
+            const storeLogo = getSetting("storeLogo");
+            await downloadInvoicePDF(
+              {
+                invoiceNumber: returnId,
+                date: new Date().toLocaleDateString("ar-EG"),
+                customerName: customerData?.name || "عميل",
+                items: returnData.items.map((item, index) => ({
+                  name: item.productName,
+                  quantity: item.quantity,
+                  price: item.price,
+                  total: item.total,
+                  productCode: item.productId.substring(0, 8),
+                })),
+                subtotal: subtotal,
+                tax: taxAmt,
+                total: totalAmt,
+                isReturn: true,
+                salesRepName: user.name,
+              },
+              {
+                storeName,
+                storeAddress,
+                storePhone,
+                currency,
+                storeLogo,
+                showQRCode: true,
+              }
+            );
+          } catch (error) {
+            console.error("Print return error:", error);
+            toast({ title: "فشل في طباعة المرتجع", variant: "destructive" });
+          }
+        }
 
         toast({ title: "تم حفظ فاتورة المرتجع بنجاح" });
         setMode("sales");

@@ -468,24 +468,31 @@ const TABLE_MAPPINGS: Record<string, TableMapping> = {
         ],
         clientOnlyFields: ['local_updated_at'],
     },
-    // Sales Returns - MySQL: original_invoice_id, customer_id, total_amount, total, reason, status
+    // Sales Returns - MySQL: original_invoice_id, customer_id, total_amount, total, reason, status, items_json, customer_name, refund_status, refund_method, user_id, user_name, tax, subtotal
     sales_returns: {
         fields: [
             { clientField: 'id', serverField: 'id' },
             { clientField: 'originalInvoiceId', serverField: 'original_invoice_id', transform: validateId },
-            { clientField: 'invoiceId', serverField: 'original_invoice_id', transform: validateId },
             { clientField: 'customerId', serverField: 'customer_id', transform: validateId },
+            { clientField: 'customerName', serverField: 'customer_name' },
             { clientField: 'totalAmount', serverField: 'total_amount' },
             { clientField: 'total', serverField: 'total' },
-            { clientField: 'subtotal', serverField: 'total' },
+            { clientField: 'subtotal', serverField: 'subtotal' },
+            { clientField: 'tax', serverField: 'tax' },
             { clientField: 'reason', serverField: 'reason' },
             { clientField: 'status', serverField: 'status', defaultValue: 'completed' },
+            { clientField: 'refundStatus', serverField: 'refund_status', defaultValue: 'completed' },
+            { clientField: 'refundMethod', serverField: 'refund_method', defaultValue: 'cash' },
+            { clientField: 'deliveryStatus', serverField: 'delivery_status', defaultValue: 'delivered' },
+            { clientField: 'userId', serverField: 'user_id', transform: validateId },
+            { clientField: 'userName', serverField: 'user_name' },
+            { clientField: 'items', serverField: 'items_json', transform: toJsonString, reverseTransform: fromJsonString },
             { clientField: 'returnDate', serverField: 'return_date', transform: toMySQLDateTime },
             { clientField: 'createdAt', serverField: 'return_date', transform: toMySQLDateTime },
             { clientField: 'createdAt', serverField: 'created_at', transform: toMySQLDateTime },
             { clientField: 'updatedAt', serverField: 'updated_at', transform: toMySQLDateTime },
         ],
-        clientOnlyFields: ['local_updated_at', 'items', 'customerName', 'invoiceNumber', 'refundMethod', 'refundStatus', 'deliveryStatus', 'userName', 'userId', 'tax'],
+        clientOnlyFields: ['local_updated_at', 'invoiceNumber'],
     },
     // WhatsApp Accounts - MySQL: name, phone, status, daily_limit, daily_sent, last_reset_date, anti_spam_delay, is_active, last_connected_at
     whatsapp_accounts: {

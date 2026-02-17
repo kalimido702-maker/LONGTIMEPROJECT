@@ -33,7 +33,6 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { toast } from "sonner";
-import { pdfService } from "@/lib/printing/pdfService";
 import { calculateSingleCustomerBalance } from "@/hooks/useCustomerBalances";
 
 const SalesReturns = () => {
@@ -350,41 +349,39 @@ const SalesReturns = () => {
     return Math.round(amount) + " " + currency;
   };
 
-  // طباعة فاتورة المرتجع
+  // طباعة فاتورة المرتجع - نفس شكل فاتورة البيع مع عنوان "مرتجع"
   const handlePrintReturn = async (returnDoc: SalesReturn) => {
-    const storeName = getSetting("storeName") || "المتجر";
-    const storeAddress = getSetting("storeAddress");
-    const storePhone = getSetting("storePhone");
-    const storeLogo = getSetting("storeLogo");
-    const currency = getSetting("currency") || "EGP";
+    try {
+      const { printInvoice } = await import("@/services/invoicePdfService");
+      const items = (returnDoc.items || []);
+      
+      if (items.length === 0) {
+        toast.error("لا توجد منتجات في هذا المرتجع للطباعة");
+        return;
+      }
 
-    await pdfService.downloadInvoicePDF(
-      {
+      await printInvoice({
+        id: returnDoc.id,
         invoiceNumber: returnDoc.id,
         date: new Date(returnDoc.createdAt).toLocaleDateString("ar-EG"),
         customerName: returnDoc.customerName || "عميل",
-        items: returnDoc.items.map((item, index) => ({
-          name: item.productName,
+        salesRepName: returnDoc.userName,
+        items: items.map((item) => ({
+          productName: item.productName,
+          productCode: item.productId?.substring(0, 8) || "",
           quantity: item.quantity,
           price: item.price,
           total: item.total,
-          productCode: item.productId.substring(0, 8),
         })),
-        subtotal: returnDoc.subtotal,
-        tax: returnDoc.tax,
+        subtotal: returnDoc.subtotal || returnDoc.total,
         total: returnDoc.total,
+        discount: 0,
         isReturn: true,
-        salesRepName: returnDoc.userName,
-      },
-      {
-        storeName,
-        storeAddress,
-        storePhone,
-        currency,
-        storeLogo,
-        showQRCode: true,
-      }
-    );
+      });
+    } catch (error) {
+      console.error("Print return error:", error);
+      toast.error("فشل في طباعة المرتجع");
+    }
   };
 
   const formatDate = (date: string) => {
@@ -432,7 +429,7 @@ const SalesReturns = () => {
     }
     try {
       // إعادة الكميات للمخزون (عكس المرتجع)
-      for (const item of returnDoc.items) {
+      for (const item of (returnDoc.items || [])) {
         try {
           const product = await db.get<Product>("products", item.productId);
           if (product) {
@@ -548,8 +545,8 @@ const SalesReturns = () => {
                   const matchesSearch = !returnsSearchQuery ||
                     returnDoc.id.toLowerCase().includes(searchLower) ||
                     returnDoc.customerName?.toLowerCase().includes(searchLower) ||
-                    returnDoc.items.some((item) =>
-                      item.productName.toLowerCase().includes(searchLower)
+                    (returnDoc.items || []).some((item) =>
+                      item.productName?.toLowerCase().includes(searchLower)
                     );
 
                   // Date filter
@@ -575,7 +572,10 @@ const SalesReturns = () => {
                   );
                 }
 
-                return filteredReturns.map((returnDoc) => (
+                return filteredReturns.map((returnDoc) => {
+                  // Default refundStatus to 'completed' if missing
+                  const status = returnDoc.refundStatus || "completed";
+                  return (
                   <Card key={returnDoc.id} className="p-4">
                     <div className="flex justify-between items-start">
                       <div>
@@ -583,16 +583,16 @@ const SalesReturns = () => {
                           <FileText className="h-4 w-4" />
                           <span className="font-bold">{returnDoc.id}</span>
                           <span
-                            className={`px-2 py-1 rounded text-xs ${returnDoc.refundStatus === "completed"
+                            className={`px-2 py-1 rounded text-xs ${status === "completed"
                               ? "bg-green-100 text-green-800"
-                              : returnDoc.refundStatus === "pending"
+                              : status === "pending"
                                 ? "bg-yellow-100 text-yellow-800"
                                 : "bg-red-100 text-red-800"
                               }`}
                           >
-                            {returnDoc.refundStatus === "completed"
+                            {status === "completed"
                               ? "مكتمل"
-                              : returnDoc.refundStatus === "pending"
+                              : status === "pending"
                                 ? "قيد الانتظار"
                                 : "مرفوض"}
                           </span>
@@ -615,7 +615,7 @@ const SalesReturns = () => {
                           {formatCurrency(returnDoc.total)}
                         </p>
                         <p className="text-sm text-muted-foreground">
-                          عدد المنتجات: {returnDoc.items.length}
+                          عدد المنتجات: {(returnDoc.items || []).length}
                         </p>
                         <div className="flex gap-2">
                           <Button
@@ -662,7 +662,8 @@ const SalesReturns = () => {
                       </div>
                     </div>
                   </Card>
-                ));
+                  );
+                });
               })()}
             </div>
           </Card>

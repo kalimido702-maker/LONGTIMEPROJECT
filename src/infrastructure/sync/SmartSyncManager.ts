@@ -697,6 +697,25 @@ export class SmartSyncManager extends EventEmitter {
             if (record.amount !== undefined) record.amount = Number(record.amount) || 0;
         }
 
+        // For sales_returns: ensure numeric fields and defaults
+        if (tableName === 'sales_returns') {
+            if (record.total !== undefined) record.total = Number(record.total) || 0;
+            if (record.subtotal !== undefined) record.subtotal = Number(record.subtotal) || 0;
+            if (record.tax !== undefined) record.tax = Number(record.tax) || 0;
+            if (record.totalAmount !== undefined) record.totalAmount = Number(record.totalAmount) || 0;
+            // Default refundStatus to 'completed' if missing
+            if (!record.refundStatus) record.refundStatus = 'completed';
+            // Default refundMethod to 'cash' if missing
+            if (!record.refundMethod) record.refundMethod = 'cash';
+            // Default deliveryStatus to 'delivered' if missing
+            if (!record.deliveryStatus) record.deliveryStatus = 'delivered';
+            // Ensure items is an array (may come from items_json via FieldMapper)
+            if (record.items && typeof record.items === 'string') {
+                try { record.items = JSON.parse(record.items); } catch { record.items = []; }
+            }
+            if (!Array.isArray(record.items)) record.items = [];
+        }
+
         // For customers: ensure numeric fields
         if (tableName === 'customers') {
             if (record.balance !== undefined) record.balance = Number(record.balance) || 0;
