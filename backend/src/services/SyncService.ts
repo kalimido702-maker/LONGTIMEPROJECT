@@ -599,6 +599,22 @@ export class SyncService {
       }, `[DEBUG] Product push - TRANSFORMED server data`);
     }
 
+    // Sanitize empty strings for DATETIME columns (MySQL rejects '' for DATETIME)
+    for (const key of Object.keys(transformedData)) {
+      if (
+        (key.endsWith('_date') || key.endsWith('_at') || key === 'expiry_date') &&
+        transformedData[key] === ''
+      ) {
+        transformedData[key] = null;
+      }
+    }
+
+    // Also sanitize boolean fields for MySQL
+    for (const key of Object.keys(transformedData)) {
+      if (transformedData[key] === true) transformedData[key] = 1;
+      if (transformedData[key] === false) transformedData[key] = 0;
+    }
+
     // Add metadata fields (id and is_deleted)
     // Note: transformedData already has client_id and branch_id
     // For settings table, use record_id (which is the key) as part of id generation
@@ -685,6 +701,22 @@ export class SyncService {
         default_price_type_id: transformedData.default_price_type_id,
         transformed_keys: Object.keys(transformedData),
       }, `[DEBUG] Product UPDATE - transformed data`);
+    }
+
+    // Sanitize empty strings for DATETIME columns (MySQL rejects '' for DATETIME)
+    for (const key of Object.keys(transformedData)) {
+      if (
+        (key.endsWith('_date') || key.endsWith('_at') || key === 'expiry_date') &&
+        transformedData[key] === ''
+      ) {
+        transformedData[key] = null;
+      }
+    }
+
+    // Also sanitize boolean fields for MySQL
+    for (const key of Object.keys(transformedData)) {
+      if (transformedData[key] === true) transformedData[key] = 1;
+      if (transformedData[key] === false) transformedData[key] = 0;
     }
 
     // Remove fields that shouldn't be updated manually
