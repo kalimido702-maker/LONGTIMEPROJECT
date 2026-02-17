@@ -43,9 +43,10 @@ const AppContent = () => {
   // تشغيل بوت الواتساب
   useWhatsAppBot();
   
-  // تنظيف عام عند تحميل التطبيق
+  // تنظيف عام عند تحميل التطبيق - لمنع تجميد الواجهة
   useEffect(() => {
     const globalCleanup = () => {
+      // إزالة الأوفرلايز المغلقة أو اليتيمة
       const allOverlays = document.querySelectorAll(
         "[data-radix-dialog-overlay], [data-radix-popover-content], [data-radix-select-content]"
       );
@@ -56,15 +57,53 @@ const AppContent = () => {
         }
       });
 
+      // إصلاح pointer-events المعلق على body
       if (document.body.style.pointerEvents === "none") {
         document.body.style.removeProperty("pointer-events");
       }
+
+      // إزالة scroll lock المعلق من Radix
+      if (document.body.hasAttribute("data-scroll-locked")) {
+        document.body.removeAttribute("data-scroll-locked");
+        document.body.style.removeProperty("overflow");
+        document.body.style.removeProperty("padding-right");
+        document.body.style.removeProperty("margin-right");
+        document.body.style.removeProperty("--removed-body-scroll-bar-size");
+      }
+
+      // التأكد من أن body ليس عليها أي إعاقة
+      const computedStyle = window.getComputedStyle(document.body);
+      if (computedStyle.pointerEvents === "none") {
+        document.body.style.pointerEvents = "auto";
+      }
     };
 
+    // تنظيف فوري + كل ثانية
     globalCleanup();
-    const intervalId = setInterval(globalCleanup, 5000);
+    const intervalId = setInterval(globalCleanup, 1000);
 
-    return () => clearInterval(intervalId);
+    // MutationObserver لاكتشاف التغييرات على body فوراً
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === "attributes" && mutation.target === document.body) {
+          const attr = mutation.attributeName;
+          if (attr === "style" || attr === "data-scroll-locked") {
+            // تأخير بسيط عشان Radix يكمل شغله الأول
+            setTimeout(globalCleanup, 300);
+          }
+        }
+      }
+    });
+
+    observer.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["style", "data-scroll-locked"],
+    });
+
+    return () => {
+      clearInterval(intervalId);
+      observer.disconnect();
+    };
   }, []);
 
   return (

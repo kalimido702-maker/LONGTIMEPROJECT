@@ -396,7 +396,7 @@ export default function Invoices() {
             const message = `🧾 *فاتورة رقم ${invoice.invoiceNumber || invoice.id}*\n` +
                 `*العميل:* ${invoice.customerName}\n` +
                 `*الإجمالي:* ${formatCurrency(invoice.total)}\n\n` +
-                `شركة لونج تايم للصناعة الكهربائية`;
+                `شركة لونج تايم للصناعات الكهربائية`;
 
             const phone = customer.phone.replace(/[^0-9]/g, "");
 

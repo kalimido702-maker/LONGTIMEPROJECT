@@ -209,8 +209,16 @@ All colors MUST be HSL.
     direction: rtl;
   }
 
-  /* Smooth animations */
-  * {
+  /* Smooth animations - فقط على العناصر التفاعلية بدل كل العناصر */
+  /* ملاحظة: * { transition } كانت تسبب تجميد الواجهة لأنها تتعارض مع animations بتاعة Radix UI */
+  button,
+  a,
+  input,
+  textarea,
+  select,
+  [role="button"],
+  .transition-all,
+  .transition-colors {
     transition: var(--transition-fast);
   }
 
@@ -220,6 +228,11 @@ All colors MUST be HSL.
   select {
     pointer-events: auto !important;
     user-select: text !important;
+  }
+
+  /* منع Radix من تعليق pointer-events على body */
+  body {
+    pointer-events: auto !important;
   }
 
   /* Custom scrollbar */

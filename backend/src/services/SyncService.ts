@@ -788,26 +788,56 @@ export class SyncService {
     const connection = await db.getConnection();
 
     try {
-      // Handle different primary key columns for different tables
+      // Tables that don't have branch_id column
+      const noBranchTables = ['roles'];
+
+      // Handle different primary key columns and lookup strategies
       let primaryKeyColumn = 'id';
+      let lookupValue = record_id;
+
       if (normalizedTableName === 'settings') {
-        primaryKeyColumn = 'key';
-      } else if (normalizedTableName === 'roles') {
-        primaryKeyColumn = 'id';
+        // Settings: client sends key like "company_address", 
+        // MySQL id is "${client_id}-company_address", and setting_key = "company_address"
+        // Try to find by setting_key first since client sends the key name
+        primaryKeyColumn = 'setting_key';
+        lookupValue = record_id;
       }
 
-      // Handle null branch_id
-      const branchIsNull = branch_id === null || branch_id === 'null';
-      const branchCondition = branchIsNull ? 'branch_id IS NULL' : 'branch_id = ?';
-      const queryParams = branchIsNull
-        ? [normalizedTableName, record_id, client_id]
-        : [normalizedTableName, record_id, client_id, branch_id];
+      let query: string;
+      let params: any[];
 
-      const [rows] = await connection.query<RowDataPacket[]>(
-        `SELECT * FROM ?? 
-         WHERE ?? = ? AND client_id = ? AND ${branchCondition}`,
-        [normalizedTableName, primaryKeyColumn, record_id, client_id, ...(branchIsNull ? [] : [branch_id])]
-      );
+      if (noBranchTables.includes(normalizedTableName)) {
+        // Tables without branch_id - only filter by client_id
+        query = `SELECT * FROM ?? WHERE ?? = ? AND client_id = ?`;
+        params = [normalizedTableName, primaryKeyColumn, lookupValue, client_id];
+      } else {
+        // Handle null branch_id
+        const branchIsNull = branch_id === null || branch_id === 'null';
+        const branchCondition = branchIsNull ? 'branch_id IS NULL' : 'branch_id = ?';
+        query = `SELECT * FROM ?? WHERE ?? = ? AND client_id = ? AND ${branchCondition}`;
+        params = [normalizedTableName, primaryKeyColumn, lookupValue, client_id, ...(branchIsNull ? [] : [branch_id])];
+      }
+
+      const [rows] = await connection.query<RowDataPacket[]>(query, params);
+
+      // Fallback: if settings lookup by setting_key found nothing, try by id
+      if (rows.length === 0 && normalizedTableName === 'settings') {
+        const fallbackId = record_id.match(/^[0-9a-f]{8}-/i) ? record_id : `${client_id}-${record_id}`;
+        const branchIsNull = branch_id === null || branch_id === 'null';
+        const branchCondition = branchIsNull ? 'branch_id IS NULL' : 'branch_id = ?';
+        const fallbackQuery = `SELECT * FROM ?? WHERE id = ? AND client_id = ? AND ${branchCondition}`;
+        const fallbackParams = [normalizedTableName, fallbackId, client_id, ...(branchIsNull ? [] : [branch_id])];
+        const [fallbackRows] = await connection.query<RowDataPacket[]>(fallbackQuery, fallbackParams);
+        if (fallbackRows.length > 0) {
+          const row = fallbackRows[0];
+          const mappedData = FieldMapper.serverToClient(normalizedTableName, row);
+          return {
+            ...mappedData,
+            server_updated_at: row.server_updated_at,
+            is_deleted: row.is_deleted || false
+          };
+        }
+      }
 
       if (rows.length === 0) {
         return null;

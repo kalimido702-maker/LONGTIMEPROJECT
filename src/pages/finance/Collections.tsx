@@ -375,36 +375,31 @@ export default function Collections() {
             };
             await db.update("customers", updatedCustomer);
 
-            // إنشاء رقم إيصال تسلسلي
+            // إنشاء رقم إيصال عشوائي (6 أرقام) - نفس نمط الفواتير
             const existingCollections = localStorage.getItem('pos-collections');
             const prevCollections: CollectionRecord[] = existingCollections ? JSON.parse(existingCollections) : [];
-            
-            // حساب أعلى رقم إيصال موجود
-            let maxReceiptNum = 0;
-            prevCollections.forEach((c: CollectionRecord) => {
-                const num = parseInt(c.id.replace('collection_', ''), 10);
-                if (!isNaN(num) && num > maxReceiptNum && num < 1000000000) {
-                    maxReceiptNum = num;
-                }
-            });
+            const existingIds = new Set(prevCollections.map(c => c.id));
             
             // أيضاً التحقق من سجلات الدفع في IndexedDB
             try {
                 const allPayments = await db.getAll<any>("payments");
                 allPayments.forEach((p: any) => {
-                    if (p.id && typeof p.id === 'string' && p.id.startsWith('collection_')) {
-                        const num = parseInt(p.id.replace('collection_', ''), 10);
-                        if (!isNaN(num) && num > maxReceiptNum && num < 1000000000) {
-                            maxReceiptNum = num;
-                        }
-                    }
+                    if (p.id) existingIds.add(p.id);
                 });
             } catch (_e) { /* ignore */ }
-            
-            const nextReceiptNum = maxReceiptNum + 1;
+
+            // توليد رقم عشوائي فريد من 6 أرقام
+            let receiptId = '';
+            while (true) {
+                const num = Math.floor(100000 + Math.random() * 900000).toString();
+                if (!existingIds.has(num)) {
+                    receiptId = num;
+                    break;
+                }
+            }
             
             const paymentRecord: CollectionRecord = {
-                id: `collection_${nextReceiptNum}`,
+                id: receiptId,
                 customerId: selectedCustomerId,
                 customerName: customer.name,
                 amount: amountValue,
@@ -472,8 +467,7 @@ export default function Collections() {
         const receiptDate = new Date(record.createdAt).toLocaleDateString("ar-EG");
         const customer = customers.find(c => c.id === record.customerId);
         const customerCode = customer?.id?.slice(-8) || '';
-        const rawNum = record.id.replace('collection_', '');
-        const receiptNumber = parseInt(rawNum, 10) > 1000000000 ? String(parseInt(rawNum, 10) % 100000) : rawNum;
+        const receiptNumber = record.id.replace('collection_', '');
 
         // Load logo & QR
         let logoBase64: string | null = null;
@@ -832,11 +826,10 @@ export default function Collections() {
                 `*التاريخ:* ${new Date(collection.createdAt).toLocaleDateString("ar-EG")}\n` +
                 `*الرصيد السابق:* ${Number(previousBalance).toFixed(2)}\n` +
                 `*الرصيد الحالي:* ${Number(currentBalance).toFixed(2)}\n\n` +
-                `شركة لونج تايم للصناعة الكهربائية`;
+                `شركة لونج تايم للصناعات الكهربائية`;
 
             const phone = customer.phone.replace(/[^0-9]/g, "");
-            const rawNum2 = collection.id.replace('collection_', '');
-            const receiptNumber = parseInt(rawNum2, 10) > 1000000000 ? String(parseInt(rawNum2, 10) % 100000) : rawNum2;
+            const receiptNumber = collection.id.replace('collection_', '');
 
             // البحث عن حساب واتساب نشط
             const accounts = await db.getAll("whatsappAccounts");
@@ -1274,7 +1267,7 @@ export default function Collections() {
                                         </Button>
                                     </PopoverTrigger>
                                     <PopoverContent className="w-[350px] p-0" align="start">
-                                        <Command>
+                                        <Command shouldFilter={false}>
                                             <CommandInput
                                                 placeholder="ابحث بالاسم أو رقم الهاتف..."
                                                 value={customerSearchQuery}

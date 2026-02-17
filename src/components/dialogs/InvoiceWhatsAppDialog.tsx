@@ -121,7 +121,7 @@ export const InvoiceWhatsAppDialog = ({
 *التاريخ:* ${new Date(inv.createdAt).toLocaleDateString("ar-EG")}
 *الإجمالي:* ${Math.round(inv.total)} ${currency}
 
-شركة لونج تايم للصناعة الكهربائية`;
+شركة لونج تايم للصناعات الكهربائية`;
     };
 
     // Send invoices using WhatsApp service

@@ -185,8 +185,14 @@ const POSv2 = () => {
   useEffect(() => {
     const handleFocus = () => {
       const active = document.activeElement;
-      // Don't steal focus from inputs/textareas
-      if (active?.tagName === "INPUT" || active?.tagName === "TEXTAREA") {
+      // Don't steal focus from inputs/textareas/selects/buttons
+      if (
+        active?.tagName === "INPUT" ||
+        active?.tagName === "TEXTAREA" ||
+        active?.tagName === "SELECT" ||
+        active?.tagName === "BUTTON" ||
+        (active as HTMLElement)?.isContentEditable
+      ) {
         return;
       }
       // Don't steal focus if a dropdown/popover/dialog is open
@@ -195,13 +201,15 @@ const POSv2 = () => {
         return;
       }
       // Don't steal focus if a radix overlay is present
-      const radixOverlay = document.querySelector('[data-radix-popper-content-wrapper], [data-radix-menu-content]');
+      const radixOverlay = document.querySelector(
+        '[data-radix-popper-content-wrapper], [data-radix-menu-content], [data-radix-dialog-overlay], [role="dialog"], [role="alertdialog"]'
+      );
       if (radixOverlay) {
         return;
       }
       searchInputRef.current?.focus();
     };
-    const interval = setInterval(handleFocus, 200);
+    const interval = setInterval(handleFocus, 500);
     return () => clearInterval(interval);
   }, []);
 
@@ -1556,7 +1564,7 @@ const POSv2 = () => {
       const message = `🧾 *فاتورة رقم ${savedInvoiceForWhatsApp.invoiceNumber || savedInvoiceForWhatsApp.id}*\n` +
         `*العميل:* ${savedInvoiceForWhatsApp.customerName}\n` +
         `*الإجمالي:* ${formatCurrency(savedInvoiceForWhatsApp.total)}\n\n` +
-        `شركة لونج تايم للصناعة الكهربائية`;
+        `شركة لونج تايم للصناعات الكهربائية`;
 
       const phone = customer.phone.replace(/[^0-9]/g, "");
       const repPhone = rep?.phone?.replace(/[^0-9]/g, "");

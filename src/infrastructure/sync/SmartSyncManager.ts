@@ -748,8 +748,96 @@ export class SmartSyncManager extends EventEmitter {
             if (!localRecord) {
                 // New record from server - insert locally
                 console.log(`[SmartSync DEBUG] Creating new record in ${storeName}:`, record.id);
-                await repo.createFromServer(record);
-                console.log(`[SmartSync DEBUG] ✅ Created ${tableName}/${record.id} successfully`);
+                try {
+                    await repo.createFromServer(record);
+                    console.log(`[SmartSync DEBUG] ✅ Created ${tableName}/${record.id} successfully`);
+                } catch (createError: any) {
+                    const errorMsg = createError?.message || '';
+                    const isConstraintError = createError?.name === 'ConstraintError';
+                    const isUniqueViolation = errorMsg.includes('uniqueness');
+                    const isKeyExists = errorMsg.includes('Key already exists');
+
+                    if (isConstraintError || isUniqueViolation || isKeyExists) {
+                        // Case 1: Primary key already exists (race condition - concurrent sync)
+                        // Another sync operation already inserted this record while we were checking
+                        if (isKeyExists && !isUniqueViolation) {
+                            console.warn(`[SmartSync] Record ${tableName}/${record.id} already exists (race condition), updating instead...`);
+                            try {
+                                await repo.updateFromServer(record.id, record);
+                                console.log(`[SmartSync DEBUG] ✅ Updated ${tableName}/${record.id} after key-exists conflict`);
+                            } catch (updateError) {
+                                console.error(`[SmartSync] ❌ Could not update after key-exists for ${tableName}/${record.id}:`, updateError);
+                                throw updateError;
+                            }
+                            return;
+                        }
+
+                        // Case 2: Unique index constraint violation
+                        // Server sends a record with a name/nameAr that already exists locally under a different ID
+                        console.warn(`[SmartSync] Unique constraint conflict for ${tableName}/${record.id}, attempting to resolve...`);
+                        
+                        // Find and remove ALL conflicting local records by unique indexed fields
+                        const uniqueFields = this.getUniqueIndexFields(storeName);
+                        let conflictsRemoved = false;
+
+                        // First try via index lookup (faster)
+                        for (const field of uniqueFields) {
+                            if (record[field] !== undefined && record[field] !== null && record[field] !== '') {
+                                try {
+                                    const conflicts = await repo.getByIndex(field, record[field]);
+                                    if (conflicts && conflicts.length > 0) {
+                                        for (const conflict of conflicts) {
+                                            if ((conflict as any).id !== record.id) {
+                                                console.log(`[SmartSync] Removing conflicting local record ${tableName}/${(conflict as any).id} (${field}="${record[field]}")`);
+                                                await repo.deleteFromServer((conflict as any).id);
+                                                conflictsRemoved = true;
+                                            }
+                                        }
+                                    }
+                                } catch (_indexError) {
+                                    // Index lookup failed, will fallback to scan
+                                }
+                            }
+                        }
+
+                        // If index lookup didn't find conflicts, do a full scan
+                        if (!conflictsRemoved) {
+                            try {
+                                const allRecords = await repo.getAll();
+                                for (const field of uniqueFields) {
+                                    if (record[field] !== undefined && record[field] !== null) {
+                                        const conflictingRecords = allRecords.filter((r: any) => r[field] === record[field] && r.id !== record.id);
+                                        for (const conflict of conflictingRecords) {
+                                            console.log(`[SmartSync] Removing conflicting record ${tableName}/${(conflict as any).id} found by scan`);
+                                            await repo.deleteFromServer((conflict as any).id);
+                                            conflictsRemoved = true;
+                                        }
+                                    }
+                                }
+                            } catch (_scanError) {
+                                // Scan failed too
+                            }
+                        }
+
+                        // Retry create after removing conflicts
+                        try {
+                            await repo.createFromServer(record);
+                            console.log(`[SmartSync DEBUG] ✅ Created ${tableName}/${record.id} after conflict resolution`);
+                        } catch (retryError: any) {
+                            // If still fails with key-exists, the record was created by a concurrent operation
+                            if (retryError?.message?.includes('Key already exists')) {
+                                console.warn(`[SmartSync] Record ${tableName}/${record.id} created by concurrent sync, updating...`);
+                                await repo.updateFromServer(record.id, record);
+                                console.log(`[SmartSync DEBUG] ✅ Updated ${tableName}/${record.id} after retry key-exists`);
+                            } else {
+                                console.error(`[SmartSync] ❌ Could not resolve conflict for ${tableName}/${record.id}:`, retryError);
+                                throw retryError;
+                            }
+                        }
+                    } else {
+                        throw createError;
+                    }
+                }
             } else {
                 // Existing record - compare timestamps
                 const shouldUpdate = this.shouldApplyServerUpdate(localRecord, record);
@@ -763,6 +851,24 @@ export class SmartSyncManager extends EventEmitter {
             console.error(`[SmartSync] ❌ Failed to apply server record to ${tableName}/${record.id}:`, error);
             throw error;
         }
+    }
+
+    /**
+     * Get the unique index field names for a given store
+     * Used to resolve unique constraint conflicts during sync
+     */
+    private getUniqueIndexFields(storeName: string): string[] {
+        const uniqueFieldsMap: Record<string, string[]> = {
+            productCategories: ['nameAr'],
+            units: ['name'],
+            priceTypes: ['name'],
+            paymentMethods: ['name'],
+            warehouses: ['nameAr'],
+            roles: ['nameEn'],
+            users: ['username'],
+            whatsappAccounts: ['phone'],
+        };
+        return uniqueFieldsMap[storeName] || [];
     }
 
     /**
