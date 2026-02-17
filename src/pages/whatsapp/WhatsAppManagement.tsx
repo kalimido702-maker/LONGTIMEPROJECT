@@ -26,6 +26,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { db, WhatsAppAccount } from "@/shared/lib/indexedDB";
 import { whatsappService } from "@/services/whatsapp/whatsappService";
+import { getBotSettings, saveBotSettings, type BotSettings } from "@/services/whatsapp/whatsappBotService";
 import {
   MessageSquare,
   Plus,
@@ -40,6 +41,7 @@ import {
   HelpCircle,
   RefreshCw,
   Infinity,
+  Bot,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { getQRColors } from "@/lib/theme.config";
@@ -134,6 +136,9 @@ const WhatsAppManagement = () => {
     dailyLimit: 100,
     antiSpamDelay: 3000,
   });
+
+  // Bot settings state
+  const [botSettings, setBotSettings] = useState<BotSettings>(getBotSettings());
 
   useEffect(() => {
     loadAccounts();
@@ -690,6 +695,71 @@ const WhatsAppManagement = () => {
             </CardContent>
           </Card>
         </div>
+
+        {/* 🤖 Bot Settings Card */}
+        <Card className="mb-6 border-blue-200 dark:border-blue-800">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg font-bold flex items-center gap-2">
+              <Bot className="h-5 w-5 text-blue-600" />
+              بوت الواتساب - الرد التلقائي
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="font-medium">تفعيل البوت</p>
+                <p className="text-sm text-muted-foreground">
+                  الرد التلقائي على رسائل العملاء (فواتير، كشف حساب، مديونية)
+                </p>
+              </div>
+              <Switch
+                checked={botSettings.enabled}
+                onCheckedChange={(checked) => {
+                  const newSettings = { ...botSettings, enabled: checked };
+                  setBotSettings(newSettings);
+                  saveBotSettings(newSettings);
+                  // Sync to main process
+                  (window as any).electronAPI?.whatsapp?.botSetEnabled?.(checked);
+                  toast({
+                    title: checked ? "🤖 تم تفعيل البوت" : "⏸️ تم إيقاف البوت",
+                  });
+                }}
+              />
+            </div>
+            
+            {botSettings.enabled && (
+              <div className="bg-muted/50 rounded-lg p-4 space-y-2">
+                <p className="text-sm font-semibold mb-2">📋 الأوامر المدعومة:</p>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-xs">فاتورة رقم 123</Badge>
+                    <span className="text-muted-foreground">عرض فاتورة محددة</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-xs">آخر فاتورة</Badge>
+                    <span className="text-muted-foreground">آخر فاتورة للمرسل</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-xs">المدفوعات</Badge>
+                    <span className="text-muted-foreground">آخر المدفوعات</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-xs">كشف حساب</Badge>
+                    <span className="text-muted-foreground">كشف حساب 30 يوم</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-xs">المديونية</Badge>
+                    <span className="text-muted-foreground">الرصيد الحالي</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-xs">مساعدة</Badge>
+                    <span className="text-muted-foreground">قائمة الأوامر</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Accounts Table */}
         <Card>

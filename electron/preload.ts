@@ -62,6 +62,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("whatsapp:is-connected", accountId),
     getGroups: (accountId: string) =>
       ipcRenderer.invoke("whatsapp:get-groups", accountId),
+    // Bot APIs
+    botSetEnabled: (enabled: boolean) =>
+      ipcRenderer.invoke("whatsapp:bot-set-enabled", enabled),
+    botReply: (accountId: string, to: string, message: string) =>
+      ipcRenderer.invoke("whatsapp:bot-reply", accountId, to, message),
+    botReplyWithMedia: (accountId: string, to: string, message: string, mediaBase64: string, filename: string) =>
+      ipcRenderer.invoke("whatsapp:bot-reply-media", accountId, to, message, mediaBase64, filename),
+    onBotIncoming: (callback: (data: { accountId: string; senderPhone: string; senderJid: string; messageText: string }) => void) => {
+      ipcRenderer.on("whatsapp:bot-incoming", (_event, data) => callback(data));
+    },
+    removeBotIncomingListener: () => {
+      ipcRenderer.removeAllListeners("whatsapp:bot-incoming");
+    },
   },
 
   // File System APIs

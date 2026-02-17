@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import "./utils/crypto-polyfill.js"; // Must be imported BEFORE whatsappHandler
-import { registerWhatsAppHandlers } from "./handlers/whatsappHandler.js";
+import { registerWhatsAppHandlers, setMainWindow } from "./handlers/whatsappHandler.js";
 import {
   registerLicenseHandlers,
   verifyLicense,
@@ -142,6 +142,10 @@ if (!gotTheLock) {
     registerPrinterHandlers();
     // Create main window
     createWindow();
+    // Set main window reference for WhatsApp bot
+    if (mainWindow) {
+      setMainWindow(mainWindow);
+    }
     // Initialize auto-updater with main window (only in production)
     if (mainWindow) {
       initAutoUpdater(mainWindow);

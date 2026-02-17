@@ -92,6 +92,12 @@ declare global {
           accountId: string
         ) => Promise<{ success: boolean; message: string }>;
         isConnected: (accountId: string) => Promise<boolean>;
+        getGroups: (accountId: string) => Promise<{ success: boolean; groups: Array<{ id: string; name: string }> }>;
+        // Bot APIs
+        botSetEnabled: (enabled: boolean) => Promise<{ success: boolean }>;
+        botReply: (accountId: string, to: string, message: string) => Promise<{ success: boolean; message: string }>;
+        onBotIncoming: (callback: (data: { accountId: string; senderPhone: string; senderJid: string; messageText: string }) => void) => void;
+        removeBotIncomingListener: () => void;
       };
       products: any;
       customers: any;

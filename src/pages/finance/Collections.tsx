@@ -62,6 +62,7 @@ import {
     Trash2,
     Edit,
     ShieldAlert,
+    MessageCircle,
 } from "lucide-react";
 import { db, Customer, PaymentMethod, SalesRep, Supervisor } from "@/shared/lib/indexedDB";
 import { useSettingsContext } from "@/contexts/SettingsContext";
@@ -439,8 +440,8 @@ export default function Collections() {
         }
     };
 
-    // Generate collection receipt
-    const generateCollectionReceipt = async (record: CollectionRecord, previousBalance: number, newBalance: number) => {
+    // بناء HTML لإيصال القبض (بدون سكريبت الطباعة)
+    const buildReceiptHTML = async (record: CollectionRecord, previousBalance: number, newBalance: number, forPrint = false) => {
         const receiptDate = new Date(record.createdAt).toLocaleDateString("ar-EG");
         const customer = customers.find(c => c.id === record.customerId);
         const customerCode = customer?.id?.slice(-8) || '';
@@ -697,18 +698,159 @@ export default function Collections() {
             <div class="employee-info">المحصّل: ${record.userName}</div>
         </div>
     </div>
-    <script>
-        window.onload = function() {
-            window.print();
-        };
-    </script>
+    ${forPrint ? `<script>window.onload = function() { window.print(); };</script>` : ''}
 </body>
 </html>`;
 
+        return receiptContent;
+    };
+
+    // Generate collection receipt (for print)
+    const generateCollectionReceipt = async (record: CollectionRecord, previousBalance: number, newBalance: number) => {
+        const html = await buildReceiptHTML(record, previousBalance, newBalance, true);
         const printWindow = window.open("", "_blank");
         if (printWindow) {
-            printWindow.document.write(receiptContent);
+            printWindow.document.write(html);
             printWindow.document.close();
+        }
+    };
+
+    // إرسال إيصال القبض عبر واتساب
+    const handleSendReceiptWhatsApp = async (collection: CollectionRecord) => {
+        const customer = customers.find(c => c.id === collection.customerId);
+        if (!customer?.phone) {
+            toast.error("العميل ليس لديه رقم هاتف");
+            return;
+        }
+
+        try {
+            toast.info("📄 جاري تجهيز إيصال القبض...");
+
+            // حساب الأرصدة
+            const currentBalance = getBalance(customer.id, Number(customer.currentBalance || 0));
+            const previousBalance = currentBalance + Number(collection.amount);
+
+            // بناء HTML بدون سكريبت الطباعة
+            const html = await buildReceiptHTML(collection, previousBalance, currentBalance, false);
+
+            // تحويل HTML إلى PDF عبر iframe
+            toast.info("🖨️ جاري توليد PDF...");
+            const pdfBlob = await new Promise<Blob>((resolve, reject) => {
+                const iframe = document.createElement("iframe");
+                iframe.style.position = "fixed";
+                iframe.style.right = "-9999px";
+                iframe.style.top = "-9999px";
+                iframe.style.width = "700px";
+                iframe.style.height = "500px";
+                document.body.appendChild(iframe);
+
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                if (!iframeDoc) {
+                    document.body.removeChild(iframe);
+                    reject(new Error("Failed to create iframe"));
+                    return;
+                }
+
+                iframeDoc.open();
+                iframeDoc.write(html);
+                iframeDoc.close();
+
+                // انتظار تحميل الصور
+                setTimeout(async () => {
+                    try {
+                        const html2canvas = (await import("html2canvas")).default;
+                        const canvas = await html2canvas(iframeDoc.body, {
+                            scale: 2,
+                            useCORS: true,
+                            allowTaint: true,
+                            backgroundColor: "#ffffff",
+                        });
+
+                        const { jsPDF } = await import("jspdf");
+                        const imgData = canvas.toDataURL("image/png");
+                        const imgWidth = 210; // A4 width mm
+                        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+                        const pdf = new jsPDF({
+                            orientation: imgHeight > imgWidth ? "portrait" : "landscape",
+                            unit: "mm",
+                            format: [imgWidth, Math.max(imgHeight, 148)],
+                        });
+                        pdf.addImage(imgData, "PNG", 0, 0, imgWidth, imgHeight);
+                        const blob = pdf.output("blob");
+
+                        document.body.removeChild(iframe);
+                        resolve(blob);
+                    } catch (err) {
+                        document.body.removeChild(iframe);
+                        reject(err);
+                    }
+                }, 500);
+            });
+
+            toast.info("📤 جاري الإرسال عبر واتساب...");
+
+            // تحويل PDF إلى Base64
+            const base64data = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(pdfBlob);
+            });
+
+            const message = `💰 *إيصال قبض*\n` +
+                `*العميل:* ${collection.customerName}\n` +
+                `*المبلغ:* ${Number(collection.amount).toFixed(2)} ${currency}\n` +
+                `*التاريخ:* ${new Date(collection.createdAt).toLocaleDateString("ar-EG")}\n` +
+                `*الرصيد السابق:* ${Number(previousBalance).toFixed(2)}\n` +
+                `*الرصيد الحالي:* ${Number(currentBalance).toFixed(2)}\n\n` +
+                `شركة لونج تايم للصناعة الكهربائية`;
+
+            const phone = customer.phone.replace(/[^0-9]/g, "");
+            const receiptNumber = collection.id.replace('collection_', '');
+
+            // البحث عن حساب واتساب نشط
+            const accounts = await db.getAll("whatsappAccounts");
+            const activeAccount = accounts.find((a: any) => a.isActive && a.status === "connected");
+
+            if (activeAccount) {
+                const { whatsappService } = await import("@/services/whatsapp/whatsappService");
+
+                const msgId = await whatsappService.sendMessage(
+                    (activeAccount as any).id,
+                    phone,
+                    message,
+                    {
+                        type: "document",
+                        url: base64data,
+                        caption: message,
+                        filename: `إيصال-قبض-${receiptNumber}.pdf`
+                    },
+                    {
+                        customerId: customer.id,
+                        type: "payment_receipt",
+                    }
+                );
+
+                try {
+                    const delivered = await (whatsappService as any).waitForMessage(msgId, 60000);
+                    if (delivered) {
+                        toast.success("✅ تم إرسال إيصال القبض بنجاح!");
+                    } else {
+                        toast.error("❌ فشل إرسال الإيصال");
+                    }
+                } catch {
+                    toast.success("✅ تم إرسال إيصال القبض!");
+                }
+            } else {
+                // Fallback to wa.me
+                const encodedMessage = encodeURIComponent(message);
+                window.open(`https://wa.me/${phone}?text=${encodedMessage}`, "_blank");
+                toast.info("لا يوجد حساب واتساب متصل، تم فتح واتساب ويب");
+            }
+        } catch (error) {
+            console.error("WhatsApp receipt send error:", error);
+            toast.error("حدث خطأ أثناء إرسال الإيصال");
         }
     };
 
@@ -1313,6 +1455,15 @@ export default function Collections() {
                                                         title="طباعة إيصال"
                                                     >
                                                         <Printer className="h-4 w-4" />
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => handleSendReceiptWhatsApp(collection)}
+                                                        title="إرسال عبر واتساب"
+                                                        className="text-green-600 hover:text-green-800 hover:bg-green-50"
+                                                    >
+                                                        <MessageCircle className="h-4 w-4" />
                                                     </Button>
                                                     {canEditCollection && (
                                                         <Button

@@ -11,6 +11,7 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import { AppProvider } from "@/contexts/AppContext";
 import LicenseGuard from "@/components/license/LicenseGuard";
 import TabLayout from "@/components/TabLayout";
+import { useWhatsAppBot } from "@/services/whatsapp/whatsappBotListener";
 
 // Auth Pages
 import Login from "./pages/auth/Login";
@@ -39,6 +40,9 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
 // Main app content with tabs
 const AppContent = () => {
+  // تشغيل بوت الواتساب
+  useWhatsAppBot();
+  
   // تنظيف عام عند تحميل التطبيق
   useEffect(() => {
     const globalCleanup = () => {

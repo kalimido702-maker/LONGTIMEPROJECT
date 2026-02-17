@@ -1,4 +1,4 @@
-import { ipcMain } from "electron";
+import { ipcMain, BrowserWindow } from "electron";
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
@@ -13,6 +13,12 @@ import { app } from "electron";
 // Store active WhatsApp connections
 const activeSockets = new Map<string, WASocket>();
 const accountStates = new Map<string, any>();
+
+// Reference to main window for forwarding bot messages
+let mainWindowRef: BrowserWindow | null = null;
+
+// Bot enabled state (synced from renderer)
+let botEnabled = true;
 
 // Simple logger replacement (avoiding pino issues)
 const logger = {
@@ -229,6 +235,50 @@ async function initializeAccount(accountId: string, accountPhone: string) {
 
     // Save credentials on update
     sock.ev.on("creds.update", saveCreds);
+
+    // === BOT: Handle incoming messages ===
+    sock.ev.on("messages.upsert", async (m) => {
+      if (!botEnabled) return;
+      
+      for (const msg of m.messages) {
+        try {
+          // تجاهل الرسائل المرسلة من نفسنا
+          if (msg.key.fromMe) continue;
+          
+          // تجاهل رسائل الحالة (status@broadcast)
+          if (msg.key.remoteJid === "status@broadcast") continue;
+          
+          // تجاهل رسائل المجموعات
+          if (msg.key.remoteJid?.endsWith("@g.us")) continue;
+          
+          // استخراج نص الرسالة
+          const messageText = 
+            msg.message?.conversation ||
+            msg.message?.extendedTextMessage?.text ||
+            "";
+          
+          if (!messageText.trim()) continue;
+          
+          // استخراج رقم المرسل
+          const senderJid = msg.key.remoteJid || "";
+          const senderPhone = senderJid.replace("@s.whatsapp.net", "");
+          
+          console.log(`[WhatsApp Bot] Incoming from ${senderPhone}: ${messageText}`);
+          
+          // إرسال الرسالة للـ renderer لمعالجتها (هناك الداتا بيز)
+          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+            mainWindowRef.webContents.send("whatsapp:bot-incoming", {
+              accountId,
+              senderPhone,
+              senderJid,
+              messageText: messageText.trim(),
+            });
+          }
+        } catch (err) {
+          console.error("[WhatsApp Bot] Error processing incoming message:", err);
+        }
+      }
+    });
 
     return {
       success: true,
@@ -609,5 +659,45 @@ export function registerWhatsAppHandlers() {
     return await getGroups(accountId);
   });
 
-  console.log("✅ WhatsApp IPC handlers registered");
+  // === BOT IPC Handlers ===
+  
+  // Set bot enabled/disabled from renderer
+  ipcMain.handle("whatsapp:bot-set-enabled", (_, enabled: boolean) => {
+    botEnabled = enabled;
+    console.log("[WhatsApp Bot] Bot", enabled ? "enabled" : "disabled");
+    return { success: true };
+  });
+
+  // Bot reply: renderer processed the message and sends back a reply
+  ipcMain.handle(
+    "whatsapp:bot-reply",
+    async (_, accountId: string, to: string, message: string) => {
+      return await sendTextMessage(accountId, to, message);
+    }
+  );
+
+  // Bot reply with media (PDF): renderer sends back a document
+  ipcMain.handle(
+    "whatsapp:bot-reply-media",
+    async (_, accountId: string, to: string, message: string, mediaBase64: string, filename: string) => {
+      try {
+        // First send text message
+        await sendTextMessage(accountId, to, message);
+        // Then send the document
+        return await sendMediaMessage(accountId, to, mediaBase64, "document", "", filename);
+      } catch (error: any) {
+        console.error("[WhatsApp Bot] Failed to send media reply:", error);
+        return { success: false, message: error.message };
+      }
+    }
+  );
+
+  console.log("✅ WhatsApp IPC handlers registered (with Bot support)");
+}
+
+/**
+ * Set the main window reference for bot message forwarding
+ */
+export function setMainWindow(win: BrowserWindow) {
+  mainWindowRef = win;
 }

@@ -13,6 +13,7 @@ export interface InvoicePDFData {
     customerAddress?: string;
     salesRepName?: string;
     items: InvoiceItemData[];
+    subtotal: number;
     total: number;
     discount?: number;
     previousBalance?: number;
@@ -484,21 +485,25 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             </div>
 
             <div class="totals-block">
+                ${(data.discount && Number(data.discount) > 0) ? `
                 <div class="total-row">
                     <span>الإجمالي</span>
-                    <span class="amount">${formatNum(data.total, 0, 0)}</span>
+                    <span class="amount">${formatNum(data.subtotal, 0, 0)}</span>
                 </div>
-                
-                ${(data.discount && Number(data.discount) > 0) ? `
                 <div class="total-row">
                     <span>الخصم</span>
                     <span class="amount">${formatNum(data.discount, 0, 0)}</span>
                 </div>
                 <div class="total-row">
                     <span>الإجمالي بعد الخصم</span>
-                    <span class="amount">${formatNum(Number(data.total || 0) - Number(data.discount || 0), 0, 0)}</span>
+                    <span class="amount">${formatNum(data.total, 0, 0)}</span>
                 </div>
-                ` : ''}
+                ` : `
+                <div class="total-row">
+                    <span>الإجمالي</span>
+                    <span class="amount">${formatNum(data.total, 0, 0)}</span>
+                </div>
+                `}
                 
                 ${data.previousBalance !== undefined ? `
                 <div class="total-row">
@@ -784,6 +789,7 @@ export async function convertToPDFData(
                 unitsPerCarton: item.unitsPerCarton ? Number(item.unitsPerCarton) : undefined,
             };
         }),
+        subtotal: Number(invoice.subtotal) || (invoiceTotal + invoiceDiscount),
         total: invoiceTotal,
         discount: invoiceDiscount,
         previousBalance: prevBalance,
