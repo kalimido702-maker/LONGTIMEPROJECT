@@ -280,6 +280,94 @@ export class SmartSyncManager extends EventEmitter {
     // ==================== Full Sync ====================
 
     /**
+     * Force overwrite local data with server data
+     * 1. Stop sync timer
+     * 2. Clear ALL local syncable stores
+     * 3. Reset sync timestamp to 0
+     * 4. Pull everything fresh from server
+     * 5. Restart sync timer
+     * 
+     * WARNING: This destroys all local data and replaces it with server data
+     */
+    async forceServerOverwrite(): Promise<SyncResult> {
+        console.log('[SmartSync] 🔄 Starting FORCE SERVER OVERWRITE...');
+        this.setStatus('syncing');
+        this.emit('statusChange', 'syncing');
+
+        const result: SyncResult = {
+            pulled: 0,
+            pushed: 0,
+            conflicts: 0,
+            errors: [],
+        };
+
+        try {
+            // 1. Stop periodic sync to avoid interference
+            if (this.syncTimer) {
+                clearInterval(this.syncTimer);
+                this.syncTimer = null;
+            }
+
+            // 2. Clear ALL local syncable stores
+            console.log('[SmartSync] 🗑️ Clearing all local data...');
+            const db = getDatabaseService();
+            let clearedCount = 0;
+            for (const tableName of SYNCABLE_TABLES) {
+                try {
+                    const storeName = getStoreName(tableName);
+                    const repo = db.getRepository(storeName);
+                    await repo.clear();
+                    clearedCount++;
+                    console.log(`[SmartSync] ✅ Cleared store: ${storeName}`);
+                } catch (e) {
+                    console.warn(`[SmartSync] ⚠️ Failed to clear ${tableName}:`, e);
+                    result.errors.push(`Failed to clear ${tableName}: ${(e as Error).message}`);
+                }
+            }
+            console.log(`[SmartSync] 🗑️ Cleared ${clearedCount}/${SYNCABLE_TABLES.length} stores`);
+
+            // Also clear the sync queue
+            try {
+                const syncQueueRepo = db.getRepository('syncQueue');
+                await syncQueueRepo.clear();
+                console.log('[SmartSync] ✅ Cleared sync queue');
+            } catch (e) {
+                console.warn('[SmartSync] ⚠️ No sync queue to clear:', e);
+            }
+
+            // 3. Reset sync timestamp to pull everything
+            this.lastSyncTime = 0;
+            this.saveLastSyncTime(0);
+            console.log('[SmartSync] ⏰ Reset sync timestamp to 0');
+
+            // 4. Pull everything fresh from server
+            console.log('[SmartSync] ⬇️ Pulling all data from server...');
+            const pullResult = await this.pullChanges();
+            result.pulled = pullResult.pulled;
+            result.conflicts = pullResult.conflicts;
+            result.errors.push(...pullResult.errors);
+
+            console.log(`[SmartSync] ✅ Force server overwrite complete: pulled ${result.pulled} records`);
+
+            // 5. Restart periodic sync
+            this.startPeriodicSync();
+            this.setStatus('idle');
+            this.emit('syncComplete', result);
+
+        } catch (error: any) {
+            console.error('[SmartSync] ❌ Force server overwrite failed:', error);
+            result.errors.push(error.message);
+            this.setStatus('error');
+            this.emit('syncError', error);
+
+            // Still restart periodic sync
+            this.startPeriodicSync();
+        }
+
+        return result;
+    }
+
+    /**
      * Perform a complete bidirectional sync
      * 1. Reset local sync state
      * 2. Mark all local records as unsynced

@@ -20,6 +20,8 @@ import {
   CheckCircle,
   XCircle,
   Loader2,
+  Download,
+  AlertTriangle,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useSettings } from "@/hooks/use-settings";
@@ -35,8 +37,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Palette, Moon, Sun, Printer } from "lucide-react";
 import { PrintSettingsTab } from "@/components/settings/PrintSettingsTab";
+import { getSmartSync } from "@/infrastructure/sync/SmartSyncManager";
 
 const Settings = () => {
   const { can } = useAuth();
@@ -69,6 +83,40 @@ const Settings = () => {
   const [deviceId, setDeviceId] = useState<string>("");
   const isElectron =
     typeof window !== "undefined" && window.electronAPI?.license;
+
+  // Force server pull state
+  const [isServerPulling, setIsServerPulling] = useState(false);
+  const [serverPullResult, setServerPullResult] = useState<{
+    pulled: number;
+    errors: string[];
+  } | null>(null);
+
+  const handleForceServerPull = async () => {
+    setIsServerPulling(true);
+    setServerPullResult(null);
+    try {
+      const sync = getSmartSync();
+      const result = await sync.forceServerOverwrite();
+      setServerPullResult({ pulled: result.pulled, errors: result.errors });
+      toast({
+        title: "✅ تم سحب البيانات بنجاح",
+        description: `تم سحب ${result.pulled} سجل من السيرفر وتحديث البيانات المحلية`,
+      });
+      // Reload the page after a short delay to reflect new data
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
+    } catch (error: any) {
+      console.error("Force server pull failed:", error);
+      toast({
+        title: "❌ فشل سحب البيانات",
+        description: error.message || "حدث خطأ أثناء سحب البيانات من السيرفر",
+        variant: "destructive",
+      });
+    } finally {
+      setIsServerPulling(false);
+    }
+  };
 
   useEffect(() => {
     // تحميل جميع الإعدادات في formData
@@ -202,7 +250,6 @@ const Settings = () => {
             <TabsTrigger value="store">بيانات المتجر</TabsTrigger>
             <TabsTrigger value="whatsapp">واتساب</TabsTrigger>
             <TabsTrigger value="license">الترخيص</TabsTrigger>
-            <TabsTrigger value="license">الترخيص</TabsTrigger>
           </TabsList>
 
           <TabsContent value="general">
@@ -265,12 +312,83 @@ const Settings = () => {
                 <Button onClick={handleSave} disabled={loading}>
                   {loading ? "جاري الحفظ..." : "حفظ الإعدادات"}
                 </Button>
+
+                {/* Force Server Pull Section */}
+                <div className="border-t pt-6 mt-6">
+                  <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+                      <h3 className="font-bold text-red-800 dark:text-red-200">سحب البيانات من السيرفر</h3>
+                    </div>
+                    <p className="text-sm text-red-700 dark:text-red-300 mb-4">
+                      سيتم حذف جميع البيانات المحلية واستبدالها بالبيانات الموجودة على السيرفر.
+                      هذا الإجراء لا يمكن التراجع عنه.
+                    </p>
+
+                    {serverPullResult && (
+                      <div className="bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg p-3 mb-4">
+                        <p className="text-sm text-green-700 dark:text-green-300">
+                          ✅ تم سحب <strong>{serverPullResult.pulled}</strong> سجل بنجاح
+                          {serverPullResult.errors.length > 0 && (
+                            <span className="text-red-600"> ({serverPullResult.errors.length} أخطاء)</span>
+                          )}
+                        </p>
+                      </div>
+                    )}
+
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="destructive"
+                          disabled={isServerPulling}
+                          className="w-full"
+                        >
+                          {isServerPulling ? (
+                            <>
+                              <Loader2 className="h-4 w-4 ml-2 animate-spin" />
+                              جاري سحب البيانات...
+                            </>
+                          ) : (
+                            <>
+                              <Download className="h-4 w-4 ml-2" />
+                              سحب كل البيانات من السيرفر
+                            </>
+                          )}
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent dir="rtl">
+                        <AlertDialogHeader>
+                          <AlertDialogTitle className="flex items-center gap-2">
+                            <AlertTriangle className="h-5 w-5 text-red-500" />
+                            تأكيد سحب البيانات من السيرفر
+                          </AlertDialogTitle>
+                          <AlertDialogDescription className="text-right">
+                            <strong className="text-red-600">تحذير:</strong> سيتم حذف جميع البيانات المحلية
+                            (المنتجات، الفواتير، العملاء، المدفوعات، وكل شيء آخر)
+                            واستبدالها بالبيانات الموجودة على السيرفر.
+                            <br />
+                            <br />
+                            هل أنت متأكد من المتابعة؟
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter className="flex-row-reverse gap-2">
+                          <AlertDialogCancel>إلغاء</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={handleForceServerPull}
+                            className="bg-red-600 hover:bg-red-700"
+                          >
+                            نعم، سحب من السيرفر
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </div>
               </div>
             </Card>
           </TabsContent>
 
-          {/* Print Settings Tab */}
-          <TabsContent value="print">
+          {/* Print Settings Tab */}          <TabsContent value="print">
             <PrintSettingsTab />
           </TabsContent>
 
