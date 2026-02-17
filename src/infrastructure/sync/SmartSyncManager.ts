@@ -368,6 +368,14 @@ export class SmartSyncManager extends EventEmitter {
                 console.warn('[SmartSync] ⚠️ Failed to reconstruct invoice items:', e);
             }
 
+            // 6. Post-pull: recalculate customer balances from invoices & payments
+            console.log('[SmartSync] 💰 Recalculating customer balances...');
+            try {
+                await this.recalculateCustomerBalances();
+            } catch (e) {
+                console.warn('[SmartSync] ⚠️ Failed to recalculate customer balances:', e);
+            }
+
             console.log(`[SmartSync] ✅ Force server overwrite complete: pulled ${result.pulled} records`);
 
             // 5. Restart periodic sync
@@ -653,9 +661,50 @@ export class SmartSyncManager extends EventEmitter {
             }
             // Ensure numeric fields are actual numbers
             if (record.price !== undefined) record.price = Number(record.price) || 0;
+            if (record.sellingPrice !== undefined) record.sellingPrice = Number(record.sellingPrice) || 0;
             if (record.costPrice !== undefined) record.costPrice = Number(record.costPrice) || 0;
             if (record.stock !== undefined) record.stock = Number(record.stock) || 0;
             if (record.minStock !== undefined) record.minStock = Number(record.minStock) || 0;
+
+            // Reconstruct prices object if null/empty (for products that were stored before prices_json migration)
+            if (!record.prices || (typeof record.prices === 'object' && Object.keys(record.prices).length === 0)) {
+                const basePrice = Number(record.sellingPrice) || Number(record.price) || 0;
+                if (basePrice > 0) {
+                    try {
+                        const priceTypesRepo = db.getRepository('priceTypes');
+                        const priceTypes = await priceTypesRepo.getAll();
+                        const defaultPriceType = priceTypes.find((pt: any) => pt.isDefault) || priceTypes[0];
+                        if (defaultPriceType) {
+                            record.prices = { [defaultPriceType.id]: basePrice };
+                            record.defaultPriceTypeId = record.defaultPriceTypeId || defaultPriceType.id;
+                            console.log(`[SmartSync] Reconstructed prices for product ${record.id}: ${JSON.stringify(record.prices)}`);
+                        }
+                    } catch (e) {
+                        console.warn(`[SmartSync] Could not reconstruct prices for product ${record.id}:`, e);
+                    }
+                }
+            }
+            // Ensure prices values are numbers
+            if (record.prices && typeof record.prices === 'object') {
+                for (const key of Object.keys(record.prices)) {
+                    record.prices[key] = Number(record.prices[key]) || 0;
+                }
+            }
+
+            // Resolve unitId - if null, try to assign default unit
+            if (!record.unitId) {
+                try {
+                    const unitsRepo = db.getRepository('units');
+                    const units = await unitsRepo.getAll();
+                    const defaultUnit = units.find((u: any) => u.isDefault || u.isBase) || units[0];
+                    if (defaultUnit) {
+                        record.unitId = defaultUnit.id;
+                        console.log(`[SmartSync] Assigned default unit ${defaultUnit.id} (${defaultUnit.name}) to product ${record.id}`);
+                    }
+                } catch (e) {
+                    console.warn(`[SmartSync] Could not resolve unit for product ${record.id}:`, e);
+                }
+            }
         }
 
         // For invoices: ensure numeric fields
@@ -795,6 +844,84 @@ export class SmartSyncManager extends EventEmitter {
             console.log(`[SmartSync] 🔗 Reconstructed items for ${updatedCount} invoices`);
         } catch (error) {
             console.error('[SmartSync] Error reconstructing invoice items:', error);
+        }
+    }
+
+    /**
+     * Recalculate customer balances from invoices, payments, sales returns
+     * After pulling from server, the customer.balance field may be stale/zeroed.
+     * This recalculates the correct balance using the formula:
+     * balance = previousStatement + sum(invoices) - sum(payments) - sum(salesReturns)
+     */
+    private async recalculateCustomerBalances(): Promise<void> {
+        const db = getDatabaseService();
+        try {
+            const customerRepo = db.getRepository('customers');
+            const invoiceRepo = db.getRepository('invoices');
+            const paymentRepo = db.getRepository('payments');
+
+            const allCustomers = await customerRepo.getAll();
+            const allInvoices = await invoiceRepo.getAll();
+            const allPayments = await paymentRepo.getAll();
+
+            // Also try to get sales returns
+            let allReturns: any[] = [];
+            try {
+                const returnsRepo = db.getRepository('salesReturns');
+                allReturns = await returnsRepo.getAll();
+            } catch { /* store may not exist */ }
+
+            // Build totals per customer
+            const invoiceTotals: Record<string, number> = {};
+            const paymentTotals: Record<string, number> = {};
+            const returnTotals: Record<string, number> = {};
+
+            for (const inv of allInvoices) {
+                const i = inv as any;
+                if (i.customerId) {
+                    invoiceTotals[i.customerId] = (invoiceTotals[i.customerId] || 0) + (Number(i.netTotal) || Number(i.total) || 0);
+                }
+            }
+
+            for (const pay of allPayments) {
+                const p = pay as any;
+                if (p.customerId) {
+                    paymentTotals[p.customerId] = (paymentTotals[p.customerId] || 0) + (Number(p.amount) || 0);
+                }
+            }
+
+            for (const ret of allReturns) {
+                const r = ret as any;
+                if (r.customerId) {
+                    returnTotals[r.customerId] = (returnTotals[r.customerId] || 0) + (Number(r.total) || Number(r.netTotal) || 0);
+                }
+            }
+
+            // Update each customer's balance
+            let updatedCount = 0;
+            for (const customer of allCustomers) {
+                const c = customer as any;
+                const previousStatement = Number(c.previousStatement) || 0;
+                const totalInvoices = invoiceTotals[c.id] || 0;
+                const totalPayments = paymentTotals[c.id] || 0;
+                const totalReturns = returnTotals[c.id] || 0;
+
+                const computedBalance = previousStatement + totalInvoices - totalPayments - totalReturns;
+                const currentStored = Number(c.balance) || Number(c.currentBalance) || 0;
+
+                // Only update if different
+                if (Math.abs(computedBalance - currentStored) > 0.01) {
+                    c.balance = computedBalance;
+                    c.currentBalance = computedBalance;
+                    await customerRepo.updateFromServer(c.id, c);
+                    updatedCount++;
+                    console.log(`[SmartSync] 💰 Updated balance for ${c.name}: ${currentStored} → ${computedBalance} (invoices: ${totalInvoices}, payments: ${totalPayments}, returns: ${totalReturns})`);
+                }
+            }
+
+            console.log(`[SmartSync] 💰 Recalculated balances for ${updatedCount} customers`);
+        } catch (error) {
+            console.error('[SmartSync] Error recalculating customer balances:', error);
         }
     }
 
