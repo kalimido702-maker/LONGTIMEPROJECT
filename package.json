@@ -15,9 +15,16 @@
     "electron:build": "cross-env ELECTRON=true vite build && electron-builder",
     "electron:build:win": "cross-env ELECTRON=true vite build && electron-builder --win",
     "electron:build:mac": "cross-env ELECTRON=true vite build && electron-builder --mac",
-    "electron:build:linux": "cross-env ELECTRON=true vite build && electron-builder --linux"
+    "electron:build:linux": "cross-env ELECTRON=true vite build && electron-builder --linux",
+    "mobile:build": "vite build && npx cap sync",
+    "mobile:android": "vite build && npx cap sync android && npx cap open android",
+    "mobile:sync": "npx cap sync",
+    "mobile:run:android": "npx cap run android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.1.0",
+    "@capacitor/cli": "^8.1.0",
+    "@capacitor/core": "^8.1.0",
     "@hapi/boom": "^10.0.1",
     "@hookform/resolvers": "^3.10.0",
     "@radix-ui/react-accordion": "^1.2.11",
