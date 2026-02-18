@@ -233,4 +233,58 @@ if (!gotTheLock) {
       }
     }
   );
+
+  // ==================== Print to PDF ====================
+  ipcMain.handle(
+    "print:to-pdf",
+    async (_event, html: string) => {
+      let pdfWindow: BrowserWindow | null = null;
+      try {
+        // Create a hidden BrowserWindow to render the HTML
+        pdfWindow = new BrowserWindow({
+          width: 794, // A4 width at 96 DPI
+          height: 1123, // A4 height at 96 DPI
+          show: false,
+          webPreferences: {
+            offscreen: true,
+          },
+        });
+
+        // Load the HTML content
+        await pdfWindow.loadURL(
+          `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
+        );
+
+        // Wait for content to fully render (fonts, images, etc.)
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+
+        // Generate PDF using the same engine as print
+        const pdfBuffer = await pdfWindow.webContents.printToPDF({
+          printBackground: true,
+          preferCSSPageSize: true,
+          margins: {
+            marginType: "none",
+          },
+        });
+
+        pdfWindow.close();
+        pdfWindow = null;
+
+        // Return as base64
+        return {
+          success: true,
+          data: Buffer.from(pdfBuffer).toString("base64"),
+        };
+      } catch (error: any) {
+        console.error("Print to PDF error:", error);
+        if (pdfWindow) {
+          pdfWindow.close();
+        }
+        return {
+          success: false,
+          error: error.message,
+        };
+      }
+    }
+  );
 }

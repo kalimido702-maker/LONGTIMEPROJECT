@@ -26,6 +26,44 @@ export async function calculateAllCustomerBalances(): Promise<CustomerBalanceMap
       db.getAll<any>("salesReturns"),
     ]);
 
+    // ====== استعادة سجلات القبض من localStorage إذا كانت مفقودة من IndexedDB ======
+    let finalPayments = payments;
+    try {
+      const saved = localStorage.getItem('pos-collections');
+      if (saved) {
+        const localCollections = JSON.parse(saved) as any[];
+        const existingIds = new Set(payments.map((p: any) => String(p.id)));
+        const missingRecords: any[] = [];
+        for (const lc of localCollections) {
+          if (lc.id && !existingIds.has(String(lc.id))) {
+            const dbRecord = {
+              id: lc.id,
+              customerId: String(lc.customerId),
+              customerName: lc.customerName || "",
+              amount: Number(lc.amount) || 0,
+              paymentMethodId: lc.paymentMethodId || "",
+              paymentMethodName: lc.paymentMethodName || "",
+              paymentType: "collection",
+              paymentDate: lc.createdAt || new Date().toISOString(),
+              createdAt: lc.createdAt || new Date().toISOString(),
+              userId: lc.userId || "",
+              userName: lc.userName || "",
+              notes: lc.notes,
+            };
+            try {
+              await db.add("payments", dbRecord);
+              missingRecords.push(dbRecord as any);
+              console.log('[useCustomerBalances] ✅ Restored payment:', lc.id);
+            } catch { /* skip duplicates */ }
+          }
+        }
+        if (missingRecords.length > 0) {
+          finalPayments = [...payments, ...missingRecords] as Payment[];
+          console.log(`[useCustomerBalances] 🔄 Restored ${missingRecords.length} payments from localStorage`);
+        }
+      }
+    } catch { /* ignore */ }
+
     // تحميل البونص من localStorage
     let allBonuses: any[] = [];
     try {
@@ -51,7 +89,7 @@ export async function calculateAllCustomerBalances(): Promise<CustomerBalanceMap
     });
 
     // خصم المدفوعات (له / دائن)
-    payments.forEach((pay: any) => {
+    finalPayments.forEach((pay: any) => {
       const cid = String(pay.customerId);
       if (pay.customerId && balanceMap[cid] !== undefined) {
         balanceMap[cid] -= Number(pay.amount) || 0;

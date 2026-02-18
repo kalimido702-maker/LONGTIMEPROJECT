@@ -213,9 +213,13 @@ const INVOICES_MAPPING: TableMapping = {
         { clientField: 'shiftId', serverField: 'shift_id', transform: validateId },
         { clientField: 'paymentType', serverField: 'payment_type' },
         { clientField: 'subtotal', serverField: 'subtotal', defaultValue: 0 },
+        { clientField: 'items', serverField: 'items_json', transform: toJsonString, reverseTransform: fromJsonString },
+        { clientField: 'paymentMethodAmounts', serverField: 'payment_method_amounts_json', transform: toJsonString, reverseTransform: fromJsonString },
+        { clientField: 'customerName', serverField: 'customer_name' },
+        { clientField: 'userName', serverField: 'user_name' },
     ],
     serverDefaults: { invoice_number: () => `INV-${Date.now()}` },
-    clientOnlyFields: ['local_updated_at', 'items', 'userName', 'paymentMethodIds', 'paymentMethodAmounts', 'updatedAt'],
+    clientOnlyFields: ['local_updated_at', 'paymentMethodIds', 'updatedAt'],
 };
 
 // Purchases - MySQL: purchase_number, supplier_id, total, discount, tax, net_total, paid_amount, remaining_amount, payment_status, purchase_date, notes, created_by
@@ -236,9 +240,10 @@ const PURCHASES_MAPPING: TableMapping = {
         { clientField: 'createdAt', serverField: 'purchase_date', transform: toMySQLDateTime },
         { clientField: 'notes', serverField: 'notes' },
         { clientField: 'userId', serverField: 'created_by' },
+        { clientField: 'items', serverField: 'items_json', transform: toJsonString, reverseTransform: fromJsonString },
     ],
     serverDefaults: { purchase_number: () => `PUR-${Date.now()}` },
-    clientOnlyFields: ['local_updated_at', 'items', 'shiftId', 'updatedAt'],
+    clientOnlyFields: ['local_updated_at', 'shiftId', 'updatedAt'],
 };
 
 // Expenses - MySQL: category_id, amount, expense_date, payment_method_id, description, receipt_number, notes
@@ -349,13 +354,16 @@ const PAYMENTS_MAPPING: TableMapping = {
         { clientField: 'amount', serverField: 'amount' },
         { clientField: 'paymentMethodId', serverField: 'payment_method_id', transform: validateId },
         { clientField: 'paymentDate', serverField: 'payment_date', transform: toMySQLDateTime },
-        { clientField: 'createdAt', serverField: 'payment_date', transform: toMySQLDateTime },
+        { clientField: 'createdAt', serverField: 'created_at', transform: toMySQLDateTime },
         { clientField: 'paymentType', serverField: 'payment_type' },
         { clientField: 'referenceNumber', serverField: 'reference_number' },
         { clientField: 'userId', serverField: 'user_id' },
         { clientField: 'notes', serverField: 'notes' },
+        { clientField: 'customerName', serverField: 'customer_name' },
+        { clientField: 'paymentMethodName', serverField: 'payment_method_name' },
+        { clientField: 'userName', serverField: 'user_name' },
     ],
-    clientOnlyFields: ['local_updated_at', 'method', 'customerName', 'paymentMethodName', 'userName'],
+    clientOnlyFields: ['local_updated_at', 'method'],
 };
 
 // Settings - MySQL: id, setting_key, setting_value, setting_group, description

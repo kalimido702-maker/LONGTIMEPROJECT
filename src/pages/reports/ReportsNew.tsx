@@ -167,6 +167,42 @@ const Reports = () => {
       setSupervisors(sups);
       setSalesReps(reps);
       setPayments(pays);
+
+      // ====== استعادة سجلات القبض من localStorage إذا كانت مفقودة ======
+      try {
+        const savedCollections = localStorage.getItem('pos-collections');
+        if (savedCollections) {
+          const localCollections = JSON.parse(savedCollections) as any[];
+          const existingIds = new Set(pays.map((p: any) => String(p.id)));
+          const missingRecords: any[] = [];
+          for (const lc of localCollections) {
+            if (lc.id && !existingIds.has(String(lc.id))) {
+              const dbRecord = {
+                id: lc.id,
+                customerId: String(lc.customerId),
+                customerName: lc.customerName || "",
+                amount: Number(lc.amount) || 0,
+                paymentMethodId: lc.paymentMethodId || "",
+                paymentMethodName: lc.paymentMethodName || "",
+                paymentType: "collection",
+                paymentDate: lc.createdAt || new Date().toISOString(),
+                createdAt: lc.createdAt || new Date().toISOString(),
+                userId: lc.userId || "",
+                userName: lc.userName || "",
+                notes: lc.notes,
+              };
+              try {
+                await db.add("payments", dbRecord);
+                missingRecords.push(dbRecord);
+              } catch { /* skip duplicates */ }
+            }
+          }
+          if (missingRecords.length > 0) {
+            setPayments([...pays, ...missingRecords]);
+            console.log(`[Reports] 🔄 Restored ${missingRecords.length} payments from localStorage`);
+          }
+        }
+      } catch { /* ignore */ }
     } catch (error) {
       console.error("Error loading data:", error);
       toast({
@@ -291,11 +327,12 @@ const Reports = () => {
   // Filter payments (collections) by date, supervisor, and sales rep
   const filteredPayments = useMemo(() => {
     return payments.filter((pay: any) => {
-      if (!pay.createdAt || !filterByDate(pay.createdAt)) return false;
+      const payDate = pay.createdAt || pay.paymentDate;
+      if (!payDate || !filterByDate(payDate)) return false;
 
       // Filter by supervisor
       if (selectedSupervisor !== "all") {
-        const customer = customers.find((c) => c.id === pay.customerId);
+        const customer = customers.find((c) => String(c.id) === String(pay.customerId));
         if (!customer) return false;
         const rep = salesReps.find((r) => r.id === (customer as any).salesRepId);
         if (!rep || rep.supervisorId !== selectedSupervisor) return false;
@@ -303,7 +340,7 @@ const Reports = () => {
 
       // Filter by sales rep
       if (selectedSalesRep !== "all") {
-        const customer = customers.find((c) => c.id === pay.customerId);
+        const customer = customers.find((c) => String(c.id) === String(pay.customerId));
         if (!customer || (customer as any).salesRepId !== selectedSalesRep) return false;
       }
 
@@ -405,14 +442,14 @@ const Reports = () => {
       if (inv.customerId) {
         const customer = customers.find((c) => c.id === inv.customerId);
         const existing = customerSalesMap.get(inv.customerId) || {
-          name: inv.customerName || "غير محدد",
+          name: inv.customerName || customer?.name || "غير محدد",
           total: 0,
           count: 0,
           phone: customer?.phone || "-",
         };
 
         customerSalesMap.set(inv.customerId, {
-          name: existing.name,
+          name: customer?.name || existing.name,
           total: existing.total + Number(inv.total || 0),
           count: existing.count + 1,
           phone: existing.phone,
@@ -421,7 +458,6 @@ const Reports = () => {
     });
 
     return Array.from(customerSalesMap.values())
-      .sort((a, b) => b.total - a.total)
       .sort((a, b) => b.total - a.total);
 
   }, [filteredInvoices, customers]);
@@ -437,7 +473,7 @@ const Reports = () => {
       if (inv.customerId && Number(inv.paidAmount) > 0) {
         const customer = customers.find((c) => c.id === inv.customerId);
         const existing = customerPaymentsMap.get(inv.customerId) || {
-          name: inv.customerName || "غير محدد",
+          name: inv.customerName || customer?.name || "غير محدد",
           totalPaid: 0,
           count: 0,
           phone: customer?.phone || "-",
@@ -1262,7 +1298,7 @@ const Reports = () => {
                   data={filteredInvoices.map((inv) => ({
                     id: inv.id,
                     date: formatDate(inv.createdAt),
-                    customer: inv.customerName || "عميل نقدي",
+                    customer: inv.customerName || (inv.customerId ? customers.find(c => c.id === inv.customerId)?.name : null) || "عميل نقدي",
                     employee: inv.userName || "-",
                     total: Number(inv.total) || 0,
                     status:
@@ -1308,7 +1344,7 @@ const Reports = () => {
                         </TableCell>
                         <TableCell>{formatDate(invoice.createdAt)}</TableCell>
                         <TableCell>
-                          {invoice.customerName || "عميل نقدي"}
+                          {invoice.customerName || (invoice.customerId ? customers.find(c => c.id === invoice.customerId)?.name : null) || "عميل نقدي"}
                         </TableCell>
                         <TableCell>{invoice.userName || "-"}</TableCell>
                         <TableCell>

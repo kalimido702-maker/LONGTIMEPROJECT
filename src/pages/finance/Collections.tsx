@@ -162,15 +162,84 @@ export default function Collections() {
     };
 
     const loadRecentCollections = async () => {
-        // سجلات القبض محفوظة في localStorage
+        // تحميل سجلات القبض من IndexedDB (payments store) مع fallback من localStorage
         try {
+            const allPayments = await db.getAll<any>("payments");
+            // فلترة سجلات القبض (collection أو credit_payment للتوافق مع السجلات القديمة)
+            const collectionPayments = allPayments
+                .filter((p: any) => p.paymentType === "collection" || p.paymentType === "credit_payment")
+                .sort((a: any, b: any) => new Date(b.createdAt || b.paymentDate || 0).getTime() - new Date(a.createdAt || a.paymentDate || 0).getTime());
+
+            // تحميل من localStorage أيضاً ودمج السجلات المفقودة في IndexedDB
             const saved = localStorage.getItem('pos-collections');
-            if (saved) {
-                const collections = JSON.parse(saved) as CollectionRecord[];
-                setRecentCollections(collections.slice(0, 20));
+            const localCollections: CollectionRecord[] = saved ? JSON.parse(saved) : [];
+
+            // إعادة إدخال سجلات localStorage المفقودة في IndexedDB
+            const existingPaymentIds = new Set(allPayments.map((p: any) => String(p.id)));
+            let restoredCount = 0;
+            for (const lc of localCollections) {
+                if (lc.id && !existingPaymentIds.has(String(lc.id))) {
+                    try {
+                        const dbRecord = {
+                            id: lc.id,
+                            customerId: String(lc.customerId),
+                            customerName: lc.customerName || "",
+                            amount: Number(lc.amount) || 0,
+                            paymentMethodId: lc.paymentMethodId || "",
+                            paymentMethodName: lc.paymentMethodName || "",
+                            paymentType: "collection",
+                            paymentDate: lc.createdAt || new Date().toISOString(),
+                            createdAt: lc.createdAt || new Date().toISOString(),
+                            userId: lc.userId || "",
+                            userName: lc.userName || "",
+                            notes: lc.notes,
+                        };
+                        await db.add("payments", dbRecord);
+                        existingPaymentIds.add(String(lc.id));
+                        restoredCount++;
+                        console.log('[Collections] ✅ Restored missing payment to IndexedDB:', lc.id);
+                    } catch (e) {
+                        console.warn('[Collections] ⚠️ Could not restore payment:', lc.id, e);
+                    }
+                }
             }
+            if (restoredCount > 0) {
+                console.log(`[Collections] 🔄 Restored ${restoredCount} payments from localStorage to IndexedDB`);
+            }
+
+            // إعادة القراءة بعد الاستعادة لو حصلت
+            const finalPayments = restoredCount > 0 ? await db.getAll<any>("payments") : allPayments;
+            const finalCollections = finalPayments
+                .filter((p: any) => p.paymentType === "collection" || p.paymentType === "credit_payment")
+                .sort((a: any, b: any) => new Date(b.createdAt || b.paymentDate || 0).getTime() - new Date(a.createdAt || a.paymentDate || 0).getTime());
+
+            const collections: CollectionRecord[] = finalCollections.map((p: any) => ({
+                id: p.id,
+                customerId: p.customerId || "",
+                customerName: p.customerName || "",
+                amount: Number(p.amount) || 0,
+                paymentMethodId: p.paymentMethodId || "",
+                paymentMethodName: p.paymentMethodName || "",
+                createdAt: p.createdAt || p.paymentDate || "",
+                userId: p.userId || "",
+                userName: p.userName || "",
+                notes: p.notes,
+            }));
+            setRecentCollections(collections);
+
+            // مزامنة localStorage مع IndexedDB
+            localStorage.setItem('pos-collections', JSON.stringify(collections.slice(0, 100)));
         } catch {
-            setRecentCollections([]);
+            // Fallback to localStorage
+            try {
+                const saved = localStorage.getItem('pos-collections');
+                if (saved) {
+                    const collections = JSON.parse(saved) as CollectionRecord[];
+                    setRecentCollections(collections.slice(0, 20));
+                }
+            } catch {
+                setRecentCollections([]);
+            }
         }
     };
 
@@ -414,18 +483,31 @@ export default function Collections() {
             // حفظ سجل الدفع في IndexedDB payments store (للظهور في كشف الحساب)
             const dbPaymentRecord = {
                 id: paymentRecord.id,
-                customerId: selectedCustomerId,
+                customerId: String(selectedCustomerId),
                 customerName: customer.name,
                 amount: amountValue,
                 paymentMethodId: selectedPaymentMethodId,
                 paymentMethodName: paymentMethod?.name || "",
                 paymentType: "collection",
+                paymentDate: new Date().toISOString(),
                 createdAt: new Date().toISOString(),
                 userId: user?.id || "",
                 userName: user?.name || "",
                 notes: notes || undefined,
             };
-            await db.add("payments", dbPaymentRecord);
+            try {
+                await db.add("payments", dbPaymentRecord);
+                console.log('[Collections] ✅ Payment saved to IndexedDB:', dbPaymentRecord.id, 'customerId:', dbPaymentRecord.customerId);
+            } catch (dbError) {
+                console.error('[Collections] ❌ Failed to save payment to IndexedDB:', dbError);
+                // Retry with update in case record exists
+                try {
+                    await db.update("payments", dbPaymentRecord);
+                    console.log('[Collections] ✅ Payment updated in IndexedDB (retry):', dbPaymentRecord.id);
+                } catch (retryError) {
+                    console.error('[Collections] ❌ Retry also failed:', retryError);
+                }
+            }
 
             // حفظ سجل الدفع في localStorage أيضاً
             const savedCollections = localStorage.getItem('pos-collections');
@@ -487,15 +569,16 @@ export default function Collections() {
 <head>
     <meta charset="UTF-8">
     <title>إيصال قبض - ${record.id}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>
         @page { size: A5 landscape; margin: 10mm; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+            font-family: 'Cairo', 'Segoe UI', Tahoma, Arial, sans-serif;
             background: #fff;
             color: #333;
             direction: rtl;
-            width: 700px;
+            width: 750px;
             margin: 0 auto;
             padding: 15px;
         }
@@ -534,7 +617,6 @@ export default function Collections() {
             padding: 6px 30px;
             font-size: 18px;
             font-weight: bold;
-            letter-spacing: 1px;
         }
         /* Type badge */
         .receipt-type {
@@ -674,7 +756,7 @@ export default function Collections() {
 
         <!-- Title -->
         <div class="receipt-title">
-            <span class="receipt-title-box">ايصال استلام نقدية/تحويل بنكي</span>
+            <span class="receipt-title-box">إيصال استلام نقدية - تحويل بنكي</span>
             <span class="receipt-type">قبض</span>
         </div>
 
@@ -682,7 +764,6 @@ export default function Collections() {
         <div class="receipt-info">
             <div class="customer-info">
                 <div class="customer-name">${record.customerName}</div>
-                ${customer?.phone ? `<div class="customer-contact">${customer.phone}</div>` : ''}
             </div>
             <div class="receipt-meta">
                 <div><span class="label">رقم الايصال: </span>${receiptNumber}</div>
@@ -695,15 +776,15 @@ export default function Collections() {
         <div class="amounts-section">
             <div class="amount-row">
                 <span class="amount-label">الرصيد السابق</span>
-                <span class="amount-value">${Number(previousBalance).toFixed(2)}</span>
+                <span class="amount-value">${Number(previousBalance) % 1 !== 0 ? Number(previousBalance).toFixed(2) : Number(previousBalance).toLocaleString()}</span>
             </div>
             <div class="amount-row">
                 <span class="amount-label">المدفوع</span>
-                <span class="amount-value paid">${Number(record.amount).toFixed(2)}</span>
+                <span class="amount-value paid">${Number(record.amount) % 1 !== 0 ? Number(record.amount).toFixed(2) : Number(record.amount).toLocaleString()}</span>
             </div>
             <div class="amount-row">
                 <span class="amount-label red">الرصيد الحالي</span>
-                <span class="amount-value current">${Number(newBalance).toFixed(2)}</span>
+                <span class="amount-value current">${Number(newBalance) % 1 !== 0 ? Number(newBalance).toFixed(2) : Number(newBalance).toLocaleString()}</span>
             </div>
         </div>
 
@@ -717,7 +798,6 @@ export default function Collections() {
             <div class="footer-text">للاطلاع على صور منتجاتنا يمكنك زيارة موقعنا</div>
             <div class="footer-link">longtimelt.com</div>
             ${qrBase64 ? `<div class="qr-code"><img src="${qrBase64}" alt="QR Code"></div>` : ''}
-            <div class="employee-info">المحصّل: ${record.userName}</div>
         </div>
     </div>
     ${forPrint ? `<script>window.onload = function() { window.print(); };</script>` : ''}
@@ -729,11 +809,17 @@ export default function Collections() {
 
     // Generate collection receipt (for print)
     const generateCollectionReceipt = async (record: CollectionRecord, previousBalance: number, newBalance: number) => {
-        const html = await buildReceiptHTML(record, previousBalance, newBalance, true);
+        const html = await buildReceiptHTML(record, previousBalance, newBalance, false);
         const printWindow = window.open("", "_blank");
         if (printWindow) {
             printWindow.document.write(html);
             printWindow.document.close();
+            // انتظار تحميل كل الصور والمحتوى قبل الطباعة
+            printWindow.onload = () => {
+                setTimeout(() => {
+                    printWindow.print();
+                }, 300);
+            };
         }
     };
 
@@ -762,8 +848,8 @@ export default function Collections() {
                 iframe.style.position = "fixed";
                 iframe.style.right = "-9999px";
                 iframe.style.top = "-9999px";
-                iframe.style.width = "700px";
-                iframe.style.height = "500px";
+                iframe.style.width = "800px";
+                iframe.style.height = "600px";
                 document.body.appendChild(iframe);
 
                 const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
@@ -777,15 +863,21 @@ export default function Collections() {
                 iframeDoc.write(html);
                 iframeDoc.close();
 
-                // انتظار تحميل الصور
+                // انتظار تحميل الخطوط والصور
                 setTimeout(async () => {
                     try {
+                        // انتظار تحميل الخطوط في الـ iframe
+                        try {
+                            await (iframeDoc as any).fonts?.ready;
+                        } catch (_e) { /* ignore */ }
+
                         const html2canvas = (await import("html2canvas")).default;
                         const canvas = await html2canvas(iframeDoc.body, {
                             scale: 2,
                             useCORS: true,
                             allowTaint: true,
                             backgroundColor: "#ffffff",
+                            width: 800,
                         });
 
                         const { jsPDF } = await import("jspdf");
@@ -807,7 +899,7 @@ export default function Collections() {
                         document.body.removeChild(iframe);
                         reject(err);
                     }
-                }, 500);
+                }, 1500);
             });
 
             toast.info("📤 جاري الإرسال عبر واتساب...");
@@ -820,12 +912,13 @@ export default function Collections() {
                 reader.readAsDataURL(pdfBlob);
             });
 
+            const fmtAmt = (v: number) => v % 1 !== 0 ? v.toFixed(2) : v.toLocaleString();
             const message = `💰 *إيصال قبض*\n` +
                 `*العميل:* ${collection.customerName}\n` +
-                `*المبلغ:* ${Number(collection.amount).toFixed(2)} ${currency}\n` +
+                `*المبلغ:* ${fmtAmt(Number(collection.amount))} ${currency}\n` +
+                `*الرصيد السابق:* ${fmtAmt(Number(previousBalance))}\n` +
+                `*الرصيد الحالي:* ${fmtAmt(Number(currentBalance))}\n\n` +
                 `*التاريخ:* ${new Date(collection.createdAt).toLocaleDateString("ar-EG")}\n` +
-                `*الرصيد السابق:* ${Number(previousBalance).toFixed(2)}\n` +
-                `*الرصيد الحالي:* ${Number(currentBalance).toFixed(2)}\n\n` +
                 `شركة لونج تايم للصناعات الكهربائية`;
 
             const phone = customer.phone.replace(/[^0-9]/g, "");

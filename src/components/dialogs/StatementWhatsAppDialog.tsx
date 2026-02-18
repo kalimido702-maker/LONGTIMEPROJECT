@@ -137,7 +137,7 @@ export const StatementWhatsAppDialog = ({
 
 ---
 
-📅 *التاريخ:* ${dateStr} والساعة ${timeStr}`;
+${dateStr} ${timeStr}`;
     };
 
     // Format full statement message

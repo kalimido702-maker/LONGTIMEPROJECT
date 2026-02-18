@@ -50,20 +50,61 @@ export async function generateAccountStatement(
 
     // Get all invoices for this customer
     const allInvoices = await db.getAll<Invoice>("invoices");
+    const custIdStr = String(customerId);
     const customerInvoices = allInvoices.filter(
-        (inv) => inv.customerId === customerId
+        (inv) => String(inv.customerId) === custIdStr
     );
 
     // Get all payments for this customer
     const allPayments = await db.getAll<Payment>("payments");
-    const customerPayments = allPayments.filter(
-        (pay: any) => pay.customerId === customerId
+
+    // ====== استعادة سجلات القبض من localStorage إذا كانت مفقودة ======
+    let finalPayments = allPayments;
+    try {
+        const savedCollections = localStorage.getItem('pos-collections');
+        if (savedCollections) {
+            const localCollections = JSON.parse(savedCollections) as any[];
+            const existingIds = new Set(allPayments.map((p: any) => String(p.id)));
+            const missingRecords: any[] = [];
+            for (const lc of localCollections) {
+                if (lc.id && !existingIds.has(String(lc.id))) {
+                    const dbRecord = {
+                        id: lc.id,
+                        customerId: String(lc.customerId),
+                        customerName: lc.customerName || "",
+                        amount: Number(lc.amount) || 0,
+                        paymentMethodId: lc.paymentMethodId || "",
+                        paymentMethodName: lc.paymentMethodName || "",
+                        paymentType: "collection",
+                        paymentDate: lc.createdAt || new Date().toISOString(),
+                        createdAt: lc.createdAt || new Date().toISOString(),
+                        userId: lc.userId || "",
+                        userName: lc.userName || "",
+                        notes: lc.notes,
+                    };
+                    try {
+                        await db.add("payments", dbRecord);
+                        missingRecords.push(dbRecord);
+                        console.log('[AccountStatement] ✅ Restored payment:', lc.id);
+                    } catch { /* skip duplicates */ }
+                }
+            }
+            if (missingRecords.length > 0) {
+                finalPayments = [...allPayments, ...missingRecords] as Payment[];
+                console.log(`[AccountStatement] 🔄 Restored ${missingRecords.length} payments from localStorage`);
+            }
+        }
+    } catch { /* ignore */ }
+
+    const customerPayments = finalPayments.filter(
+        (pay: any) => String(pay.customerId) === custIdStr
     );
+    console.log('[AccountStatement] All payments in DB:', finalPayments.length, 'Customer payments:', customerPayments.length, 'Customer ID:', custIdStr);
 
     // Get sales returns
     const allReturns = await db.getAll<any>("salesReturns");
     const customerReturns = allReturns.filter(
-        (ret) => ret.customerId === customerId
+        (ret) => String(ret.customerId) === custIdStr
     );
 
     // Get bonuses from localStorage
@@ -73,7 +114,7 @@ export async function generateAccountStatement(
         if (savedBonuses) {
             const allBonuses = JSON.parse(savedBonuses) as any[];
             customerBonuses = allBonuses.filter(
-                (bonus) => bonus.customerId === customerId
+                (bonus) => String(bonus.customerId) === custIdStr
             );
             console.log('[AccountStatement] All bonuses in storage:', allBonuses.length);
             console.log('[AccountStatement] Customer bonuses:', customerBonuses.length, customerBonuses);
@@ -105,7 +146,7 @@ export async function generateAccountStatement(
 
     customerPayments.forEach((pay: any) => {
         movements.push({
-            date: new Date(pay.createdAt),
+            date: new Date(pay.createdAt || pay.paymentDate),
             type: "payment",
             data: pay,
         });

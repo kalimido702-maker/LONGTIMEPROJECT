@@ -1243,6 +1243,7 @@ const POSv2 = () => {
                 unitsPerCarton: item.unitsPerCarton,
               })),
               isReturn: true,
+              notes: invoiceNotes || undefined,
             };
             const pdfData = await convertToPDFData(
               returnInvoiceLike,
@@ -2479,7 +2480,7 @@ const POSv2 = () => {
                 </div>
 
                 {/* Paid Amount - Only show if not in split payment mode */}
-                {!splitPaymentMode && (
+                {/* {!splitPaymentMode && (
                   <div>
                     <Label className="text-xs">المدفوع</Label>
                     <Input
@@ -2490,7 +2491,7 @@ const POSv2 = () => {
                       className="h-10 text-lg font-bold"
                     />
                   </div>
-                )}
+                )} */}
 
                 {paid > 0 && (
                   <div

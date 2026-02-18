@@ -91,6 +91,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getPrinters: () => ipcRenderer.invoke("printer:getPrinters"),
     print: (data: any[], options: any) =>
       ipcRenderer.invoke("printer:print", data, options),
+    printToPDF: (html: string) =>
+      ipcRenderer.invoke("print:to-pdf", html),
   },
 
   // Auto-Updater APIs
@@ -247,6 +249,9 @@ declare global {
           data: any[],
           options: any
         ) => Promise<{ success: boolean; error?: string }>;
+        printToPDF: (
+          html: string
+        ) => Promise<{ success: boolean; data?: string; error?: string }>;
       };
       autoUpdater: {
         checkForUpdates: () => Promise<boolean>;

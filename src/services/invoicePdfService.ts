@@ -19,6 +19,7 @@ export interface InvoicePDFData {
     previousBalance?: number;
     currentBalance?: number;
     isReturn?: boolean; // Flag for return invoice
+    notes?: string; // ملاحظات الفاتورة
 }
 
 export interface InvoiceItemData {
@@ -31,15 +32,28 @@ export interface InvoiceItemData {
 }
 
 /**
- * Load logo as base64
+ * Load logo as base64 (always returns data: URL)
  */
 async function loadLogoBase64(): Promise<string | null> {
     try {
         const logoModule = await import("@/assets/images/longtime-logo.png");
-        if (typeof logoModule.default === "string") {
-            return logoModule.default;
+        const logoUrl = typeof logoModule.default === "string" ? logoModule.default : null;
+        if (!logoUrl) return null;
+
+        // If already a data: URL (base64), return as-is
+        if (logoUrl.startsWith("data:")) {
+            return logoUrl;
         }
-        return null;
+
+        // Otherwise it's a file URL - fetch and convert to base64
+        const response = await fetch(logoUrl);
+        const blob = await response.blob();
+        return await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
     } catch (error) {
         console.error("Failed to load logo:", error);
         return null;
@@ -72,13 +86,15 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
     const logoBase64 = await loadLogoBase64();
     const qrCodeBase64 = await generateQRCode();
 
-    const formatNum = (num: number | string | undefined | null, minDecimals = 0, maxDecimals = 2): string => {
+    const formatNum = (num: number | string | undefined | null, _minDecimals = 0, maxDecimals = 2): string => {
         if (num === undefined || num === null || num === "") return "";
         const n = Number(num);
         if (isNaN(n)) return "0";
+        // عرض الكسور فقط عندما تكون ذات معنى - بدون .00
+        const hasDecimals = n % 1 !== 0;
         return n.toLocaleString("en-US", {
-            minimumFractionDigits: minDecimals,
-            maximumFractionDigits: maxDecimals
+            minimumFractionDigits: hasDecimals ? 2 : 0,
+            maximumFractionDigits: hasDecimals ? maxDecimals : 0
         });
     };
 
@@ -88,8 +104,8 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             <td class="col-name">${item.productName || ""}</td>
             <td class="col-qty">${formatNum(item.quantity, 0, 0)}</td>
             <td class="col-unit">قطعة</td>
-            <td class="col-price">${formatNum(item.price, 2, 2)}</td>
-            <td class="col-total">${formatNum(item.total, 2, 2)}</td>
+            <td class="col-price">${formatNum(item.price, 0, 2)}</td>
+            <td class="col-total">${formatNum(item.total, 0, 2)}</td>
             <td class="col-spacer"></td>
             <td class="col-units">${item.unitsPerCarton ? formatNum(item.unitsPerCarton, 0, 0) : ""}</td>
         </tr>
@@ -150,11 +166,13 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
         }
         
         .logo-section {
-            text-align: right;
+            text-align: left;
+            margin-right: auto;
+            margin-left: 0;
         }
         
         .logo-container {
-            width: 110px;
+            width: 150px;
         }
         
         .logo {
@@ -176,7 +194,7 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             background: #2d8a9e;
             color: white;
             padding: 5px 6px;
-            font-size: 10px;
+            font-size: 12px;
             font-weight: 600;
             text-align: center;
             border: none;
@@ -185,7 +203,7 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
         .meta-table td {
             background: #fff;
             padding: 5px 6px;
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 700;
             text-align: center;
             border: none;
@@ -209,7 +227,7 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             color: white;
             display: block;
             padding: 4px 20px 4px 12px;
-            font-size: 11px;
+            font-size: 13px;
             font-weight: 600;
             margin-top: 4px;
         }
@@ -222,13 +240,13 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
         }
         
         .customer-name {
-            font-size: 16px;
+            font-size: 18px;
             font-weight: 800;
             color: #000;
         }
         
         .customer-address {
-            font-size: 12px;
+            font-size: 14px;
             color: #333;
             font-weight: 600;
             margin-top: 3px;
@@ -248,9 +266,10 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             background: #2d8a9e;
             color: white;
             padding: 7px 4px;
-            font-size: 11px;
+            font-size: 13px;
             font-weight: 700;
             text-align: center;
+            vertical-align: middle;
             border: 1px solid rgba(255,255,255,0.3);
             border-bottom: 2px solid #2d8a9e;
         }
@@ -266,9 +285,8 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
         
         /* Fixed row height, bigger text, vertical centering */
         .items-table td {
-            padding: 0 4px;
-            height: 32px;
-            font-size: 12px;
+            padding: 8px 4px;
+            font-size: 14px;
             font-weight: 600;
             text-align: center;
             vertical-align: middle;
@@ -280,7 +298,7 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
         .items-table td.col-name {
             text-align: right;
             padding-right: 10px;
-            font-size: 11px;
+            font-size: 13px;
         }
         
         .items-table td.col-index {
@@ -342,6 +360,14 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             border: none !important;
             background: #fff !important;
         }
+
+        .items-table tbody tr {
+            padding: 7px 4px;
+            font-size: 13px;
+            font-weight: 700;
+            text-align: center;
+            vertical-align: middle;
+        }
         
         /* Carton column - separate visual block */
         .col-units { 
@@ -380,7 +406,7 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
             justify-content: space-between;
             align-items: center;
             padding: 5px 0;
-            font-size: 13px;
+            font-size: 15px;
             font-weight: 700;
             border-bottom: 2px solid #000;
         }
@@ -399,15 +425,39 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
         }
         
         .site-url {
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 700;
             color: #2d8a9e;
             text-decoration: none;
         }
         
         .qr-code {
-            width: 55px;
-            height: 55px;
+            width: 110px;
+            height: 110px;
+        }
+        
+        /* ===== NOTES SECTION ===== */
+        .notes-section {
+            margin-top: 12px;
+            padding: 8px 12px;
+            border: 1.5px solid #2d8a9e;
+            border-radius: 4px;
+            text-align: right;
+        }
+        
+        .notes-label {
+            font-size: 13px;
+            font-weight: 700;
+            color: #2d8a9e;
+            margin-bottom: 4px;
+        }
+        
+        .notes-text {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            line-height: 1.6;
+            white-space: pre-wrap;
         }
         
     </style>
@@ -520,6 +570,14 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
                 ` : ''}
             </div>
         </div>
+        
+        ${data.notes ? `
+        <!-- Notes Section -->
+        <div class="notes-section">
+            <div class="notes-label">ملاحظات:</div>
+            <div class="notes-text">${data.notes}</div>
+        </div>
+        ` : ''}
     </div>
 </body>
 </html>
@@ -527,12 +585,35 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
 }
 
 /**
- * Generate PDF from HTML using browser print
+ * Generate PDF from HTML using Electron's printToPDF (same engine as print)
+ * Falls back to html2canvas if not in Electron
  */
 export async function generateInvoicePDF(data: InvoicePDFData): Promise<Blob> {
     const html = await generateInvoiceHTML(data);
 
-    // Create hidden iframe for printing
+    // Try Electron's printToPDF first (same rendering as print)
+    if (window.electronAPI?.printer?.printToPDF) {
+        try {
+            console.log("[PDF] Using Electron printToPDF (native print engine)");
+            const result = await window.electronAPI.printer.printToPDF(html);
+            if (result.success && result.data) {
+                // Convert base64 to Blob
+                const byteCharacters = atob(result.data);
+                const byteNumbers = new Array(byteCharacters.length);
+                for (let i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                return new Blob([byteArray], { type: "application/pdf" });
+            }
+            console.warn("[PDF] Electron printToPDF failed, falling back to html2canvas:", result.error);
+        } catch (err) {
+            console.warn("[PDF] Electron printToPDF error, falling back to html2canvas:", err);
+        }
+    }
+
+    // Fallback: html2canvas + jsPDF
+    console.log("[PDF] Using html2canvas fallback");
     const iframe = document.createElement("iframe");
     iframe.style.position = "fixed";
     iframe.style.right = "-9999px";
@@ -551,10 +632,8 @@ export async function generateInvoicePDF(data: InvoicePDFData): Promise<Blob> {
     iframeDoc.write(html);
     iframeDoc.close();
 
-    // Wait for images to load
     await new Promise(resolve => setTimeout(resolve, 500));
 
-    // Use html2canvas + jsPDF for actual PDF generation
     try {
         const { default: html2canvas } = await import("html2canvas");
 
@@ -788,6 +867,7 @@ export async function convertToPDFData(
         customerName: customer?.name || invoice.customerName || "عميل",
         customerAddress: customer?.address || "",
         salesRepName: salesRep?.name,
+        notes: invoice.notes || undefined,
         items: (items || []).map((item) => {
             const qty = Number(item.quantity) || 0;
             const price = Number(item.price || item.unitPrice) || 0;

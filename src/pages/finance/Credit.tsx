@@ -44,7 +44,7 @@ import {
 } from "@/components/ui/select";
 
 export default function Credit() {
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -146,16 +146,35 @@ export default function Credit() {
       const selectedMethod = paymentMethods.find(
         (m) => m.id === selectedPaymentMethodId
       );
+      // توليد رقم عشوائي فريد من 6 أرقام
+      let receiptId = '';
+      {
+        const allPayments = await db.getAll<any>("payments");
+        const existingIds = new Set(allPayments.map((p: any) => p.id));
+        while (true) {
+          const num = Math.floor(100000 + Math.random() * 900000).toString();
+          if (!existingIds.has(num)) {
+            receiptId = num;
+            break;
+          }
+        }
+      }
+
+      const customerForName = selectedInvoice.customerId ? await db.get<Customer>("customers", selectedInvoice.customerId) : null;
       const paymentRecord = {
-        id: `credit_payment_${Date.now()}`,
+        id: receiptId,
         invoiceId: selectedInvoice.id,
-        customerId: selectedInvoice.customerId,
+        customerId: String(selectedInvoice.customerId),
+        customerName: customerForName?.name || selectedInvoice.customerName || "",
         amount: amount,
         paymentMethodId: selectedPaymentMethodId,
         paymentMethodName: selectedMethod?.name || "غير محدد",
-        paymentType: "credit_payment",
-        shiftId: undefined,
+        paymentType: "collection",
+        paymentDate: new Date().toISOString(),
         createdAt: new Date().toISOString(),
+        userId: user?.id || "",
+        userName: user?.name || "",
+        notes: `تسديد فاتورة #${selectedInvoice.id}`,
       };
       await db.add("payments", paymentRecord);
 
@@ -245,16 +264,33 @@ export default function Credit() {
       const selectedMethod = paymentMethods.find(
         (m) => m.id === selectedPaymentMethodId
       );
+      // توليد رقم عشوائي فريد من 6 أرقام
+      let receiptId2 = '';
+      {
+        const allPayments = await db.getAll<any>("payments");
+        const existingIds = new Set(allPayments.map((p: any) => p.id));
+        while (true) {
+          const num = Math.floor(100000 + Math.random() * 900000).toString();
+          if (!existingIds.has(num)) {
+            receiptId2 = num;
+            break;
+          }
+        }
+      }
+
       const paymentRecord = {
-        id: `credit_payment_${Date.now()}`,
-        customerId: selectedCustomer.id,
+        id: receiptId2,
+        customerId: String(selectedCustomer.id),
         customerName: selectedCustomer.name,
         amount: amount,
         paymentMethodId: selectedPaymentMethodId,
         paymentMethodName: selectedMethod?.name || "غير محدد",
-        paymentType: "credit_payment",
-        shiftId: undefined,
+        paymentType: "collection",
+        paymentDate: new Date().toISOString(),
         createdAt: new Date().toISOString(),
+        userId: user?.id || "",
+        userName: user?.name || "",
+        notes: `تسديد من رصيد العميل - ${selectedCustomer.name}`,
       };
       await db.add("payments", paymentRecord);
 

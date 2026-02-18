@@ -40,8 +40,13 @@ interface Payment {
     paymentMethodId: string;
     paymentMethodName: string;
     paymentType: string;
+    paymentDate?: string;
     shiftId?: string;
     createdAt: string;
+    notes?: string;
+    customerName?: string;
+    userName?: string;
+    userId?: string;
 }
 
 interface CustomerDetailsDialogProps {
@@ -80,8 +85,9 @@ export const CustomerDetailsDialog = ({
         try {
             // جلب جميع الفواتير
             const allInvoices = await db.getAll<Invoice>("invoices");
+            const custIdStr = String(customer.id);
             const customerInvoices = allInvoices
-                .filter((inv) => inv.customerId === customer.id)
+                .filter((inv) => String(inv.customerId) === custIdStr)
                 .sort(
                     (a, b) =>
                         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -94,18 +100,59 @@ export const CustomerDetailsDialog = ({
 
             // جلب سجل التسديدات للعميل
             const allPayments = await db.getAll<Payment>("payments");
-            const customerPayments = allPayments
-                .filter((p) => p.customerId === customer.id)
+            const custId = String(customer.id);
+
+            // ====== استعادة سجلات القبض من localStorage إذا كانت مفقودة ======
+            let restoredPayments = allPayments;
+            try {
+                const saved = localStorage.getItem('pos-collections');
+                if (saved) {
+                    const localCollections = JSON.parse(saved) as any[];
+                    const existingIds = new Set(allPayments.map((p: any) => String(p.id)));
+                    const missingRecords: Payment[] = [];
+                    for (const lc of localCollections) {
+                        if (lc.id && !existingIds.has(String(lc.id))) {
+                            const dbRecord: any = {
+                                id: lc.id,
+                                customerId: String(lc.customerId),
+                                customerName: lc.customerName || "",
+                                amount: Number(lc.amount) || 0,
+                                paymentMethodId: lc.paymentMethodId || "",
+                                paymentMethodName: lc.paymentMethodName || "",
+                                paymentType: "collection",
+                                paymentDate: lc.createdAt || new Date().toISOString(),
+                                createdAt: lc.createdAt || new Date().toISOString(),
+                                userId: lc.userId || "",
+                                userName: lc.userName || "",
+                                notes: lc.notes,
+                            };
+                            try {
+                                await db.add("payments", dbRecord);
+                                missingRecords.push(dbRecord);
+                                console.log('[CustomerDetails] ✅ Restored payment:', lc.id);
+                            } catch { /* skip duplicates */ }
+                        }
+                    }
+                    if (missingRecords.length > 0) {
+                        restoredPayments = [...allPayments, ...missingRecords];
+                        console.log(`[CustomerDetails] 🔄 Restored ${missingRecords.length} payments from localStorage`);
+                    }
+                }
+            } catch { /* ignore */ }
+
+            const customerPayments = restoredPayments
+                .filter((p: any) => String(p.customerId) === custId)
                 .sort(
                     (a, b) =>
-                        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+                        new Date(b.createdAt || (b as any).paymentDate || 0).getTime() - new Date(a.createdAt || (a as any).paymentDate || 0).getTime()
                 );
             setPayments(customerPayments);
+            console.log('[CustomerDetails] All payments:', restoredPayments.length, 'Customer payments:', customerPayments.length, 'Customer ID:', custId);
 
             // جلب سجل المرتجعات للعميل
             const allReturns = await db.getAll<SalesReturn>("salesReturns");
             const customerReturns = allReturns
-                .filter((r) => r.customerId === customer.id)
+                .filter((r) => String(r.customerId) === custId)
                 .sort(
                     (a, b) =>
                         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -252,8 +299,13 @@ export const CustomerDetailsDialog = ({
                                                         {Number(payment.amount || 0).toFixed(2)} {currency}
                                                     </p>
                                                     <p className="text-xs text-muted-foreground">
-                                                        {payment.paymentMethodName} - {formatDate(payment.createdAt)}
+                                                        {(payment as any).paymentMethodName || ''} - {formatDate(payment.createdAt || (payment as any).paymentDate || '')}
                                                     </p>
+                                                    {(payment as any).notes && (
+                                                        <p className="text-xs text-muted-foreground mt-1">
+                                                            {(payment as any).notes}
+                                                        </p>
+                                                    )}
                                                     {payment.invoiceId && (
                                                         <p className="text-xs text-blue-600">
                                                             فاتورة #{payment.invoiceId}
@@ -263,7 +315,8 @@ export const CustomerDetailsDialog = ({
                                                 <Badge className="bg-green-500">
                                                     {payment.paymentType === "credit_payment" ? "تسديد آجل" :
                                                         payment.paymentType === "installment_payment" ? "تسديد قسط" :
-                                                            "دفعة"}
+                                                            payment.paymentType === "collection" ? "قبض" :
+                                                                "دفعة"}
                                                 </Badge>
                                             </div>
                                         </Card>

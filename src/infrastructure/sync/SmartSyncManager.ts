@@ -328,9 +328,45 @@ export class SmartSyncManager extends EventEmitter {
                 }
             }
 
-            // 2. Clear ALL local syncable stores
-            console.log('[SmartSync] 🗑️ Clearing all local data...');
+            // 2. Backup local-only records that might not be on server yet
+            // (records in sync queue that haven't been pushed successfully)
+            console.log('[SmartSync] 💾 Backing up unsynced local records...');
             const db = getDatabaseService();
+            const localBackups: { storeName: string; records: any[] }[] = [];
+            try {
+                const syncQueueRepo = db.getRepository('syncQueue');
+                const syncQueue = await syncQueueRepo.getAll();
+                const pendingByStore: Record<string, Set<string>> = {};
+                for (const item of syncQueue as any[]) {
+                    const store = item.storeName || item.tableName;
+                    if (store) {
+                        if (!pendingByStore[store]) pendingByStore[store] = new Set();
+                        if (item.recordId) pendingByStore[store].add(String(item.recordId));
+                    }
+                }
+                // Backup the actual records that are pending sync
+                for (const [store, ids] of Object.entries(pendingByStore)) {
+                    try {
+                        const repo = db.getRepository(store);
+                        const backedUp: any[] = [];
+                        for (const id of ids) {
+                            try {
+                                const record = await repo.get(id);
+                                if (record) backedUp.push(record);
+                            } catch { /* skip */ }
+                        }
+                        if (backedUp.length > 0) {
+                            localBackups.push({ storeName: store, records: backedUp });
+                            console.log(`[SmartSync] 💾 Backed up ${backedUp.length} unsynced records from ${store}`);
+                        }
+                    } catch { /* skip */ }
+                }
+            } catch (e) {
+                console.warn('[SmartSync] ⚠️ Could not backup sync queue:', e);
+            }
+
+            // 3. Clear ALL local syncable stores
+            console.log('[SmartSync] 🗑️ Clearing all local data...');
             let clearedCount = 0;
             for (const tableName of SYNCABLE_TABLES) {
                 try {
@@ -389,6 +425,68 @@ export class SmartSyncManager extends EventEmitter {
                 await this.recalculateCustomerBalances();
             } catch (e) {
                 console.warn('[SmartSync] ⚠️ Failed to recalculate customer balances:', e);
+            }
+
+            // 8. Post-pull: restore any local-only records that weren't on the server
+            if (localBackups.length > 0) {
+                console.log('[SmartSync] 🔄 Restoring unsynced local records...');
+                for (const backup of localBackups) {
+                    try {
+                        const repo = db.getRepository(backup.storeName);
+                        for (const record of backup.records) {
+                            try {
+                                const existing = await repo.get(record.id);
+                                if (!existing) {
+                                    await repo.createFromServer(record);
+                                    console.log(`[SmartSync] ✅ Restored ${backup.storeName}/${record.id}`);
+                                }
+                            } catch { /* skip duplicate */ }
+                        }
+                    } catch (e) {
+                        console.warn(`[SmartSync] ⚠️ Failed to restore records for ${backup.storeName}:`, e);
+                    }
+                }
+            }
+
+            // 9. Post-pull: restore collection payments from localStorage
+            // localStorage is never cleared by sync, so it's a reliable backup for collections
+            console.log('[SmartSync] 🔄 Restoring collection payments from localStorage...');
+            try {
+                const saved = localStorage.getItem('pos-collections');
+                if (saved) {
+                    const localCollections = JSON.parse(saved) as any[];
+                    const paymentRepo = db.getRepository('payments');
+                    let restoredCount = 0;
+                    for (const lc of localCollections) {
+                        if (!lc.id) continue;
+                        try {
+                            const existing = await paymentRepo.get(lc.id);
+                            if (!existing) {
+                                const dbRecord = {
+                                    id: lc.id,
+                                    customerId: String(lc.customerId || ''),
+                                    customerName: lc.customerName || '',
+                                    amount: Number(lc.amount) || 0,
+                                    paymentMethodId: lc.paymentMethodId || '',
+                                    paymentMethodName: lc.paymentMethodName || '',
+                                    paymentType: 'collection',
+                                    paymentDate: lc.createdAt || new Date().toISOString(),
+                                    createdAt: lc.createdAt || new Date().toISOString(),
+                                    userId: lc.userId || '',
+                                    userName: lc.userName || '',
+                                    notes: lc.notes,
+                                };
+                                await paymentRepo.createFromServer(dbRecord);
+                                restoredCount++;
+                            }
+                        } catch { /* skip */ }
+                    }
+                    if (restoredCount > 0) {
+                        console.log(`[SmartSync] ✅ Restored ${restoredCount} collection payments from localStorage`);
+                    }
+                }
+            } catch (e) {
+                console.warn('[SmartSync] ⚠️ Failed to restore collections from localStorage:', e);
             }
 
             console.log(`[SmartSync] ✅ Force server overwrite complete: pulled ${result.pulled} records`);
@@ -673,7 +771,7 @@ export class SmartSyncManager extends EventEmitter {
             }
         }
 
-        // For invoices: ensure numeric fields
+        // For invoices: ensure numeric fields and parse JSON fields
         if (tableName === 'invoices') {
             if (record.total !== undefined) record.total = Number(record.total) || 0;
             if (record.discount !== undefined) record.discount = Number(record.discount) || 0;
@@ -682,6 +780,45 @@ export class SmartSyncManager extends EventEmitter {
             if (record.paidAmount !== undefined) record.paidAmount = Number(record.paidAmount) || 0;
             if (record.remainingAmount !== undefined) record.remainingAmount = Number(record.remainingAmount) || 0;
             if (record.subtotal !== undefined) record.subtotal = Number(record.subtotal) || 0;
+            // Ensure items is an array (may come from items_json via FieldMapper)
+            if (record.items && typeof record.items === 'string') {
+                try { record.items = JSON.parse(record.items); } catch { record.items = []; }
+            }
+            if (record.items === null || record.items === undefined) record.items = [];
+            // Ensure paymentMethodAmounts is an object (may come from JSON)
+            if (record.paymentMethodAmounts && typeof record.paymentMethodAmounts === 'string') {
+                try { record.paymentMethodAmounts = JSON.parse(record.paymentMethodAmounts); } catch { record.paymentMethodAmounts = {}; }
+            }
+
+            // Reconstruct customerName from customers store if missing
+            if (!record.customerName && record.customerId) {
+                try {
+                    const customerRepo = db.getRepository('customers');
+                    const customer = await customerRepo.get(record.customerId);
+                    if (customer) {
+                        record.customerName = (customer as any).name || '';
+                    }
+                } catch (e) { /* ignore */ }
+            }
+
+            // Reconstruct userName from users store if missing
+            if (!record.userName && record.userId) {
+                try {
+                    const userRepo = db.getRepository('users');
+                    const u = await userRepo.get(record.userId);
+                    if (u) {
+                        record.userName = (u as any).name || (u as any).fullName || '';
+                    }
+                } catch (e) { /* ignore */ }
+            }
+        }
+
+        // For purchases: ensure items is parsed
+        if (tableName === 'purchases') {
+            if (record.items && typeof record.items === 'string') {
+                try { record.items = JSON.parse(record.items); } catch { record.items = []; }
+            }
+            if (record.items === null || record.items === undefined) record.items = [];
         }
 
         // For invoice_items: ensure numeric fields
@@ -692,9 +829,42 @@ export class SmartSyncManager extends EventEmitter {
             if (record.total !== undefined) record.total = Number(record.total) || 0;
         }
 
-        // For payments: ensure numeric fields
+        // For payments: ensure numeric fields and reconstruct names if missing
         if (tableName === 'payments') {
             if (record.amount !== undefined) record.amount = Number(record.amount) || 0;
+
+            // Reconstruct customerName from customers store if missing
+            if (!record.customerName && record.customerId) {
+                try {
+                    const customerRepo = db.getRepository('customers');
+                    const customer = await customerRepo.get(record.customerId);
+                    if (customer) {
+                        record.customerName = (customer as any).name || '';
+                    }
+                } catch (e) { /* ignore */ }
+            }
+
+            // Reconstruct paymentMethodName from paymentMethods store if missing
+            if (!record.paymentMethodName && record.paymentMethodId) {
+                try {
+                    const pmRepo = db.getRepository('paymentMethods');
+                    const pm = await pmRepo.get(record.paymentMethodId);
+                    if (pm) {
+                        record.paymentMethodName = (pm as any).name || '';
+                    }
+                } catch (e) { /* ignore */ }
+            }
+
+            // Reconstruct userName from users store if missing
+            if (!record.userName && record.userId) {
+                try {
+                    const userRepo = db.getRepository('users');
+                    const user = await userRepo.get(record.userId);
+                    if (user) {
+                        record.userName = (user as any).name || (user as any).fullName || '';
+                    }
+                } catch (e) { /* ignore */ }
+            }
         }
 
         // For sales_returns: ensure numeric fields and defaults
@@ -970,21 +1140,24 @@ export class SmartSyncManager extends EventEmitter {
             for (const inv of allInvoices) {
                 const i = inv as any;
                 if (i.customerId) {
-                    invoiceTotals[i.customerId] = (invoiceTotals[i.customerId] || 0) + (Number(i.netTotal) || Number(i.total) || 0);
+                    const cid = String(i.customerId);
+                    invoiceTotals[cid] = (invoiceTotals[cid] || 0) + (Number(i.netTotal) || Number(i.total) || 0);
                 }
             }
 
             for (const pay of allPayments) {
                 const p = pay as any;
                 if (p.customerId) {
-                    paymentTotals[p.customerId] = (paymentTotals[p.customerId] || 0) + (Number(p.amount) || 0);
+                    const cid = String(p.customerId);
+                    paymentTotals[cid] = (paymentTotals[cid] || 0) + (Number(p.amount) || 0);
                 }
             }
 
             for (const ret of allReturns) {
                 const r = ret as any;
                 if (r.customerId) {
-                    returnTotals[r.customerId] = (returnTotals[r.customerId] || 0) + (Number(r.total) || Number(r.netTotal) || 0);
+                    const cid = String(r.customerId);
+                    returnTotals[cid] = (returnTotals[cid] || 0) + (Number(r.total) || Number(r.netTotal) || 0);
                 }
             }
 
@@ -992,10 +1165,11 @@ export class SmartSyncManager extends EventEmitter {
             let updatedCount = 0;
             for (const customer of allCustomers) {
                 const c = customer as any;
+                const custId = String(c.id);
                 const previousStatement = Number(c.previousStatement) || 0;
-                const totalInvoices = invoiceTotals[c.id] || 0;
-                const totalPayments = paymentTotals[c.id] || 0;
-                const totalReturns = returnTotals[c.id] || 0;
+                const totalInvoices = invoiceTotals[custId] || 0;
+                const totalPayments = paymentTotals[custId] || 0;
+                const totalReturns = returnTotals[custId] || 0;
 
                 const computedBalance = previousStatement + totalInvoices - totalPayments - totalReturns;
                 const currentStored = Number(c.balance) || Number(c.currentBalance) || 0;

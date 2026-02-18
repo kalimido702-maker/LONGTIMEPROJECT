@@ -56,7 +56,7 @@ import {
 } from "@/lib/customerImport";
 
 const Customers = () => {
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -391,16 +391,31 @@ const Customers = () => {
       const selectedMethod = paymentMethods.find(
         (m) => m.id === selectedPaymentMethodId
       );
+      // توليد رقم عشوائي فريد من 6 أرقام
+      let receiptId = '';
+      const allPayments = await db.getAll<any>("payments");
+      const existingIds = new Set(allPayments.map((p: any) => p.id));
+      while (true) {
+        const num = Math.floor(100000 + Math.random() * 900000).toString();
+        if (!existingIds.has(num)) {
+          receiptId = num;
+          break;
+        }
+      }
+
       const paymentRecord = {
-        id: `credit_payment_${Date.now()}`,
-        customerId: payingCustomer.id,
+        id: receiptId,
+        customerId: String(payingCustomer.id),
         customerName: payingCustomer.name,
         amount: amount,
         paymentMethodId: selectedPaymentMethodId,
         paymentMethodName: selectedMethod?.name || "غير محدد",
-        paymentType: "credit_payment",
-        shiftId: undefined,
+        paymentType: "collection",
+        paymentDate: new Date().toISOString(),
         createdAt: new Date().toISOString(),
+        userId: user?.id || "",
+        userName: user?.name || "",
+        notes: `تسديد من رصيد العميل - ${payingCustomer.name}`,
       };
       await db.add("payments", paymentRecord);
 
