@@ -81,6 +81,7 @@ const createBackup = async (): Promise<BackupRecord | null> => {
             "employees",
             "expenses",
             "deposits",
+            "depositSources",
             "installments",
             "shifts",
             "promotions",

@@ -134,6 +134,12 @@ export class SmartSyncManager extends EventEmitter {
     // Use 'any' for timer to avoid NodeJS/Browser type conflicts
     private syncTimer: any = null;
     private isOnline: boolean = navigator.onLine;
+    // Mutex to prevent concurrent sync operations
+    private isSyncing: boolean = false;
+    // Queue for batching WebSocket notifications
+    private pendingNotifications: Map<string, SyncEvent> = new Map();
+    private notificationFlushTimer: any = null;
+    private readonly NOTIFICATION_BATCH_DELAY = 2000; // 2 seconds
 
     constructor(
         httpClient: FastifyClient,
@@ -398,7 +404,7 @@ export class SmartSyncManager extends EventEmitter {
 
             // 4. Pull everything fresh from server
             console.log('[SmartSync] ⬇️ Pulling all data from server...');
-            const pullResult = await this.pullChanges();
+            const pullResult = await this.pullChanges(true);
             result.pulled = pullResult.pulled;
             result.conflicts = pullResult.conflicts;
             result.errors.push(...pullResult.errors);
@@ -539,7 +545,7 @@ export class SmartSyncManager extends EventEmitter {
 
         // 3. Perform Pull
         console.log('[SmartSync] Pulling all data from server...');
-        const pullResult = await this.pullChanges();
+        const pullResult = await this.pullChanges(true);
 
         // 3.5 Post-process products (resolve categories, prices, units)
         try { await this.postProcessProducts(); } catch { /* ignore */ }
@@ -562,6 +568,11 @@ export class SmartSyncManager extends EventEmitter {
      * Perform a complete bidirectional sync
      */
     async performFullSync(): Promise<SyncResult> {
+        // Guard against concurrent sync operations
+        if (this.isSyncing) {
+            console.log('[SmartSync] Sync already in progress, skipping performFullSync...');
+            return { pulled: 0, pushed: 0, conflicts: 0, errors: [] };
+        }
 
         console.log('[SmartSync] Performing full sync...');
         this.setStatus('syncing');
@@ -607,7 +618,13 @@ export class SmartSyncManager extends EventEmitter {
     /**
      * Pull changes from server and apply to local IndexedDB
      */
-    async pullChanges(): Promise<SyncResult> {
+    async pullChanges(force: boolean = false): Promise<SyncResult> {
+        // Prevent concurrent pull operations (unless forced by forceServerOverwrite/forceFullSync)
+        if (this.isSyncing && !force) {
+            console.log('[SmartSync] Pull already in progress, skipping...');
+            return { pulled: 0, pushed: 0, conflicts: 0, errors: [] };
+        }
+        this.isSyncing = true;
         console.log('[SmartSync] Pulling changes from server...');
         this.setStatus('pulling');
 
@@ -703,6 +720,8 @@ export class SmartSyncManager extends EventEmitter {
         } catch (error: any) {
             console.error('[SmartSync] Pull failed:', error);
             result.errors.push(error.message);
+        } finally {
+            this.isSyncing = false;
         }
 
         this.setStatus('idle');
@@ -731,11 +750,9 @@ export class SmartSyncManager extends EventEmitter {
                 console.warn(`[SmartSync] No data returned for ${tableName}/${recordId}`);
             }
         } catch (error: any) {
-            console.error(`[SmartSync] Failed to pull ${tableName}/${recordId}:`, error);
-
-            // Fallback: trigger full sync for this table
-            console.log('[SmartSync] Falling back to full sync...');
-            await this.pullChanges();
+            console.error(`[SmartSync] Failed to pull ${tableName}/${recordId}:`, error?.message || error);
+            // Do NOT fallback to full pullChanges() - it causes infinite loops with large datasets
+            // The periodic sync will pick up any missed records
         }
     }
 
@@ -1503,31 +1520,67 @@ export class SmartSyncManager extends EventEmitter {
 
         console.log(`[SmartSync] Notification received: ${event.table}/${event.recordId} (${event.operation})`);
 
-        try {
-            // For create/update: pull fresh data from server
-            if (event.operation === 'create' || event.operation === 'update') {
-                // Pull the specific record from server (single source of truth)
-                await this.pullSpecificRecord(event.table, event.recordId);
-            }
-            // For delete: apply directly (no need to fetch)
-            else if (event.operation === 'delete') {
+        // For delete: apply directly (no need to batch)
+        if (event.operation === 'delete') {
+            try {
                 const db = getDatabaseService();
                 const storeName = getStoreName(event.table);
                 const repo = db.getRepository(storeName);
                 await repo.deleteFromServer(event.recordId);
                 console.log(`[SmartSync] Deleted ${event.table}/${event.recordId} from local DB`);
+                this.emit('remoteUpdate', {
+                    table: event.table,
+                    recordId: event.recordId,
+                    operation: event.operation,
+                });
+            } catch (error) {
+                console.error('[SmartSync] Failed to handle remote delete:', error);
             }
-
-            // Emit event for UI refresh
-            this.emit('remoteUpdate', {
-                table: event.table,
-                recordId: event.recordId,
-                operation: event.operation,
-            });
-
-        } catch (error) {
-            console.error('[SmartSync] Failed to handle remote notification:', error);
+            return;
         }
+
+        // For create/update: batch notifications and do a single pull
+        // This prevents flooding the server with hundreds of individual record pulls
+        const key = `${event.table}/${event.recordId}`;
+        this.pendingNotifications.set(key, event);
+
+        // Debounce: wait for more notifications before pulling
+        if (this.notificationFlushTimer) {
+            clearTimeout(this.notificationFlushTimer);
+        }
+        this.notificationFlushTimer = setTimeout(() => {
+            this.flushPendingNotifications();
+        }, this.NOTIFICATION_BATCH_DELAY);
+    }
+
+    /**
+     * Flush pending notifications by doing a single pull instead of individual record fetches
+     */
+    private async flushPendingNotifications(): Promise<void> {
+        const count = this.pendingNotifications.size;
+        if (count === 0) return;
+
+        console.log(`[SmartSync] Flushing ${count} batched notifications...`);
+        const notifications = new Map(this.pendingNotifications);
+        this.pendingNotifications.clear();
+
+        // If we have many notifications (> 5), just do a full pull - much more efficient
+        if (count > 5) {
+            console.log(`[SmartSync] Too many notifications (${count}), doing full pull instead of individual fetches...`);
+            await this.pullChanges();
+        } else {
+            // Few notifications - pull each specific record
+            for (const [key, event] of notifications) {
+                try {
+                    await this.pullSpecificRecord(event.table, event.recordId);
+                } catch (error) {
+                    console.error(`[SmartSync] Failed to pull ${key}:`, error);
+                }
+            }
+        }
+
+        // Emit UI refresh event
+        this.emit('remoteUpdate', { count });
     }
 
     /**
@@ -1624,8 +1677,10 @@ export class SmartSyncManager extends EventEmitter {
         this.isOnline = true;
         this.setStatus('idle');
 
-        // Perform full sync when back online
-        this.performFullSync();
+        // Pull changes (with mutex guard) instead of full sync to avoid loops
+        if (!this.isSyncing) {
+            this.pullChanges();
+        }
 
         this.emit('online');
     }
@@ -1645,7 +1700,7 @@ export class SmartSyncManager extends EventEmitter {
         }
 
         this.syncTimer = setInterval(() => {
-            if (this.isOnline && this.status === 'idle') {
+            if (this.isOnline && this.status === 'idle' && !this.isSyncing) {
                 this.performFullSync();
             }
         }, this.config.syncInterval);

@@ -140,7 +140,7 @@ function normalizeTableName(tableName: string): string {
 }
 
 const MAX_BATCH_SIZE = 50;
-const MAX_PULL_SIZE = 100;
+const MAX_PULL_SIZE = 500;
 
 export class SyncService {
   /**
@@ -393,31 +393,42 @@ export class SyncService {
       // Tables that don't have branch_id column
       const noBranchTables = ['roles'];
 
+      // Per-table limit to prevent any single table from consuming the entire response
+      const perTableLimit = Math.min(MAX_PULL_SIZE, 500);
+
       for (const table_name of tablesToSync) {
+        // Stop if we already have enough changes
+        if (response.changes.length >= MAX_PULL_SIZE) {
+          break;
+        }
+
+        const remaining = MAX_PULL_SIZE - response.changes.length;
+
         try {
           let queryParams: any[];
           let query: string;
 
           if (noBranchTables.includes(table_name)) {
             // Tables without branch_id - only filter by client_id
+            // Use >= instead of > to avoid skipping records with identical timestamps
             query = `SELECT * FROM ?? 
              WHERE client_id = ? 
-             AND server_updated_at > ? 
-             ORDER BY server_updated_at ASC 
+             AND server_updated_at >= ? 
+             ORDER BY server_updated_at ASC, id ASC 
              LIMIT ?`;
-            queryParams = [table_name, client_id, since, MAX_PULL_SIZE];
+            queryParams = [table_name, client_id, since, Math.min(remaining, perTableLimit)];
           } else {
             // Handle null branch_id: use IS NULL when branch_id is null, otherwise use =
             const branchCondition = branch_id === null || branch_id === 'null' ? 'branch_id IS NULL' : 'branch_id = ?';
             query = `SELECT * FROM ?? 
              WHERE client_id = ? 
              AND ${branchCondition}
-             AND server_updated_at > ? 
-             ORDER BY server_updated_at ASC 
+             AND server_updated_at >= ? 
+             ORDER BY server_updated_at ASC, id ASC 
              LIMIT ?`;
             queryParams = branch_id === null || branch_id === 'null'
-              ? [table_name, client_id, since, MAX_PULL_SIZE]
-              : [table_name, client_id, branch_id, since, MAX_PULL_SIZE];
+              ? [table_name, client_id, since, Math.min(remaining, perTableLimit)]
+              : [table_name, client_id, branch_id, since, Math.min(remaining, perTableLimit)];
           }
 
           // Use simple query; streaming API was failing in promise wrapper
@@ -915,6 +926,78 @@ export class SyncService {
         last_sync_at: lastSyncRows[0].last_sync,
         tables_stats,
       };
+    } finally {
+      connection.release();
+    }
+  }
+
+  /**
+   * حذف جميع البيانات من السيرفر لعميل وفرع معين
+   * يحذف من جميع الجداول القابلة للمزامنة + جدول sync_queue
+   */
+  async clearAllData(
+    client_id: string | number,
+    branch_id: string | number
+  ): Promise<{ success: boolean; deleted_tables: string[]; total_deleted: number }> {
+    const connection = await db.getConnection();
+    try {
+      const branchIsNull = branch_id === null || branch_id === undefined || branch_id === '';
+      const branchCondition = branchIsNull ? 'branch_id IS NULL' : 'branch_id = ?';
+
+      let totalDeleted = 0;
+      const deletedTables: string[] = [];
+
+      await connection.beginTransaction();
+
+      for (const table of SYNCABLE_TABLES) {
+        try {
+          const params = branchIsNull ? [client_id] : [client_id, branch_id];
+          const [result] = await connection.query<ResultSetHeader>(
+            `DELETE FROM ?? WHERE client_id = ? AND ${branchCondition}`,
+            [table, ...params]
+          );
+          if (result.affectedRows > 0) {
+            deletedTables.push(table);
+            totalDeleted += result.affectedRows;
+            logger.info(`Cleared ${result.affectedRows} records from ${table}`);
+          }
+        } catch (tableError: any) {
+          // Skip tables that don't exist
+          if (tableError?.code === 'ER_NO_SUCH_TABLE') {
+            logger.warn(`Table ${table} does not exist, skipping`);
+          } else {
+            logger.error({ error: tableError }, `Error clearing table ${table}`);
+          }
+        }
+      }
+
+      // Also clear sync_queue for this client
+      try {
+        const queueParams = branchIsNull ? [client_id] : [client_id, branch_id];
+        const [queueResult] = await connection.query<ResultSetHeader>(
+          `DELETE FROM sync_queue WHERE client_id = ? AND ${branchCondition}`,
+          queueParams
+        );
+        if (queueResult.affectedRows > 0) {
+          deletedTables.push('sync_queue');
+          totalDeleted += queueResult.affectedRows;
+        }
+      } catch (e) {
+        logger.warn({ error: e }, 'Could not clear sync_queue');
+      }
+
+      await connection.commit();
+
+      logger.info(`Cleared all data: ${totalDeleted} records from ${deletedTables.length} tables`);
+
+      return {
+        success: true,
+        deleted_tables: deletedTables,
+        total_deleted: totalDeleted,
+      };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
     } finally {
       connection.release();
     }

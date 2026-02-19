@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { POSHeader } from "@/components/POS/POSHeader";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -45,6 +45,8 @@ import {
     Trash2,
     Edit, // Import Edit icon
     MessageSquare, // Import MessageSquare icon for WhatsApp
+    ChevronRight,
+    ChevronLeft,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom"; // Import useNavigate
 import { db, Invoice, Customer, PaymentMethod, SalesReturn, SalesReturnItem, Product, Shift, SalesRep } from "@/shared/lib/indexedDB";
@@ -53,6 +55,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { printInvoiceReceipt, type InvoiceReceiptData, type InvoiceItem } from "@/lib/printing";
 import { ExcelExportButton } from "@/components/common/ExcelExportButton";
+import { TABLE_SETTINGS } from "@/lib/constants";
 
 export default function Invoices() {
     const { getSetting } = useSettingsContext();
@@ -82,6 +85,10 @@ export default function Invoices() {
 
     // Delivery Status Filter
     const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<string>("all");
+
+    // Pagination
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState<number>(TABLE_SETTINGS.DEFAULT_PAGE_SIZE);
 
     // Permissions
     const canEditInvoice = can("invoices", "edit");
@@ -189,6 +196,33 @@ export default function Invoices() {
         paymentStatusFilter,
         deliveryStatusFilter,
     ]);
+
+    // Reset page when filters change
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchQuery, dateFrom, dateTo, paymentTypeFilter, paymentStatusFilter, deliveryStatusFilter]);
+
+    // Pagination calculations
+    const totalPages = Math.ceil(filteredInvoices.length / pageSize);
+    const paginatedInvoices = useMemo(() => {
+        const start = (currentPage - 1) * pageSize;
+        return filteredInvoices.slice(start, start + pageSize);
+    }, [filteredInvoices, currentPage, pageSize]);
+
+    // Generate visible page numbers
+    const getVisiblePages = useCallback(() => {
+        const maxVisible = TABLE_SETTINGS.MAX_VISIBLE_PAGES;
+        const pages: number[] = [];
+        let start = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+        let end = Math.min(totalPages, start + maxVisible - 1);
+        if (end - start + 1 < maxVisible) {
+            start = Math.max(1, end - maxVisible + 1);
+        }
+        for (let i = start; i <= end; i++) {
+            pages.push(i);
+        }
+        return pages;
+    }, [currentPage, totalPages]);
 
     const openInvoiceDetails = (invoice: Invoice) => {
         setSelectedInvoice(invoice);
@@ -843,7 +877,7 @@ export default function Invoices() {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {filteredInvoices.map((invoice) => (
+                            {paginatedInvoices.map((invoice) => (
                                 <TableRow
                                     key={invoice.id}
                                     className="hover:bg-muted/50"
@@ -968,6 +1002,111 @@ export default function Invoices() {
                         </TableBody>
                     </Table>
                 </Card>
+
+                {/* Pagination Controls */}
+                {filteredInvoices.length > 0 && (
+                    <div className="flex items-center justify-between mt-4 flex-wrap gap-3">
+                        {/* Page size selector */}
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm text-muted-foreground">عرض</span>
+                            <Select
+                                value={pageSize.toString()}
+                                onValueChange={(v) => {
+                                    setPageSize(Number(v));
+                                    setCurrentPage(1);
+                                }}
+                            >
+                                <SelectTrigger className="w-[80px] h-8">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {TABLE_SETTINGS.PAGE_SIZE_OPTIONS.map((size) => (
+                                        <SelectItem key={size} value={size.toString()}>
+                                            {size}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <span className="text-sm text-muted-foreground">
+                                من أصل {filteredInvoices.length} فاتورة
+                            </span>
+                        </div>
+
+                        {/* Page navigation */}
+                        {totalPages > 1 && (
+                            <div className="flex items-center gap-1">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                                    disabled={currentPage === 1}
+                                >
+                                    <ChevronRight className="h-4 w-4" />
+                                    السابق
+                                </Button>
+
+                                {getVisiblePages()[0] > 1 && (
+                                    <>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setCurrentPage(1)}
+                                            className="w-8 h-8 p-0"
+                                        >
+                                            1
+                                        </Button>
+                                        {getVisiblePages()[0] > 2 && (
+                                            <span className="px-1 text-muted-foreground">...</span>
+                                        )}
+                                    </>
+                                )}
+
+                                {getVisiblePages().map((page) => (
+                                    <Button
+                                        key={page}
+                                        variant={page === currentPage ? "default" : "outline"}
+                                        size="sm"
+                                        onClick={() => setCurrentPage(page)}
+                                        className="w-8 h-8 p-0"
+                                    >
+                                        {page}
+                                    </Button>
+                                ))}
+
+                                {getVisiblePages()[getVisiblePages().length - 1] < totalPages && (
+                                    <>
+                                        {getVisiblePages()[getVisiblePages().length - 1] < totalPages - 1 && (
+                                            <span className="px-1 text-muted-foreground">...</span>
+                                        )}
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setCurrentPage(totalPages)}
+                                            className="w-8 h-8 p-0"
+                                        >
+                                            {totalPages}
+                                        </Button>
+                                    </>
+                                )}
+
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                                    disabled={currentPage === totalPages}
+                                >
+                                    التالي
+                                    <ChevronLeft className="h-4 w-4" />
+                                </Button>
+                            </div>
+                        )}
+
+                        {/* Current page info */}
+                        <div className="text-sm text-muted-foreground">
+                            صفحة {currentPage} من {totalPages}
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Invoice Details Dialog */}

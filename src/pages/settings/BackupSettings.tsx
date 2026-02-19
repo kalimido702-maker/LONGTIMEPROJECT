@@ -38,6 +38,7 @@ import { db } from "@/shared/lib/indexedDB";
 import {
     AlertTriangle,
     Trash2,
+    Bug,
 } from "lucide-react";
 
 const BackupSettings = () => {
@@ -45,6 +46,9 @@ const BackupSettings = () => {
     const [history, setHistory] = useState(backupService.getBackupHistory());
     const [isCreatingBackup, setIsCreatingBackup] = useState(false);
     const [isRestoring, setIsRestoring] = useState(false);
+
+    // Debug mode - shows dangerous operations
+    const isDebugMode = import.meta.env.VITE_DEBUG_SYNC === 'true';
 
     useEffect(() => {
         // بدء خدمة النسخ التلقائي
@@ -253,33 +257,35 @@ const BackupSettings = () => {
                     </Card>
                 </div>
 
-                {/* Data Maintenance */}
-                <Card className="border-red-200 dark:border-red-900">
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
-                            <AlertTriangle className="h-5 w-5" />
-                            صيانة البيانات (منطقة الخطر)
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-6">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-3">
-                                <Label>إعادة ضبط المصنع</Label>
-                                <Button
-                                    variant="destructive"
-                                    className="w-full gap-2"
-                                    onClick={handleResetDatabase}
-                                >
-                                    <Trash2 className="h-4 w-4" />
-                                    حذف جميع البيانات وإعادة التهيئة
-                                </Button>
-                                <p className="text-sm text-muted-foreground">
-                                    سيتم حذف قاعدة البيانات بالكامل وإنشاء واحدة جديدة فارغة
-                                </p>
+                {/* Data Maintenance - Debug Mode Only */}
+                {isDebugMode && (
+                    <Card className="border-red-200 dark:border-red-900">
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                                <Bug className="h-5 w-5" />
+                                صيانة البيانات - وضع المطور (Debug)
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-6">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-3">
+                                    <Label>إعادة ضبط المصنع</Label>
+                                    <Button
+                                        variant="destructive"
+                                        className="w-full gap-2"
+                                        onClick={handleResetDatabase}
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                        حذف جميع البيانات وإعادة التهيئة
+                                    </Button>
+                                    <p className="text-sm text-muted-foreground">
+                                        سيتم حذف قاعدة البيانات بالكامل وإنشاء واحدة جديدة فارغة
+                                    </p>
+                                </div>
                             </div>
-                        </div>
-                    </CardContent>
-                </Card>
+                        </CardContent>
+                    </Card>
+                )}
 
                 {/* Backup History */}
                 <Card>

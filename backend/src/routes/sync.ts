@@ -471,4 +471,54 @@ export async function syncRoutes(server: FastifyInstance) {
       }
     }
   );
+
+  /**
+   * DELETE /api/sync/clear-all
+   * حذف جميع البيانات من السيرفر للعميل والفرع الحالي
+   * ⚠️ عملية خطيرة - تحذف كل البيانات
+   */
+  server.delete(
+    "/clear-all",
+    {
+      preHandler: [server.authenticate],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { userId, clientId, branchId } = request.user!;
+
+        logger.warn(
+          {
+            user_id: userId,
+            client_id: clientId,
+            branch_id: branchId,
+          },
+          "⚠️ CLEAR ALL DATA request"
+        );
+
+        const result = await syncService.clearAllData(
+          clientId as any,
+          branchId as any
+        );
+
+        logger.warn(
+          {
+            user_id: userId,
+            client_id: clientId,
+            branch_id: branchId,
+            deleted_tables: result.deleted_tables,
+            total_deleted: result.total_deleted,
+          },
+          "✅ CLEAR ALL DATA completed"
+        );
+
+        return reply.code(200).send(result);
+      } catch (error) {
+        logger.error({ error }, "Clear all data failed");
+        return reply.code(500).send({
+          error: "Clear all data failed",
+          message: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    }
+  );
 }
