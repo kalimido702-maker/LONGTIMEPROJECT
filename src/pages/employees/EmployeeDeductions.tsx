@@ -25,6 +25,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSettingsContext } from "@/contexts/SettingsContext";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 const EmployeeDeductions = () => {
   const { can, user } = useAuth();
@@ -191,6 +193,8 @@ const EmployeeDeductions = () => {
     return matchesSearch && matchesEmployee && matchesStatus;
   });
 
+  const pagination = usePagination(filteredDeductions, { resetDeps: [searchTerm, selectedEmployee, selectedStatus] });
+
   // حساب الإحصائيات
   const stats = {
     activeDeductions: deductions.filter((d) => d.status === "active").length,
@@ -349,7 +353,7 @@ const EmployeeDeductions = () => {
               لا توجد خصومات
             </Card>
           ) : (
-            filteredDeductions.map((deduction) => (
+            pagination.paginatedItems.map((deduction) => (
               <Card key={deduction.id} className="p-4">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
@@ -485,6 +489,8 @@ const EmployeeDeductions = () => {
             ))
           )}
         </div>
+
+        <DataPagination {...pagination} entityName="خصم" />
 
         {/* نموذج إضافة/تعديل الخصم */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

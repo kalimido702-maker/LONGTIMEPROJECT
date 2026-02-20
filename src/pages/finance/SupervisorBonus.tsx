@@ -43,6 +43,8 @@ import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { POSHeader } from "@/components/POS/POSHeader";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 // نوع سجل بونص المشرف
 interface SupervisorBonusRecord {
@@ -385,6 +387,8 @@ const SupervisorBonus = () => {
         return new Date(dateString).toLocaleDateString("ar-EG");
     };
 
+    const pagination = usePagination(recentBonuses);
+
     return (
         <div className="min-h-screen bg-background" dir="rtl">
             <POSHeader />
@@ -636,7 +640,7 @@ const SupervisorBonus = () => {
                                 </div>
                             ) : (
                                 <div className="space-y-3 max-h-[500px] overflow-y-auto">
-                                    {recentBonuses.map((bonus) => (
+                                    {pagination.paginatedItems.map((bonus) => (
                                         <Card key={bonus.id} className="p-4">
                                             <div className="flex justify-between items-start">
                                                 <div>
@@ -667,6 +671,7 @@ const SupervisorBonus = () => {
                                     ))}
                                 </div>
                             )}
+                            <DataPagination {...pagination} entityName="بونص مشرف" />
                         </CardContent>
                     </Card>
                 </div>

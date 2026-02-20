@@ -49,6 +49,8 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { ExcelExportButton } from "@/components/common/ExcelExportButton";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 const Purchases = () => {
   const { user, can } = useAuth();
@@ -289,6 +291,8 @@ const Purchases = () => {
     p.nameAr.toLowerCase().includes(productSearchQuery.toLowerCase())
   );
 
+  const pagination = usePagination(purchases);
+
   const formatCurrency = (amount: number) => {
     return `${amount.toFixed(2)} ${currency}`;
   };
@@ -390,7 +394,7 @@ const Purchases = () => {
                   لا توجد فواتير شراء
                 </div>
               ) : (
-                purchases.map((purchase) => (
+                pagination.paginatedItems.map((purchase) => (
                   <Card key={purchase.id} className="p-4">
                     <div className="flex justify-between items-start">
                       <div className="flex-1">
@@ -449,6 +453,7 @@ const Purchases = () => {
               )}
             </div>
           </Card>
+          <DataPagination {...pagination} entityName="فاتورة شراء" />
 
           {/* Create Purchase Dialog */}
           <Dialog

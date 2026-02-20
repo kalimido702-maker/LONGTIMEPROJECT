@@ -30,6 +30,8 @@ import { Plus, Filter } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { ExcelExportButton } from "@/components/common/ExcelExportButton";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 const Expenses = () => {
   const { can, user } = useAuth();
@@ -97,6 +99,10 @@ const Expenses = () => {
 
     setFilteredExpenses(filtered);
   };
+
+  const pagination = usePagination(filteredExpenses, {
+    resetDeps: [filters],
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -353,7 +359,7 @@ const Expenses = () => {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredExpenses.map((expense) => (
+                pagination.paginatedItems.map((expense) => (
                   <TableRow key={expense.id}>
                     <TableCell>
                       {new Date(expense.createdAt).toLocaleString("ar-EG", {
@@ -384,6 +390,7 @@ const Expenses = () => {
             </TableBody>
           </Table>
         </div>
+        <DataPagination {...pagination} entityName="مصروف" />
 
         {/* Add Dialog */}
         <Dialog open={showDialog} onOpenChange={handleCloseDialog}>

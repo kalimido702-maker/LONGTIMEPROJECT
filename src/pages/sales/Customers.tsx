@@ -54,6 +54,8 @@ import {
   importCustomersFromExcel,
   ImportResult,
 } from "@/lib/customerImport";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 const Customers = () => {
   const { can, user } = useAuth();
@@ -141,6 +143,10 @@ const Customers = () => {
       return matchesSearch && matchesSalesRep && matchesSupervisor;
     }
   );
+
+  const pagination = usePagination(filteredCustomers, {
+    resetDeps: [searchQuery, filterBySalesRep, filterBySupervisor],
+  });
 
   const { getSetting } = useSettingsContext();
 
@@ -803,7 +809,7 @@ const Customers = () => {
 
         {/* Customers Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredCustomers.map((customer) => (
+          {pagination.paginatedItems.map((customer) => (
             <Card
               key={customer.id}
               className="hover:shadow-lg transition-shadow cursor-pointer"
@@ -914,6 +920,7 @@ const Customers = () => {
             </p>
           </div>
         )}
+        <DataPagination {...pagination} entityName="عميل" />
       </main>
 
       {/* Dialog للدفع من رصيد العميل */}

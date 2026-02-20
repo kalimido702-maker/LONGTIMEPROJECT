@@ -45,6 +45,8 @@ import {
 import { db } from "@/shared/lib/indexedDB";
 import { useToast } from "@/hooks/use-toast";
 import { whatsappService } from "@/services/whatsapp/whatsappService";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 interface Supervisor {
     id: string;
@@ -118,6 +120,8 @@ const SalesReps = () => {
             r.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
             r.phone.includes(searchQuery)
     );
+
+    const pagination = usePagination(filteredSalesReps, { resetDeps: [searchQuery] });
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -337,7 +341,7 @@ const SalesReps = () => {
                                         </TableCell>
                                     </TableRow>
                                 ) : (
-                                    filteredSalesReps.map((rep) => (
+                                    pagination.paginatedItems.map((rep) => (
                                         <TableRow key={rep.id}>
                                             <TableCell className="font-medium">
                                                 <div className="flex items-center gap-2">
@@ -393,6 +397,8 @@ const SalesReps = () => {
                     </CardContent>
                 </Card>
             </div>
+
+            <DataPagination {...pagination} entityName="مندوب" />
 
             {/* Add/Edit Dialog */}
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

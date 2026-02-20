@@ -178,6 +178,9 @@ export class SyncService {
 
     try {
       await connection.beginTransaction();
+      
+      // Temporarily disable FK checks to handle out-of-order sync (e.g., purchases before suppliers)
+      await connection.query('SET FOREIGN_KEY_CHECKS = 0');
 
       for (const record of records) {
         try {
@@ -315,7 +318,7 @@ export class SyncService {
           const errorMessage = error instanceof Error ? error.message : "Unknown error";
 
           // Handle UNIQUE constraint violations - record already exists with same unique field
-          if (errorMessage.includes('UNIQUE constraint failed')) {
+          if (errorMessage.includes('UNIQUE constraint failed') || errorMessage.includes('Duplicate entry')) {
             logger.warn({
               table_name: record.table_name,
               record_id: record.record_id,
@@ -344,6 +347,8 @@ export class SyncService {
         }
       }
 
+      // Re-enable FK checks before committing
+      await connection.query('SET FOREIGN_KEY_CHECKS = 1');
       await connection.commit();
       logger.info(
         {
@@ -354,6 +359,8 @@ export class SyncService {
         "Batch processing completed"
       );
     } catch (error) {
+      // Re-enable FK checks even on error
+      try { await connection.query('SET FOREIGN_KEY_CHECKS = 1'); } catch { /* ignore */ }
       await connection.rollback();
       logger.error({ error }, "Batch processing failed");
       throw error;

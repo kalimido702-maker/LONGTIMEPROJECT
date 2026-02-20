@@ -227,29 +227,36 @@ export class IndexedDBRepository<T = any> {
   async batchUpdate(items: T[]): Promise<void> {
     const db = this.client.getDatabase();
 
+    if (items.length === 0) return;
+
     return new Promise((resolve, reject) => {
       const transaction = db.transaction([this.storeName], "readwrite");
       const store = transaction.objectStore(this.storeName);
+      let errorCount = 0;
 
-      let completed = 0;
-      const total = items.length;
-
-      if (total === 0) {
+      transaction.oncomplete = () => {
+        if (errorCount > 0) {
+          console.warn(`[batchUpdate] ${this.storeName}: ${errorCount}/${items.length} records failed`);
+        }
         resolve();
-        return;
-      }
+      };
+      transaction.onerror = (event) => {
+        // Prevent transaction abort on individual record errors
+        event.preventDefault();
+      };
+      transaction.onabort = () => {
+        reject(new Error(`Transaction aborted for ${this.storeName}`));
+      };
 
       for (const item of items) {
         const request = store.put(item);
-
-        request.onsuccess = () => {
-          completed++;
-          if (completed === total) {
-            resolve();
-          }
+        request.onerror = (event) => {
+          // Prevent the error from aborting the entire transaction
+          event.preventDefault();
+          event.stopPropagation();
+          errorCount++;
+          console.warn(`[batchUpdate] ${this.storeName}: Failed to put record ${(item as any).id || 'unknown'}:`, request.error?.message);
         };
-
-        request.onerror = () => reject(request.error);
       }
     });
   }

@@ -33,6 +33,8 @@ import {
 } from "lucide-react";
 import { db } from "@/shared/lib/indexedDB";
 import { useToast } from "@/hooks/use-toast";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 interface Supervisor {
     id: string;
@@ -77,6 +79,8 @@ const Supervisors = () => {
             s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
             s.phone.includes(searchQuery)
     );
+
+    const pagination = usePagination(filteredSupervisors, { resetDeps: [searchQuery] });
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -233,7 +237,7 @@ const Supervisors = () => {
                                         </TableCell>
                                     </TableRow>
                                 ) : (
-                                    filteredSupervisors.map((supervisor) => (
+                                    pagination.paginatedItems.map((supervisor) => (
                                         <TableRow key={supervisor.id}>
                                             <TableCell className="font-medium">
                                                 <div className="flex items-center gap-2">
@@ -291,6 +295,8 @@ const Supervisors = () => {
                     </CardContent>
                 </Card>
             </div>
+
+            <DataPagination {...pagination} entityName="مشرف" />
 
             {/* Add/Edit Dialog */}
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

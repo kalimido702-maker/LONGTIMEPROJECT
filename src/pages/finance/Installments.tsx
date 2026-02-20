@@ -36,6 +36,8 @@ import {
 import { toast } from "sonner";
 import { Calendar, CheckCircle2, XCircle } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 export default function Installments() {
   const { can } = useAuth();
@@ -163,6 +165,8 @@ export default function Installments() {
     }, 0);
   };
 
+  const pagination = usePagination(invoices);
+
   return (
     <div className="min-h-screen bg-background" dir="rtl">
       <POSHeader />
@@ -230,7 +234,7 @@ export default function Installments() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {invoices.map((invoice) => (
+                {pagination.paginatedItems.map((invoice) => (
                   <TableRow key={invoice.id}>
                     <TableCell className="font-medium">
                       {invoice.id.slice(0, 8)}
@@ -289,6 +293,8 @@ export default function Installments() {
               </TableBody>
             </Table>
           </Card>
+
+          <DataPagination {...pagination} entityName="قسط" />
 
           <Dialog
             open={isPaymentDialogOpen}

@@ -36,6 +36,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ExcelExportButton } from "@/components/common/ExcelExportButton";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 const Suppliers = () => {
   const { can } = useAuth();
@@ -146,6 +148,10 @@ const Suppliers = () => {
       s.phone.includes(searchTerm)
   );
 
+  const pagination = usePagination(filteredSuppliers, {
+    resetDeps: [searchTerm],
+  });
+
   return (
     <div className="min-h-screen bg-background" dir="rtl">
       <POSHeader />
@@ -186,7 +192,7 @@ const Suppliers = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredSuppliers.map((supplier) => {
+          {pagination.paginatedItems.map((supplier) => {
             const supplierPurchases = purchases.filter(
               (p) => p.supplierId === supplier.id
             );
@@ -323,6 +329,7 @@ const Suppliers = () => {
             );
           })}
         </div>
+        <DataPagination {...pagination} entityName="مورد" />
 
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent dir="rtl">

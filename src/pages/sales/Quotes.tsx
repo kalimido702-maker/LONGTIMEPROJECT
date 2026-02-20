@@ -32,6 +32,8 @@ import { useNavigate } from "react-router-dom";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import { useTabs } from "@/contexts/TabContext";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 // Quote interface
 export interface SavedQuote {
@@ -134,6 +136,10 @@ export default function Quotes() {
       new Date(q.createdAt) <= new Date(dateTo + "T23:59:59");
 
     return matchSearch && matchDateFrom && matchDateTo;
+  });
+
+  const pagination = usePagination(filteredQuotes, {
+    resetDeps: [searchQuery, dateFrom, dateTo],
   });
 
   // Create invoice from quote
@@ -287,7 +293,7 @@ export default function Quotes() {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredQuotes.map((quote) => {
+                pagination.paginatedItems.map((quote) => {
                   const itemsCount = quote.items.reduce(
                     (sum, i) => sum + i.quantity,
                     0
@@ -363,6 +369,7 @@ export default function Quotes() {
             </TableBody>
           </Table>
         </Card>
+        <DataPagination {...pagination} entityName="عرض سعر" />
       </div>
 
       {/* Quote Details Dialog */}

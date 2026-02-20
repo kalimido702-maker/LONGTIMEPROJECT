@@ -337,9 +337,11 @@ const users = dbUsers.map(u => ({
   id: gId('user', u.id),
   name: toStr(u.title),
   username: toStr(u.title),
+  password: toStr(u.pass) || '0000',
   role: u.sn === 1 ? 'admin' : 'cashier',
+  roleId: u.sn === 1 ? 'admin' : 'cashier',
   pin: toStr(u.pass) || '0000',
-  isActive: u.active === 1,
+  active: u.active === 1,
   createdAt: new Date().toISOString(),
 }));
 console.log(`  ✅ مستخدمين: ${users.length}`);
@@ -372,7 +374,7 @@ const customers = accounts
       creditLimit: toNum(a.max_balance_out),
       currentBalance: toNum(a.balance_out),
       bonusBalance: 0,
-      previousStatement: toNum(a.balance_out),
+      previousStatement: toNum(a.balance_in),
       salesRepId: undefined,
       loyaltyPoints: 0,
       createdAt: new Date().toISOString(),
@@ -814,6 +816,27 @@ const expenses = moneyRaw
   });
 console.log(`  ✅ مصروفات: ${expenses.length}`);
 
+// ========================================
+// Generate payments from deposits (for Collections / القبض السريع page)
+// صفحة القبض السريع بتقرأ من جدول "payments" مع paymentType === "collection"
+// لكن الـ deposits بتروح لجدول "deposits" — فلازم ننسخها كمان في "payments"
+// ========================================
+const payments = deposits.map(dep => ({
+  id: `pay_${dep.id.replace('dep_', '')}`,
+  customerId: dep.sourceId,
+  customerName: dep.sourceName,
+  amount: dep.amount,
+  paymentMethodId: 'pm_1',
+  paymentMethodName: 'نقدي الرئيسية',
+  paymentType: 'collection',
+  paymentDate: dep.createdAt,
+  createdAt: dep.createdAt,
+  userId: dep.userId,
+  userName: dep.userName,
+  notes: dep.notes,
+}));
+console.log(`  ✅ سجلات قبض (payments): ${payments.length}`);
+
 // Log skipped records
 const transfers = moneyRaw.filter(m => m.kind === 'TRANSFER');
 const openBal = moneyRaw.filter(m => m.kind === 'OPEN');
@@ -837,6 +860,42 @@ const settingsData = [
   { id: 'taxRate', key: 'taxRate', value: '0' },
 ];
 console.log(`  ✅ إعدادات: ${settingsData.length}`);
+
+// ========================================
+// حساب previousStatement كتعديل لضمان تطابق الأرصدة
+// MYPOS يحسب الرصيد = previousStatement + invoices - payments - returns
+// لذلك: previousStatement = balance_out - (invoices - payments - returns)
+// ========================================
+console.log('\n🔧 جاري حساب أرصدة العملاء الافتتاحية...');
+
+// حساب إجمالي الحركات لكل عميل من البيانات المحولة
+const custTotals = {};
+saleInvoices.forEach(inv => {
+  if (!inv.customerId) return;
+  if (!custTotals[inv.customerId]) custTotals[inv.customerId] = { inv: 0, pay: 0, ret: 0 };
+  custTotals[inv.customerId].inv += inv.total;
+});
+payments.forEach(p => {
+  if (!p.customerId) return;
+  if (!custTotals[p.customerId]) custTotals[p.customerId] = { inv: 0, pay: 0, ret: 0 };
+  custTotals[p.customerId].pay += p.amount;
+});
+salesReturns.forEach(r => {
+  if (!r.customerId) return;
+  if (!custTotals[r.customerId]) custTotals[r.customerId] = { inv: 0, pay: 0, ret: 0 };
+  custTotals[r.customerId].ret += r.total;
+});
+
+let adjustedCount = 0;
+customers.forEach(c => {
+  const balanceOut = toNum(accountsMap.get(parseInt(c.id.replace('cust_', '')))?.balance_out);
+  const t = custTotals[c.id] || { inv: 0, pay: 0, ret: 0 };
+  const transactionBalance = t.inv - t.pay - t.ret;
+  const adjustment = balanceOut - transactionBalance;
+  c.previousStatement = Math.round(adjustment * 100) / 100;
+  if (Math.abs(adjustment) > 0.01) adjustedCount++;
+});
+console.log(`  ✅ تم تعديل previousStatement لـ ${adjustedCount} عميل لضمان تطابق balance_out`);
 
 // ========================================
 // Build Final JSON
@@ -865,6 +924,7 @@ const myposBackup = {
     purchaseReturns,
     deposits,
     depositSources,
+    payments,
     expenses,
     employees: [],
     installments: [],
@@ -903,7 +963,7 @@ console.log(`  ↩️  مرتجعات البيع:    ${salesReturns.length}`);
 console.log(`  📥 فواتير الشراء:     ${purchasesList.length}`);
 console.log(`  ↪️  مرتجعات الشراء:   ${purchaseReturns.length}`);
 console.log(`  💵 سندات القبض:       ${deposits.length}`);
-console.log(`  💸 المصروفات:         ${expenses.length}`);
+console.log(`  � المصروفات:         ${expenses.length}`);
 console.log(`  ⚙️  الإعدادات:         ${settingsData.length}`);
 console.log('─'.repeat(55));
 

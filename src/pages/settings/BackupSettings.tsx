@@ -46,8 +46,9 @@ const BackupSettings = () => {
     const [history, setHistory] = useState(backupService.getBackupHistory());
     const [isCreatingBackup, setIsCreatingBackup] = useState(false);
     const [isRestoring, setIsRestoring] = useState(false);
+    const [restoreProgress, setRestoreProgress] = useState<{ stage: string; detail: string; percent: number } | null>(null);
 
-    // Debug mode - shows dangerous operations
+    // Debug mode - shows dangerous operations only (does NOT affect sync)
     const isDebugMode = import.meta.env.VITE_DEBUG_SYNC === 'true';
 
     useEffect(() => {
@@ -93,8 +94,11 @@ const BackupSettings = () => {
         if (!file) return;
 
         setIsRestoring(true);
+        setRestoreProgress({ stage: 'reading', detail: 'جاري البدء...', percent: 0 });
         try {
-            const result = await backupService.restoreBackup(file);
+            const result = await backupService.restoreBackup(file, (progress) => {
+                setRestoreProgress(progress);
+            });
             if (result.success) {
                 toast.success(result.message);
             } else {
@@ -102,6 +106,7 @@ const BackupSettings = () => {
             }
         } finally {
             setIsRestoring(false);
+            setRestoreProgress(null);
             e.target.value = ""; // Reset input
         }
     };
@@ -249,6 +254,26 @@ const BackupSettings = () => {
                                     onChange={handleRestoreBackup}
                                 />
                             </div>
+
+                            {/* Progress bar during restore */}
+                            {restoreProgress && (
+                                <div className="space-y-2 p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                                    <div className="flex items-center justify-between text-sm">
+                                        <span className="text-blue-800 dark:text-blue-200">
+                                            {restoreProgress.detail}
+                                        </span>
+                                        <span className="text-blue-600 dark:text-blue-400 font-mono">
+                                            {restoreProgress.percent}%
+                                        </span>
+                                    </div>
+                                    <div className="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-2">
+                                        <div
+                                            className="bg-blue-600 dark:bg-blue-400 h-2 rounded-full transition-all duration-300"
+                                            style={{ width: `${restoreProgress.percent}%` }}
+                                        />
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="p-3 bg-yellow-50 dark:bg-yellow-950 rounded-lg text-sm text-yellow-800 dark:text-yellow-200">
                                 <p>⚠️ تحذير: استعادة نسخة احتياطية ستؤدي إلى استبدال البيانات الحالية</p>

@@ -87,7 +87,7 @@ const Settings = () => {
   const isElectron =
     typeof window !== "undefined" && window.electronAPI?.license;
 
-  // Debug mode - shows dangerous operations
+  // Debug mode - shows dangerous operations only (does NOT affect sync)
   const isDebugMode = import.meta.env.VITE_DEBUG_SYNC === 'true';
 
   // Force server pull state

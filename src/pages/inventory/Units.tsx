@@ -34,6 +34,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 export default function Units() {
   const [units, setUnits] = useState<Unit[]>([]);
@@ -244,6 +246,8 @@ export default function Units() {
     }
   };
 
+  const pagination = usePagination(units);
+
   return (
     <div className="min-h-screen bg-background" dir="rtl">
       <POSHeader />
@@ -295,7 +299,7 @@ export default function Units() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {units.map((unit) => (
+                  {pagination.paginatedItems.map((unit) => (
                     <TableRow key={unit.id}>
                       <TableCell className="font-medium">{unit.name}</TableCell>
                       <TableCell>
@@ -348,6 +352,7 @@ export default function Units() {
                 </TableBody>
               </Table>
             )}
+            <DataPagination {...pagination} entityName="وحدة قياس" />
           </CardContent>
         </Card>
 

@@ -17,6 +17,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 const ProductCategories = () => {
   const { can } = useAuth();
@@ -181,6 +183,8 @@ const ProductCategories = () => {
       cat.nameAr?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const pagination = usePagination(filteredCategories, { resetDeps: [searchTerm] });
+
   if (!can("products", "view")) {
     return (
       <div className="min-h-screen bg-background" dir="rtl">
@@ -271,7 +275,7 @@ const ProductCategories = () => {
               لا توجد أقسام
             </Card>
           ) : (
-            filteredCategories.map((category) => (
+            pagination.paginatedItems.map((category) => (
               <Card key={category.id} className="p-4">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
@@ -342,6 +346,8 @@ const ProductCategories = () => {
             ))
           )}
         </div>
+
+        <DataPagination {...pagination} entityName="قسم منتجات" />
 
         {/* نموذج إضافة/تعديل القسم */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

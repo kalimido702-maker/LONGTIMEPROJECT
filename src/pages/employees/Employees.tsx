@@ -40,6 +40,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSettingsContext } from "@/contexts/SettingsContext";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 // حساب الأيام المتبقية حتى يوم صرف الراتب
 const getDaysUntilSalary = (salaryDay: number): number => {
@@ -429,6 +431,8 @@ const Employees = () => {
       e.position.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const pagination = usePagination(filteredEmployees, { resetDeps: [searchTerm] });
+
   return (
     <div className="min-h-screen bg-background" dir="rtl">
       <POSHeader />
@@ -454,7 +458,7 @@ const Employees = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredEmployees.map((employee) => {
+          {pagination.paginatedItems.map((employee) => {
             const daysUntilSalary = getDaysUntilSalary(employee.salaryDay || 1);
             const fixedDeductions = Number(employee.deductions || 0);
 
@@ -709,6 +713,8 @@ const Employees = () => {
             );
           })}
         </div>
+
+        <DataPagination {...pagination} entityName="موظف" />
 
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent

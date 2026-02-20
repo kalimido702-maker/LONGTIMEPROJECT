@@ -136,6 +136,9 @@ export class SmartSyncManager extends EventEmitter {
     private isOnline: boolean = navigator.onLine;
     // Mutex to prevent concurrent sync operations
     private isSyncing: boolean = false;
+    // Circuit breaker: stop retrying after consecutive auth failures
+    private consecutiveAuthFailures: number = 0;
+    private readonly MAX_AUTH_FAILURES = 3;
     // Queue for batching WebSocket notifications
     private pendingNotifications: Map<string, SyncEvent> = new Map();
     private notificationFlushTimer: any = null;
@@ -574,6 +577,20 @@ export class SmartSyncManager extends EventEmitter {
             return { pulled: 0, pushed: 0, conflicts: 0, errors: [] };
         }
 
+        // Circuit breaker: skip sync if too many consecutive auth failures
+        if (this.consecutiveAuthFailures >= this.MAX_AUTH_FAILURES) {
+            console.warn(`[SmartSync] Circuit breaker OPEN: ${this.consecutiveAuthFailures} consecutive auth failures. Skipping sync until re-authenticated.`);
+            this.setStatus('error');
+            return { pulled: 0, pushed: 0, conflicts: 0, errors: ['Auth circuit breaker open - too many 401 failures'] };
+        }
+
+        // Check if we have auth tokens before attempting sync
+        if (!this.httpClient.isAuthenticated()) {
+            console.warn('[SmartSync] Not authenticated - skipping sync. Will retry when tokens are available.');
+            this.setStatus('idle');
+            return { pulled: 0, pushed: 0, conflicts: 0, errors: ['Not authenticated'] };
+        }
+
         console.log('[SmartSync] Performing full sync...');
         this.setStatus('syncing');
 
@@ -601,11 +618,28 @@ export class SmartSyncManager extends EventEmitter {
             this.setStatus('idle');
             this.emit('syncComplete', result);
 
+            // Reset auth failure counter on successful sync
+            this.consecutiveAuthFailures = 0;
+
             console.log(`[SmartSync] Full sync complete: pulled=${result.pulled}, pushed=${result.pushed}, conflicts=${result.conflicts}`);
 
         } catch (error: any) {
             console.error('[SmartSync] Full sync failed:', error);
             result.errors.push(error.message);
+
+            // Detect auth failures (401 / token errors) and increment circuit breaker
+            const errorMsg = error.message?.toLowerCase() || '';
+            const isAuthError = error.response?.status === 401 
+                || errorMsg.includes('401')
+                || errorMsg.includes('unauthorized')
+                || errorMsg.includes('no refresh token')
+                || errorMsg.includes('failed to refresh token');
+            
+            if (isAuthError) {
+                this.consecutiveAuthFailures++;
+                console.warn(`[SmartSync] Auth failure #${this.consecutiveAuthFailures}/${this.MAX_AUTH_FAILURES}. ${this.consecutiveAuthFailures >= this.MAX_AUTH_FAILURES ? 'Circuit breaker will OPEN.' : 'Will retry.'}`);
+            }
+
             this.setStatus('error');
             this.emit('syncError', error);
         }
@@ -1353,6 +1387,13 @@ export class SmartSyncManager extends EventEmitter {
      */
     async pushChanges(): Promise<SyncResult> {
         console.log('[SmartSync] Pushing local changes to server...');
+
+        // Skip push if not authenticated
+        if (!this.httpClient.isAuthenticated()) {
+            console.warn('[SmartSync] Not authenticated - skipping push.');
+            return { pulled: 0, pushed: 0, conflicts: 0, errors: ['Not authenticated'] };
+        }
+
         this.setStatus('pushing');
 
         const result: SyncResult = {
@@ -1700,7 +1741,7 @@ export class SmartSyncManager extends EventEmitter {
         }
 
         this.syncTimer = setInterval(() => {
-            if (this.isOnline && this.status === 'idle' && !this.isSyncing) {
+            if (this.isOnline && this.status === 'idle' && !this.isSyncing && this.httpClient.isAuthenticated()) {
                 this.performFullSync();
             }
         }, this.config.syncInterval);
@@ -1737,6 +1778,17 @@ export class SmartSyncManager extends EventEmitter {
 
     getDeviceId(): string {
         return this.deviceId;
+    }
+
+    /**
+     * Reset the auth circuit breaker (call after successful re-authentication)
+     */
+    resetAuthCircuitBreaker(): void {
+        if (this.consecutiveAuthFailures > 0) {
+            console.log(`[SmartSync] Auth circuit breaker RESET (was at ${this.consecutiveAuthFailures} failures)`);
+            this.consecutiveAuthFailures = 0;
+            this.setStatus('idle');
+        }
     }
 }
 

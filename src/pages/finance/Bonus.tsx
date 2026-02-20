@@ -46,6 +46,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useCustomerBalances } from "@/hooks/useCustomerBalances";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 // نوع سجل البونص
 interface BonusRecord {
@@ -72,6 +74,8 @@ export default function Bonus() {
     // البيانات
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [recentBonuses, setRecentBonuses] = useState<BonusRecord[]>([]);
+
+    const pagination = usePagination(recentBonuses);
 
     // نموذج الإدخال
     const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
@@ -568,7 +572,7 @@ export default function Bonus() {
                                         </TableCell>
                                     </TableRow>
                                 ) : (
-                                    recentBonuses.map((bonus) => (
+                                    pagination.paginatedItems.map((bonus) => (
                                         <TableRow key={bonus.id}>
                                             <TableCell className="font-medium">
                                                 {bonus.customerName}
@@ -595,6 +599,8 @@ export default function Bonus() {
                             </TableBody>
                         </Table>
                     </Card>
+
+                    <DataPagination {...pagination} entityName="بونص" />
                 </div>
             </div>
         </div>

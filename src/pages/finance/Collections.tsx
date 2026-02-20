@@ -71,6 +71,8 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { exportToExcel } from "@/lib/reportExport";
 import { useCustomerBalances } from "@/hooks/useCustomerBalances";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 // نوع سجل القبض
 interface CollectionRecord {
@@ -227,6 +229,15 @@ export default function Collections() {
             }));
             setRecentCollections(collections);
 
+            // تعيين تاريخ "من" لأقدم عملية قبض
+            if (collections.length > 0) {
+                const oldestDate = collections.reduce((oldest, c) => {
+                    const d = new Date(c.createdAt);
+                    return d < oldest ? d : oldest;
+                }, new Date(collections[0].createdAt));
+                setFilterDateFrom(oldestDate.toISOString().split('T')[0]);
+            }
+
             // مزامنة localStorage مع IndexedDB
             localStorage.setItem('pos-collections', JSON.stringify(collections.slice(0, 100)));
         } catch {
@@ -236,6 +247,14 @@ export default function Collections() {
                 if (saved) {
                     const collections = JSON.parse(saved) as CollectionRecord[];
                     setRecentCollections(collections.slice(0, 20));
+                    // تعيين تاريخ "من" لأقدم عملية قبض
+                    if (collections.length > 0) {
+                        const oldestDate = collections.reduce((oldest, c) => {
+                            const d = new Date(c.createdAt);
+                            return d < oldest ? d : oldest;
+                        }, new Date(collections[0].createdAt));
+                        setFilterDateFrom(oldestDate.toISOString().split('T')[0]);
+                    }
                 }
             } catch {
                 setRecentCollections([]);
@@ -348,6 +367,10 @@ export default function Collections() {
 
         return filtered;
     }, [recentCollections, globalSearchQuery, filterDateFrom, filterDateTo, filterPaymentMethodId, filterSupervisorId, salesReps, customers]);
+
+    const pagination = usePagination(filteredCollections, {
+        resetDeps: [globalSearchQuery, filterDateFrom, filterDateTo, filterPaymentMethodId, filterSupervisorId],
+    });
 
     // العميل المختار
     const selectedCustomer = useMemo(() => {
@@ -1546,7 +1569,7 @@ export default function Collections() {
                                         </TableCell>
                                     </TableRow>
                                 ) : (
-                                    filteredCollections.map((collection) => (
+                                    pagination.paginatedItems.map((collection) => (
                                         <TableRow key={collection.id}>
                                             <TableCell className="font-medium">
                                                 {collection.customerName}
@@ -1610,6 +1633,7 @@ export default function Collections() {
                             </TableBody>
                         </Table>
                     </Card>
+                    <DataPagination {...pagination} entityName="عملية قبض" />
                 </div>
             </div>
             )}

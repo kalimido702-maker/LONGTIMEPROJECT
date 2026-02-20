@@ -33,6 +33,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { useSettings } from "@/hooks/use-settings";
 import { APP_DEFAULTS } from "@/lib/constants";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 interface Purchase {
   id: string;
@@ -215,6 +217,8 @@ const PurchaseReturns = () => {
     setReason("");
   };
 
+  const pagination = usePagination(purchaseReturns);
+
   const formatCurrency = (amount: number) => {
     return amount.toFixed(2) + " EGP";
   };
@@ -248,7 +252,7 @@ const PurchaseReturns = () => {
           <Card className="p-6">
             <h2 className="text-xl font-bold mb-4">سجل مرتجعات المشتريات</h2>
             <div className="space-y-4">
-              {purchaseReturns.map((returnDoc) => (
+              {pagination.paginatedItems.map((returnDoc) => (
                 <Card key={returnDoc.id} className="p-4">
                   <div className="flex justify-between items-start">
                     <div>
@@ -302,6 +306,7 @@ const PurchaseReturns = () => {
               ))}
             </div>
           </Card>
+          <DataPagination {...pagination} entityName="مرتجع شراء" />
         </div>
       )}
     </div>

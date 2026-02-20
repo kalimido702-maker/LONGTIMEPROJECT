@@ -4,6 +4,8 @@
  */
 
 import { db } from "@/shared/lib/indexedDB";
+import { getDatabaseService } from "@/infrastructure/database/DatabaseService";
+import { getSmartSync } from "@/infrastructure/sync";
 
 // تكوين النسخ الاحتياطي
 interface BackupConfig {
@@ -74,25 +76,33 @@ const createBackup = async (): Promise<BackupRecord | null> => {
             "products",
             "customers",
             "invoices",
+            "invoiceItems",
             "salesReturns",
             "purchases",
             "purchaseReturns",
             "suppliers",
             "employees",
             "expenses",
+            "expenseCategories",
+            "expenseItems",
             "deposits",
             "depositSources",
+            "payments",
+            "paymentMethods",
             "installments",
             "shifts",
             "promotions",
             "productCategories",
             "units",
+            "productUnits",
             "warehouses",
             "priceTypes",
             "salesReps",
             "supervisors",
             "users",
+            "roles",
             "settings",
+            "auditLogs",
         ];
 
         const backupData: Record<string, any[]> = {};
@@ -188,8 +198,13 @@ const downloadBackup = (blob: Blob, filename: string): void => {
 };
 
 // استعادة النسخ الاحتياطي
-const restoreBackup = async (file: File): Promise<{ success: boolean; message: string }> => {
+const restoreBackup = async (
+    file: File,
+    onProgress?: (progress: { stage: string; detail: string; percent: number }) => void
+): Promise<{ success: boolean; message: string }> => {
     try {
+        onProgress?.({ stage: 'reading', detail: 'جاري قراءة ملف النسخ الاحتياطي...', percent: 0 });
+
         const content = await file.text();
         const backup = JSON.parse(content);
 
@@ -198,32 +213,93 @@ const restoreBackup = async (file: File): Promise<{ success: boolean; message: s
         }
 
         await db.init();
+        const dbService = getDatabaseService();
 
+        const tables = Object.entries(backup.data).filter(
+            ([, records]) => Array.isArray(records) && (records as any[]).length > 0
+        ) as [string, any[]][];
+        const totalTables = tables.length;
         let restoredCount = 0;
-        for (const [table, records] of Object.entries(backup.data)) {
-            if (Array.isArray(records)) {
-                for (const record of records) {
-                    try {
-                        await db.add(table, record);
-                        restoredCount++;
-                    } catch (e) {
-                        // تحديث إذا كان موجوداً
-                        try {
-                            await db.update(table, record);
-                            restoredCount++;
-                        } catch (updateError) {
-                            console.log(`Could not restore record in ${table}`);
-                        }
-                    }
+        const now = new Date().toISOString();
+
+        onProgress?.({ stage: 'restoring', detail: `جاري استعادة ${totalTables} جدول...`, percent: 5 });
+
+        console.log(`📦 Starting restore of ${totalTables} tables...`);
+        const tableResults: Array<{ table: string; count: number; status: string }> = [];
+
+        // Bulk upsert each table in a single IDB transaction (fast)
+        for (let i = 0; i < tables.length; i++) {
+            const [table, records] = tables[i];
+            const percent = 5 + Math.round(((i + 1) / totalTables) * 65); // 5% - 70%
+
+            onProgress?.({
+                stage: 'restoring',
+                detail: `جاري استعادة ${table} (${records.length} سجل) [${i + 1}/${totalTables}]`,
+                percent
+            });
+
+            try {
+                const repo = dbService.getRepository(table);
+
+                // Clear existing data first to avoid uniqueness conflicts
+                try {
+                    await repo.clear();
+                } catch (clearErr) {
+                    console.warn(`⚠️ Could not clear table ${table} before restore:`, clearErr);
                 }
+
+                // Stamp records: mark as unsynced so SmartSyncManager will push them
+                const stampedRecords = records.map((record: any) => ({
+                    ...record,
+                    local_updated_at: now,
+                    is_synced: false,
+                    last_synced_at: null,
+                }));
+
+                // Use batchUpdateFromServer: single IDB transaction with put (upsert), no sync queue overhead
+                await repo.batchUpdateFromServer(stampedRecords);
+                restoredCount += records.length;
+                console.log(`✅ Restored ${table}: ${records.length} records`);
+                tableResults.push({ table, count: records.length, status: '✅' });
+            } catch (error) {
+                console.error(`❌ Error restoring table ${table}:`, error);
+                tableResults.push({ table, count: 0, status: '❌' });
             }
+        }
+
+        // Log summary of all tables
+        console.log('\n📊 Restore Summary:');
+        for (const r of tableResults) {
+            console.log(`  ${r.status} ${r.table}: ${r.count} records`);
+        }
+        console.log(`  Total restored: ${restoredCount} records\n`);
+
+        // After all data is in IndexedDB, push to server automatically
+        onProgress?.({ stage: 'syncing', detail: 'جاري رفع البيانات للسيرفر...', percent: 75 });
+
+        try {
+            const smartSync = getSmartSync();
+            if (smartSync) {
+                console.log("🔄 Starting post-restore sync push...");
+                const pushResult = await smartSync.pushChanges();
+                console.log(`✅ Post-restore sync push completed: ${pushResult.pushed} records pushed`);
+                onProgress?.({
+                    stage: 'done',
+                    detail: `تم رفع ${pushResult.pushed} سجل للسيرفر`,
+                    percent: 100
+                });
+            }
+        } catch (syncError) {
+            console.warn("⚠️ Could not push to server after restore:", syncError);
+            onProgress?.({ stage: 'done', detail: 'تم الاستعادة محلياً، فشل الرفع للسيرفر', percent: 100 });
         }
 
         return {
             success: true,
-            message: `تم استعادة ${restoredCount} سجل من النسخ الاحتياطي`,
+            message: `تم استعادة ${restoredCount} سجل ورفعهم للسيرفر`,
         };
     } catch (error) {
+        console.error("Error restoring backup:", error);
         return { success: false, message: "حدث خطأ أثناء استعادة النسخ الاحتياطي" };
     }
 };

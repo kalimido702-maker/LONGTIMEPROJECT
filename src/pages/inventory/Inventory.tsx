@@ -56,6 +56,8 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { printBarcodeLabels, type BarcodeLabelData } from "@/lib/printing";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 const Inventory = () => {
   const { can, user } = useAuth();
@@ -822,6 +824,10 @@ const Inventory = () => {
     return matchesSearch && matchesCategory;
   });
 
+  const pagination = usePagination(filteredProducts, {
+    resetDeps: [searchTerm, selectedCategory],
+  });
+
   const getStockStatus = (product: Product) => {
     if (product.stock === 0)
       return { label: "نفذ", variant: "destructive" as const };
@@ -1048,7 +1054,7 @@ const Inventory = () => {
 
         {/* Products Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {filteredProducts.map((product) => {
+          {pagination.paginatedItems.map((product) => {
             const status = getStockStatus(product);
             return (
               <Card
@@ -1138,6 +1144,7 @@ const Inventory = () => {
             );
           })}
         </div>
+        <DataPagination {...pagination} entityName="منتج" />
 
         {/* Add/Edit Product Dialog */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

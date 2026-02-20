@@ -604,22 +604,21 @@ const TABLE_MAPPINGS: Record<string, TableMapping> = {
         ],
         clientOnlyFields: ['local_updated_at'],
     },
-    // Deposits - MySQL: customer_id, deposit_source_id, amount, deposit_date, user_id, shift_id, notes
+    // Deposits - MySQL: customer_id, deposit_source_id, amount, deposit_date, created_by, notes
     deposits: {
         fields: [
             { clientField: 'id', serverField: 'id' },
             { clientField: 'customerId', serverField: 'customer_id', transform: validateId },
             { clientField: 'sourceId', serverField: 'deposit_source_id', transform: validateId },
             { clientField: 'depositSourceId', serverField: 'deposit_source_id', transform: validateId },
-            { clientField: 'userId', serverField: 'user_id' },
+            { clientField: 'userId', serverField: 'created_by' },
             { clientField: 'createdBy', serverField: 'created_by' },
-            { clientField: 'shiftId', serverField: 'shift_id' },
             { clientField: 'amount', serverField: 'amount' },
             { clientField: 'depositDate', serverField: 'deposit_date', transform: toMySQLDateTime },
             { clientField: 'createdAt', serverField: 'deposit_date', transform: toMySQLDateTime },
             { clientField: 'notes', serverField: 'notes' },
         ],
-        clientOnlyFields: ['local_updated_at', 'sourceName', 'userName'],
+        clientOnlyFields: ['local_updated_at', 'sourceName', 'userName', 'shiftId'],
     },
     // Deposit Sources - SQLite: name, active
     deposit_sources: {
@@ -735,7 +734,8 @@ const TABLE_MAPPINGS: Record<string, TableMapping> = {
             { clientField: 'supplierId', serverField: 'supplier_id', transform: validateId },
             { clientField: 'totalAmount', serverField: 'total' },
             { clientField: 'total', serverField: 'total' },
-            { clientField: 'returnDate', serverField: 'return_date', transform: toMySQLDateTime },
+            { clientField: 'returnDate', serverField: 'return_date', defaultValue: () => toMySQLDateTime(new Date().toISOString()), transform: toMySQLDateTime },
+            { clientField: 'createdAt', serverField: 'return_date', transform: toMySQLDateTime },
             { clientField: 'reason', serverField: 'reason' },
             { clientField: 'notes', serverField: 'notes' },
             { clientField: 'userId', serverField: 'created_by' },
@@ -764,14 +764,17 @@ const TABLE_MAPPINGS: Record<string, TableMapping> = {
         fields: [
             { clientField: 'id', serverField: 'id' },
             { clientField: 'username', serverField: 'username' },
-            { clientField: 'password', serverField: 'password_hash', transform: (v: string) => {
-                if (!v) return null;
+            { clientField: 'password', serverField: 'password_hash', defaultValue: () => bcrypt.hashSync('0000', 10), transform: (v: string) => {
+                if (!v) {
+                    // Provide a default bcrypt hash for "0000" when password is missing
+                    return bcrypt.hashSync('0000', 10);
+                }
                 // If already a bcrypt hash, keep as-is
                 if (v.startsWith('$2b$') || v.startsWith('$2a$')) return v;
                 // Hash plaintext password
                 return bcrypt.hashSync(v, 10);
             }},
-            { clientField: 'name', serverField: 'full_name' },
+            { clientField: 'name', serverField: 'full_name', defaultValue: 'User' },
             { clientField: 'email', serverField: 'email' },
             { clientField: 'phone', serverField: 'phone' },
             { clientField: 'role', serverField: 'role', defaultValue: 'cashier' },
