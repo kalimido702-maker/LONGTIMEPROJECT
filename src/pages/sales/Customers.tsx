@@ -700,7 +700,6 @@ const Customers = () => {
                         }
                         placeholder="0.00"
                         step="0.01"
-                        min="0"
                       />
                       <p className="text-xs text-muted-foreground">
                         رصيد سابق من نظام قديم
