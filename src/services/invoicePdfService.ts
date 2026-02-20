@@ -89,12 +89,14 @@ export async function generateInvoiceHTML(data: InvoicePDFData): Promise<string>
     const formatNum = (num: number | string | undefined | null, _minDecimals = 0, maxDecimals = 2): string => {
         if (num === undefined || num === null || num === "") return "";
         const n = Number(num);
-        if (isNaN(n)) return "0";
+        if (isNaN(n) || !isFinite(n)) return "0";
+        // Ensure maxDecimals is a valid integer between 0 and 20
+        const safeMaxDecimals = Math.max(0, Math.min(20, Math.floor(Number(maxDecimals) || 0)));
         // عرض الكسور فقط عندما تكون ذات معنى - بدون .00
         const hasDecimals = n % 1 !== 0;
         return n.toLocaleString("en-US", {
-            minimumFractionDigits: hasDecimals ? 2 : 0,
-            maximumFractionDigits: hasDecimals ? maxDecimals : 0
+            minimumFractionDigits: hasDecimals ? Math.min(2, safeMaxDecimals) : 0,
+            maximumFractionDigits: hasDecimals ? safeMaxDecimals : 0
         });
     };
 

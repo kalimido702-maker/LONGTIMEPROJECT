@@ -36,9 +36,13 @@ async function generateQRCode(text: string = "https://longtimelt.com"): Promise<
  * Format number in English locale
  */
 const formatNum = (num: number, minDecimals = 0, maxDecimals = 2) => {
-    return (num || 0).toLocaleString("en-US", {
-        minimumFractionDigits: minDecimals,
-        maximumFractionDigits: maxDecimals
+    const n = Number(num) || 0;
+    if (!isFinite(n)) return "0";
+    const safeMin = Math.max(0, Math.min(20, Math.floor(Number(minDecimals) || 0)));
+    const safeMax = Math.max(safeMin, Math.min(20, Math.floor(Number(maxDecimals) || 0)));
+    return n.toLocaleString("en-US", {
+        minimumFractionDigits: safeMin,
+        maximumFractionDigits: safeMax
     });
 };
 
