@@ -41,6 +41,19 @@ export interface SyncEvent {
     userId?: string;
 }
 
+export interface SyncProgressEvent {
+    phase: 'pulling' | 'pushing' | 'processing';
+    message: string;
+    /** Current step within this phase */
+    current?: number;
+    /** Total steps in this phase */
+    total?: number;
+    /** Per-table detail when available */
+    table?: string;
+    /** Total records pulled/pushed so far */
+    recordCount?: number;
+}
+
 export interface SmartSyncConfig {
     syncInterval: number;        // How often to sync (ms) - default 30s
     pullOnConnect: boolean;      // Pull changes on connect - default true
@@ -376,6 +389,10 @@ export class SmartSyncManager extends EventEmitter {
 
             // 3. Clear ALL local syncable stores
             console.log('[SmartSync] 🗑️ Clearing all local data...');
+            this.emit('syncProgress', {
+                phase: 'processing',
+                message: 'جاري مسح البيانات المحلية...',
+            } as SyncProgressEvent);
             let clearedCount = 0;
             for (const tableName of SYNCABLE_TABLES) {
                 try {
@@ -407,6 +424,10 @@ export class SmartSyncManager extends EventEmitter {
 
             // 4. Pull everything fresh from server
             console.log('[SmartSync] ⬇️ Pulling all data from server...');
+            this.emit('syncProgress', {
+                phase: 'pulling',
+                message: 'جاري تحميل جميع البيانات من السيرفر...',
+            } as SyncProgressEvent);
             const pullResult = await this.pullChanges(true);
             result.pulled = pullResult.pulled;
             result.conflicts = pullResult.conflicts;
@@ -414,6 +435,12 @@ export class SmartSyncManager extends EventEmitter {
 
             // 5. Post-pull: reconstruct invoice items arrays
             console.log('[SmartSync] 🔗 Reconstructing invoice items...');
+            this.emit('syncProgress', {
+                phase: 'processing',
+                message: 'جاري ربط عناصر الفواتير...',
+                current: 1,
+                total: 3,
+            } as SyncProgressEvent);
             try {
                 await this.reconstructInvoiceItems();
             } catch (e) {
@@ -422,6 +449,12 @@ export class SmartSyncManager extends EventEmitter {
 
             // 6. Post-pull: fix products (category names, prices, units)
             console.log('[SmartSync] 📦 Post-processing products...');
+            this.emit('syncProgress', {
+                phase: 'processing',
+                message: 'جاري معالجة المنتجات...',
+                current: 2,
+                total: 3,
+            } as SyncProgressEvent);
             try {
                 await this.postProcessProducts();
             } catch (e) {
@@ -430,6 +463,12 @@ export class SmartSyncManager extends EventEmitter {
 
             // 7. Post-pull: recalculate customer balances from invoices & payments
             console.log('[SmartSync] 💰 Recalculating customer balances...');
+            this.emit('syncProgress', {
+                phase: 'processing',
+                message: 'جاري حساب أرصدة العملاء...',
+                current: 3,
+                total: 3,
+            } as SyncProgressEvent);
             try {
                 await this.recalculateCustomerBalances();
             } catch (e) {
@@ -670,86 +709,92 @@ export class SmartSyncManager extends EventEmitter {
         };
 
         try {
-            let hasMore = true;
-            let currentSyncTime = this.lastSyncTime;
+            const since = this.lastSyncTime > 0
+                ? new Date(this.lastSyncTime).toISOString()
+                : '1970-01-01T00:00:00.000Z';
 
-            // Loop until all pages are fetched
-            while (hasMore) {
-                // Get the since timestamp - use ISO string
-                const since = currentSyncTime > 0
-                    ? new Date(currentSyncTime).toISOString()
-                    : '1970-01-01T00:00:00.000Z';
+            console.log(`[SmartSync] Pulling with since=${since}`);
 
-                const response = await this.httpClient.get<{
-                    success?: boolean;
-                    changes: any[];
-                    has_more?: boolean;
-                    next_cursor?: string;
-                }>(`/api/sync/pull-changes?since=${encodeURIComponent(since)}&tables=${SYNCABLE_TABLES.join(',')}`);
+            this.emit('syncProgress', {
+                phase: 'pulling',
+                message: 'جاري تحميل البيانات من السيرفر...',
+            } as SyncProgressEvent);
 
-                // Normalize response format - convert array to object keyed by table
-                const changesObj: Record<string, any[]> = {};
-                if (Array.isArray(response.changes)) {
-                    // DEBUG: Log first few changes to understand the response structure
-                    if (response.changes.length > 0) {
-                        console.log('[SmartSync DEBUG] First change object:', JSON.stringify(response.changes[0]));
-                        console.log('[SmartSync DEBUG] First change.data:', JSON.stringify(response.changes[0]?.data));
+            const response = await this.httpClient.get<{
+                success?: boolean;
+                changes: any[];
+                has_more?: boolean;
+                next_cursor?: string;
+            }>(`/api/sync/pull-changes?since=${encodeURIComponent(since)}&tables=${SYNCABLE_TABLES.join(',')}`);
+
+            // Normalize response format - convert array to object keyed by table
+            const changesObj: Record<string, any[]> = {};
+            if (Array.isArray(response.changes)) {
+                // DEBUG: Log table counts
+                const tableCounts: Record<string, number> = {};
+                for (const change of response.changes) {
+                    const table = change.table_name;
+                    tableCounts[table] = (tableCounts[table] || 0) + 1;
+                    if (!changesObj[table]) {
+                        changesObj[table] = [];
                     }
-
-                    for (const change of response.changes) {
-                        const table = change.table_name;
-                        if (!changesObj[table]) {
-                            changesObj[table] = [];
-                        }
-                        // Include is_deleted and server_updated_at in the record
-                        const record = {
-                            ...(change.data || {}),
-                            is_deleted: change.is_deleted,
-                            server_updated_at: change.server_updated_at,
-                        };
-                        changesObj[table].push(record);
-                    }
-                } else if (response.changes) {
-                    Object.assign(changesObj, response.changes);
+                    const record = {
+                        ...(change.data || {}),
+                        is_deleted: change.is_deleted,
+                        server_updated_at: change.server_updated_at,
+                    };
+                    changesObj[table].push(record);
                 }
+                console.log('[SmartSync] Records per table:', JSON.stringify(tableCounts));
+            } else if (response.changes) {
+                Object.assign(changesObj, response.changes);
+            }
 
-                let pagePulledCount = 0;
-                let pageErrorCount = 0;
-                // Apply each table's changes to local IndexedDB
-                for (const [tableName, records] of Object.entries(changesObj)) {
-                    for (const record of records) {
-                        try {
-                            await this.applyServerRecord(tableName, record);
-                            pagePulledCount++;
-                            result.pulled++;
-                        } catch (recordError: any) {
-                            // Log error but continue with other records
-                            pageErrorCount++;
-                            const errorMsg = `${tableName}/${record.id}: ${recordError.message}`;
-                            console.warn(`[SmartSync] Skipping failed record: ${errorMsg}`);
-                            result.errors.push(errorMsg);
-                        }
+            let pulledCount = 0;
+            const tableEntries = Object.entries(changesObj);
+            let tableIndex = 0;
+            // Apply each table's changes to local IndexedDB
+            for (const [tableName, records] of tableEntries) {
+                tableIndex++;
+                console.log(`[SmartSync] Applying ${records.length} records for ${tableName}...`);
+                this.emit('syncProgress', {
+                    phase: 'pulling',
+                    message: `جاري تطبيق ${records.length} سجل من ${tableName}...`,
+                    current: tableIndex,
+                    total: tableEntries.length,
+                    table: tableName,
+                    recordCount: pulledCount,
+                } as SyncProgressEvent);
+                for (const record of records) {
+                    try {
+                        await this.applyServerRecord(tableName, record);
+                        pulledCount++;
+                        result.pulled++;
+                    } catch (recordError: any) {
+                        const errorMsg = `${tableName}/${record.id}: ${recordError.message}`;
+                        console.warn(`[SmartSync] Skipping failed record: ${errorMsg}`);
+                        result.errors.push(errorMsg);
                     }
-                }
-
-                console.log(`[SmartSync] Pulled page with ${pagePulledCount} records`);
-
-                // Check pagination
-                hasMore = response.has_more || false;
-
-                // Update timestamp for next page if provided, otherwise update lastSyncTime
-                if (hasMore && response.next_cursor) {
-                    currentSyncTime = new Date(response.next_cursor).getTime();
-                } else {
-                    // Update global lastSyncTime only when full sync is done
-                    this.saveLastSyncTime();
                 }
             }
+
+            console.log(`[SmartSync] Pulled ${pulledCount} records from server`);
+
+            // Update global lastSyncTime
+            this.saveLastSyncTime();
 
             // Update last pull time for throttling
             this.lastPullTime = Date.now();
 
             console.log(`[SmartSync] Total pulled: ${result.pulled} records from server`);
+
+            this.emit('syncProgress', {
+                phase: 'pulling',
+                message: `تم تحميل ${result.pulled} سجل بنجاح`,
+                current: tableEntries.length,
+                total: tableEntries.length,
+                recordCount: result.pulled,
+            } as SyncProgressEvent);
 
         } catch (error: any) {
             console.error('[SmartSync] Pull failed:', error);
@@ -1431,6 +1476,15 @@ export class SmartSyncManager extends EventEmitter {
             }
 
             console.log(`[SmartSync] Found ${unsyncedRecords.length} unsynced records`);
+
+            this.emit('syncProgress', {
+                phase: 'pushing',
+                message: `جاري رفع ${unsyncedRecords.length} سجل إلى السيرفر...`,
+                current: 0,
+                total: unsyncedRecords.length,
+                recordCount: 0,
+            } as SyncProgressEvent);
+
             // Log details of unsynced records for debugging
             for (const { table, record } of unsyncedRecords) {
                 console.log(`[SmartSync] Unsynced: ${table}/${record.id || record.key} (is_synced=${record.is_synced}, last_synced_at=${record.last_synced_at})`);
@@ -1438,8 +1492,17 @@ export class SmartSyncManager extends EventEmitter {
 
             // Send in batches
             const batches = this.createBatches(unsyncedRecords, this.config.batchSize);
+            let batchIndex = 0;
 
             for (const batch of batches) {
+                batchIndex++;
+                this.emit('syncProgress', {
+                    phase: 'pushing',
+                    message: `جاري رفع الدفعة ${batchIndex} من ${batches.length}...`,
+                    current: batchIndex,
+                    total: batches.length,
+                    recordCount: result.pushed,
+                } as SyncProgressEvent);
                 const batchResult = await this.pushBatch(batch);
                 result.pushed += batchResult.pushed;
                 result.conflicts += batchResult.conflicts;

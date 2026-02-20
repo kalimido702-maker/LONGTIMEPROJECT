@@ -353,14 +353,14 @@ const Settings = () => {
                 </Button>
 
                 {/* Debug Mode Section - Only visible when VITE_DEBUG_SYNC=true */}
-                {isDebugMode && (
+                {/* {isDebugMode && (
                   <div className="border-t pt-6 mt-6 space-y-4">
                     <div className="flex items-center gap-2 mb-2">
                       <Bug className="h-5 w-5 text-orange-500" />
                       <h3 className="font-bold text-orange-700 dark:text-orange-300">وضع المطور (Debug)</h3>
                     </div>
 
-                    {/* Force Server Pull */}
+                    {/* Force Server Pull 
                     <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-4">
                       <div className="flex items-center gap-2 mb-3">
                         <Download className="h-5 w-5 text-red-600 dark:text-red-400" />
@@ -429,7 +429,7 @@ const Settings = () => {
                       </AlertDialog>
                     </div>
 
-                    {/* Clear Server Data */}
+                    {/* Clear Server Data 
                     <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-4">
                       <div className="flex items-center gap-2 mb-3">
                         <ServerOff className="h-5 w-5 text-red-600 dark:text-red-400" />
@@ -500,7 +500,7 @@ const Settings = () => {
                       </AlertDialog>
                     </div>
                   </div>
-                )}
+                )} */}
               </div>
             </Card>
           </TabsContent>

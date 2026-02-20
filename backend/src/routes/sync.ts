@@ -182,7 +182,7 @@ export async function syncRoutes(server: FastifyInstance) {
           type: "object",
           required: ["since"],
           properties: {
-            since: { type: "string", format: "date-time" },
+            since: { type: "string" }, // timestamp or compound cursor (timestamp|id)
             tables: { type: "string" }, // comma-separated table names
           },
         },

@@ -283,7 +283,7 @@ const BackupSettings = () => {
                 </div>
 
                 {/* Data Maintenance - Debug Mode Only */}
-                {isDebugMode && (
+                {/* {isDebugMode && (
                     <Card className="border-red-200 dark:border-red-900">
                         <CardHeader>
                             <CardTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
@@ -310,7 +310,7 @@ const BackupSettings = () => {
                             </div>
                         </CardContent>
                     </Card>
-                )}
+                )} */}
 
                 {/* Backup History */}
                 <Card>

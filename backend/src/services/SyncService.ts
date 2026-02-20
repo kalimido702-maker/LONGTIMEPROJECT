@@ -140,7 +140,9 @@ function normalizeTableName(tableName: string): string {
 }
 
 const MAX_BATCH_SIZE = 50;
-const MAX_PULL_SIZE = 500;
+// No global pull limit - each table is fetched completely
+// This avoids cross-table cursor issues where some tables get skipped
+const PER_TABLE_PULL_LIMIT = 50000;
 
 export class SyncService {
   /**
@@ -400,33 +402,23 @@ export class SyncService {
       // Tables that don't have branch_id column
       const noBranchTables = ['roles'];
 
-      // Per-table limit to prevent any single table from consuming the entire response
-      const perTableLimit = Math.min(MAX_PULL_SIZE, 500);
-
       for (const table_name of tablesToSync) {
-        // Stop if we already have enough changes
-        if (response.changes.length >= MAX_PULL_SIZE) {
-          break;
-        }
-
-        const remaining = MAX_PULL_SIZE - response.changes.length;
-
         try {
           let queryParams: any[];
           let query: string;
 
           if (noBranchTables.includes(table_name)) {
-            // Tables without branch_id - only filter by client_id
-            // Use >= instead of > to avoid skipping records with identical timestamps
             query = `SELECT * FROM ?? 
              WHERE client_id = ? 
              AND server_updated_at >= ? 
              ORDER BY server_updated_at ASC, id ASC 
              LIMIT ?`;
-            queryParams = [table_name, client_id, since, Math.min(remaining, perTableLimit)];
+            queryParams = [table_name, client_id, since, PER_TABLE_PULL_LIMIT];
           } else {
-            // Handle null branch_id: use IS NULL when branch_id is null, otherwise use =
-            const branchCondition = branch_id === null || branch_id === 'null' ? 'branch_id IS NULL' : 'branch_id = ?';
+            // Include records with NULL branch_id (imported data) alongside branch-specific records
+            const branchCondition = branch_id === null || branch_id === 'null' 
+              ? 'branch_id IS NULL' 
+              : '(branch_id = ? OR branch_id IS NULL)';
             query = `SELECT * FROM ?? 
              WHERE client_id = ? 
              AND ${branchCondition}
@@ -434,11 +426,10 @@ export class SyncService {
              ORDER BY server_updated_at ASC, id ASC 
              LIMIT ?`;
             queryParams = branch_id === null || branch_id === 'null'
-              ? [table_name, client_id, since, Math.min(remaining, perTableLimit)]
-              : [table_name, client_id, branch_id, since, Math.min(remaining, perTableLimit)];
+              ? [table_name, client_id, since, PER_TABLE_PULL_LIMIT]
+              : [table_name, client_id, branch_id, since, PER_TABLE_PULL_LIMIT];
           }
 
-          // Use simple query; streaming API was failing in promise wrapper
           const [rows] = await connection.query<RowDataPacket[]>(query, queryParams);
 
           for (const row of rows) {
@@ -483,14 +474,6 @@ export class SyncService {
             "Skipping table during pull (likely missing client_id/branch_id columns)"
           );
           continue;
-        }
-
-        // التحقق من وجود المزيد من السجلات
-        if (response.changes.length >= MAX_PULL_SIZE) {
-          response.has_more = true;
-          response.next_cursor =
-            response.changes[response.changes.length - 1].server_updated_at;
-          break;
         }
       }
 

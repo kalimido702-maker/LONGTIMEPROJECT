@@ -9,6 +9,7 @@ import { TabBar } from '@/components/TabBar';
 import { TabContent } from '@/components/TabContent';
 import { TabProvider } from '@/contexts/TabContext';
 import UpdateProgressBar from '@/components/UpdateProgressBar';
+import { SyncProgressBar } from '@/components/sync/SyncProgressBar';
 
 export function TabLayout() {
     return (
@@ -19,6 +20,9 @@ export function TabLayout() {
 
                 {/* Tab Content - يحتوي على Header الخاص بكل صفحة */}
                 <TabContent />
+
+                {/* Sync Progress Bar - شريط تقدم المزامنة */}
+                <SyncProgressBar />
 
                 {/* Update Progress Bar */}
                 <UpdateProgressBar />
