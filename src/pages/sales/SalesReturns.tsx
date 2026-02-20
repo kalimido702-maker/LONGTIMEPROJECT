@@ -467,8 +467,8 @@ const SalesReturns = () => {
         try {
           const product = await db.get<Product>("products", item.productId);
           if (product) {
-            const restoredQty = Number(product.stockQuantity || 0) - Number(item.quantity);
-            await db.update("products", { ...product, stockQuantity: restoredQty });
+            const restoredQty = Number(product.stock || 0) - Number(item.quantity);
+            await db.update("products", { ...product, stock: restoredQty });
           }
         } catch (_e) { /* تجاهل */ }
       }

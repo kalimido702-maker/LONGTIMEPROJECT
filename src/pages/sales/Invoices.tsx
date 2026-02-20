@@ -336,7 +336,7 @@ export default function Invoices() {
                 const products = await db.getAll<Product>("products");
 
                 for (const item of invoice.items) {
-                    const product = products.find(p => p.id === item.productId || p.id === item.id); // try both IDs
+                    const product = products.find(p => p.id === item.productId || p.id === (item as any).id); // try both IDs
                     if (product) {
                         // Calculate quantity to restore (checking for units/packaging)
                         // If complex units, logic might be needed. Assuming standard quantity here.

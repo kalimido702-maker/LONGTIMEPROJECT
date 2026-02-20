@@ -85,7 +85,7 @@ export interface WhatsAppMessage {
     invoiceId?: string;
     customerId?: string;
     campaignId?: string;
-    type?: "invoice" | "reminder" | "campaign" | "manual" | "statement";
+    type?: "invoice" | "reminder" | "campaign" | "manual" | "statement" | "payment_receipt";
   };
   createdAt: string;
 }

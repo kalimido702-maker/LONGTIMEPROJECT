@@ -346,7 +346,7 @@ const startAutoBackup = (): void => {
     }
 
     // فحص كل دقيقة
-    autoBackupInterval = setInterval(checkAndRunAutoBackup, 60 * 1000);
+    autoBackupInterval = window.setInterval(checkAndRunAutoBackup, 60 * 1000) as unknown as number;
     console.log("Auto backup service started");
 
     // فحص فوري عند البدء
