@@ -78,9 +78,9 @@ const AppContent = () => {
       }
     };
 
-    // تنظيف فوري + كل ثانية
+    // تنظيف فوري + كل 3 ثوان (تقليل التكرار لتحسين الأداء)
     globalCleanup();
-    const intervalId = setInterval(globalCleanup, 1000);
+    const intervalId = setInterval(globalCleanup, 3000);
 
     // MutationObserver لاكتشاف التغييرات على body فوراً
     const observer = new MutationObserver((mutations) => {
@@ -88,8 +88,10 @@ const AppContent = () => {
         if (mutation.type === "attributes" && mutation.target === document.body) {
           const attr = mutation.attributeName;
           if (attr === "style" || attr === "data-scroll-locked") {
-            // تأخير بسيط عشان Radix يكمل شغله الأول
-            setTimeout(globalCleanup, 300);
+            // تنظيف فوري ثم بعد تأخير قصير
+            globalCleanup();
+            setTimeout(globalCleanup, 100);
+            setTimeout(globalCleanup, 500);
           }
         }
       }

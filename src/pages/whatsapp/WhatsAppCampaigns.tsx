@@ -205,7 +205,7 @@ const WhatsAppCampaigns = () => {
     setIsLoading(true);
     try {
       await db.init();
-      const [campaignsData, accountsData, customersData] = await Promise.all([
+      const [campaignsData, accountsData, customersData, supervisorsData, salesRepsData] = await Promise.all([
         db.getAll<WhatsAppCampaign>("whatsappCampaigns"),
         db.getAll<WhatsAppAccount>("whatsappAccounts"),
         db.getAll("customers"),

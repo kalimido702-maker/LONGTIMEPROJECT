@@ -10,6 +10,7 @@ export interface Customer {
   previousStatement?: number; // Statement قديم
   salesRepId?: string; // المندوب المسؤول
   class?: "A" | "B" | "C"; // تصنيف العميل
+  whatsappGroupId?: string; // جروب واتساب للإرسال (بديل عن رقم الهاتف)
   loyaltyPoints: number;
   createdAt: string;
   notes?: string;

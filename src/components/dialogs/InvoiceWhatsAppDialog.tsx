@@ -220,9 +220,9 @@ export const InvoiceWhatsAppDialog = ({
                     }
                 };
 
-                // Send to Customer
-                if ((recipient === "customer" || recipient === "both") && customer?.phone) {
-                    await sendToTarget(customer.phone, "Customer");
+                // Send to Customer (prefer whatsappGroupId, fallback to phone)
+                if ((recipient === "customer" || recipient === "both") && (customer?.whatsappGroupId || customer?.phone)) {
+                    await sendToTarget(customer.whatsappGroupId || customer.phone, "Customer");
                 }
 
                 // Send to Sales Rep

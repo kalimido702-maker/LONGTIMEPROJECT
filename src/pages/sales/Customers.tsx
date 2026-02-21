@@ -34,15 +34,7 @@ import {
   Upload,
   FileSpreadsheet,
 } from "lucide-react";
-import { db, Customer, Invoice, PaymentMethod } from "@/shared/lib/indexedDB";
-
-interface SalesRep {
-  id: string;
-  name: string;
-  phone: string;
-  supervisorId: string;
-  isActive: boolean;
-}
+import { db, Customer, Invoice, PaymentMethod, Supervisor, SalesRep } from "@/shared/lib/indexedDB";
 import { toast } from "sonner";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -73,7 +65,7 @@ const Customers = () => {
   const [salesReps, setSalesReps] = useState<SalesRep[]>([]);
   const [filterBySalesRep, setFilterBySalesRep] = useState<string>("all");
   const [filterBySupervisor, setFilterBySupervisor] = useState<string>("all");
-  const [supervisors, setSupervisors] = useState<SalesRep[]>([]);
+  const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [isImportResultOpen, setIsImportResultOpen] = useState(false);
@@ -90,6 +82,7 @@ const Customers = () => {
     previousStatement: 0,
     notes: "",
     salesRepId: "",
+    whatsappGroupId: "",
   });
 
   useEffect(() => {
@@ -111,8 +104,8 @@ const Customers = () => {
   const loadSalesReps = async () => {
     const reps = await db.getAll<SalesRep>("salesReps");
     setSalesReps(reps.filter((r) => r.isActive));
-    const sups = reps.filter((r: any) => r.role === "supervisor" || r.isSupervisor);
-    setSupervisors(sups);
+    const sups = await db.getAll<Supervisor>("supervisors");
+    setSupervisors(sups.filter((s) => s.isActive));
   };
 
   const getSalesRepName = (id?: string) => {
@@ -155,8 +148,8 @@ const Customers = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.name || !formData.phone) {
-      toast.error("يرجى إدخال الاسم ورقم الهاتف");
+    if (!formData.name) {
+      toast.error("يرجى إدخال اسم العميل");
       return;
     }
 
@@ -256,6 +249,7 @@ const Customers = () => {
       previousStatement: customer.previousStatement || 0,
       notes: customer.notes || "",
       salesRepId: customer.salesRepId || "",
+      whatsappGroupId: customer.whatsappGroupId || "",
     });
     setIsDialogOpen(true);
   };
@@ -284,6 +278,7 @@ const Customers = () => {
       previousStatement: 0,
       notes: "",
       salesRepId: "",
+      whatsappGroupId: "",
     });
     setEditingCustomer(null);
   };
@@ -597,16 +592,30 @@ const Customers = () => {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="phone">رقم الهاتف *</Label>
+                      <Label htmlFor="phone">رقم الهاتف</Label>
                       <Input
                         id="phone"
                         value={formData.phone}
                         onChange={(e) =>
                           setFormData({ ...formData, phone: e.target.value })
                         }
-                        required
+                        placeholder="رقم الموبايل (اختياري)"
                       />
                     </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="whatsappGroupId">جروب واتساب (اختياري)</Label>
+                    <Input
+                      id="whatsappGroupId"
+                      value={formData.whatsappGroupId}
+                      onChange={(e) =>
+                        setFormData({ ...formData, whatsappGroupId: e.target.value })
+                      }
+                      placeholder="معرف الجروب أو اسم الجروب (بديل عن رقم الهاتف)"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      يمكن استخدام جروب واتساب بدلاً من رقم الهاتف للإرسال (مثل جروب المندوب)
+                    </p>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">

@@ -357,12 +357,18 @@ async function sendTextMessage(accountId: string, to: string, message: string) {
     if (!isGroup) {
       try {
         const results = await sock.onWhatsApp(cleanedNumber);
-        if (results && results.length > 0 && !results[0]?.exists) {
-          return {
-            success: false,
-            message: ERROR_MESSAGES.NUMBER_NOT_ON_WHATSAPP,
-            messageAr: ERROR_MESSAGES.NUMBER_NOT_ON_WHATSAPP,
-          };
+        if (results && results.length > 0) {
+          if (!results[0]?.exists) {
+            return {
+              success: false,
+              message: ERROR_MESSAGES.NUMBER_NOT_ON_WHATSAPP,
+              messageAr: ERROR_MESSAGES.NUMBER_NOT_ON_WHATSAPP,
+            };
+          }
+          // Use the actual JID returned by WhatsApp to avoid sending to wrong number
+          if (results[0]?.jid) {
+            formattedNumber = results[0].jid;
+          }
         }
       } catch (checkError) {
         // Continue anyway if check fails
@@ -371,6 +377,7 @@ async function sendTextMessage(accountId: string, to: string, message: string) {
     }
 
     // Send with timeout
+    console.log(`[WhatsApp] Sending message to: ${formattedNumber}`);
     const sendPromise = sock.sendMessage(formattedNumber, { text: message });
     const timeoutPromise = new Promise((_, reject) =>
       setTimeout(() => reject(new Error("Timed out")), 30000)
@@ -437,6 +444,18 @@ async function sendMediaMessage(
       formattedNumber = to;
     } else {
       formattedNumber = `${cleanedNumber}@s.whatsapp.net`;
+    }
+
+    // Verify number and use actual JID (skip for groups)
+    if (!isGroup) {
+      try {
+        const results = await sock.onWhatsApp(cleanedNumber);
+        if (results && results.length > 0 && results[0]?.jid) {
+          formattedNumber = results[0].jid;
+        }
+      } catch (checkError) {
+        console.warn("Could not verify number for media:", checkError);
+      }
     }
 
     // Fetch media from URL with timeout

@@ -64,7 +64,7 @@ import {
     ShieldAlert,
     MessageCircle,
 } from "lucide-react";
-import { db, Customer, PaymentMethod, SalesRep, Supervisor } from "@/shared/lib/indexedDB";
+import { db, Customer, PaymentMethod, SalesRep, Supervisor, Invoice } from "@/shared/lib/indexedDB";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -104,6 +104,7 @@ export default function Collections() {
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
     const [recentCollections, setRecentCollections] = useState<CollectionRecord[]>([]);
+    const [allInvoices, setAllInvoices] = useState<Invoice[]>([]);
 
     const { getBalance, refresh: refreshBalances } = useCustomerBalances([customers]);
 
@@ -158,6 +159,10 @@ export default function Collections() {
         setSalesReps(allReps);
         const allSupervisors = await db.getAll<Supervisor>("supervisors");
         setSupervisors(allSupervisors.filter(s => s.isActive));
+
+        // تحميل الفواتير
+        const invoices = await db.getAll<Invoice>("invoices");
+        setAllInvoices(invoices);
 
         // تحميل آخر عمليات القبض
         await loadRecentCollections();
@@ -229,15 +234,6 @@ export default function Collections() {
             }));
             setRecentCollections(collections);
 
-            // تعيين تاريخ "من" لأقدم عملية قبض
-            if (collections.length > 0) {
-                const oldestDate = collections.reduce((oldest, c) => {
-                    const d = new Date(c.createdAt);
-                    return d < oldest ? d : oldest;
-                }, new Date(collections[0].createdAt));
-                setFilterDateFrom(oldestDate.toISOString().split('T')[0]);
-            }
-
             // مزامنة localStorage مع IndexedDB
             localStorage.setItem('pos-collections', JSON.stringify(collections.slice(0, 100)));
         } catch {
@@ -247,14 +243,6 @@ export default function Collections() {
                 if (saved) {
                     const collections = JSON.parse(saved) as CollectionRecord[];
                     setRecentCollections(collections.slice(0, 20));
-                    // تعيين تاريخ "من" لأقدم عملية قبض
-                    if (collections.length > 0) {
-                        const oldestDate = collections.reduce((oldest, c) => {
-                            const d = new Date(c.createdAt);
-                            return d < oldest ? d : oldest;
-                        }, new Date(collections[0].createdAt));
-                        setFilterDateFrom(oldestDate.toISOString().split('T')[0]);
-                    }
                 }
             } catch {
                 setRecentCollections([]);
@@ -992,6 +980,17 @@ export default function Collections() {
         }
     };
 
+    // الحصول على آخر فاتورة للعميل
+    const getLastInvoiceAmount = (customerId: string): number | null => {
+        const customerInvoices = allInvoices
+            .filter((inv) => inv.customerId === customerId)
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        if (customerInvoices.length > 0) {
+            return Number(customerInvoices[0].total || 0);
+        }
+        return null;
+    };
+
     // معالجة الضغط على Enter
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === "Enter" && selectedCustomerId && amount) {
@@ -1463,18 +1462,19 @@ export default function Collections() {
                                         >
                                             كامل الرصيد
                                         </Button>
-                                        <Button
-                                            type="button"
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() =>
-                                                setAmount(
-                                                    (getBalance(selectedCustomer.id, Number(selectedCustomer.currentBalance || 0)) / 2).toFixed(2)
-                                                )
-                                            }
-                                        >
-                                            نصف الرصيد
-                                        </Button>
+                                        {(() => {
+                                            const lastInv = getLastInvoiceAmount(selectedCustomer.id);
+                                            return lastInv !== null ? (
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => setAmount(lastInv.toFixed(2))}
+                                                >
+                                                    آخر فاتورة ({lastInv.toLocaleString()})
+                                                </Button>
+                                            ) : null;
+                                        })()}
                                     </div>
                                 )}
                             </div>

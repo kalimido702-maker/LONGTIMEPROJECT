@@ -25,6 +25,7 @@ import {
   Package,
   PackageCheck,
   Landmark,
+  Check,
 } from "lucide-react";
 import {
   db,
@@ -72,6 +73,20 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
@@ -113,6 +128,8 @@ const POSv2 = () => {
   // Payment states - now only credit (آجل) is supported
   const [paymentType] = useState<"credit">("credit");
   const [selectedCustomer, setSelectedCustomer] = useState<string>("cash");
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState("");
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] =
     useState<string>("");
   const [selectedPriceTypeId, setSelectedPriceTypeId] = useState<string>("");
@@ -471,6 +488,13 @@ const POSv2 = () => {
       toast({ title: "خطأ في تحميل بيانات عرض السعر", variant: "destructive" });
     }
   };
+
+  // Filtered customers for search dropdown
+  const filteredCustomersForPOS = customers.filter((c) => {
+    if (!customerSearchQuery.trim()) return true;
+    const q = customerSearchQuery.toLowerCase();
+    return c.name?.toLowerCase().includes(q) || c.phone?.includes(q);
+  });
 
   const filteredProducts = products.filter((p) => {
     // Search by name, barcode, or code
@@ -2006,21 +2030,56 @@ const POSv2 = () => {
                 <div className="space-y-2">
                   <Label className="text-xs">العميل * (آجل)</Label>
                   <div className="flex gap-2">
-                    <Select
-                      value={selectedCustomer}
-                      onValueChange={setSelectedCustomer}
-                    >
-                      <SelectTrigger className="h-9">
-                        <SelectValue placeholder="اختر عميل" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {customers.map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            {c.name} - {c.phone}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Popover open={customerSearchOpen} onOpenChange={setCustomerSearchOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={customerSearchOpen}
+                          className="flex-1 justify-between h-9 text-sm"
+                        >
+                          {selectedCustomer && selectedCustomer !== "cash"
+                            ? customers.find((c) => c.id === selectedCustomer)?.name || "اختر عميل"
+                            : "اختر عميل"}
+                          <Search className="h-3.5 w-3.5 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[300px] p-0" align="start">
+                        <Command shouldFilter={false}>
+                          <CommandInput
+                            placeholder="ابحث بالاسم أو الهاتف..."
+                            value={customerSearchQuery}
+                            onValueChange={setCustomerSearchQuery}
+                          />
+                          <CommandList>
+                            <CommandEmpty>لا يوجد عملاء</CommandEmpty>
+                            <CommandGroup>
+                              {filteredCustomersForPOS.map((c) => (
+                                <CommandItem
+                                  key={c.id}
+                                  value={c.id}
+                                  onSelect={() => {
+                                    setSelectedCustomer(c.id);
+                                    setCustomerSearchOpen(false);
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-3.5 w-3.5",
+                                      selectedCustomer === c.id ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  <div className="flex flex-col flex-1">
+                                    <span className="text-sm">{c.name}</span>
+                                    <span className="text-xs text-muted-foreground">{c.phone}</span>
+                                  </div>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                     <Button
                       size="sm"
                       variant="outline"
