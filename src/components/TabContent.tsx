@@ -129,7 +129,7 @@ export function TabContent() {
 
                 return (
                     <div
-                        key={isActive ? `${tab.id}-${refreshCounter}` : tab.id}
+                        key={`${tab.id}-${refreshCounter}`}
                         className={cn(
                             "h-full overflow-auto",
                             isActive ? "block" : "hidden"

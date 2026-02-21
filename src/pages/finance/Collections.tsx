@@ -837,13 +837,14 @@ export default function Collections() {
     // إرسال إيصال القبض عبر واتساب
     const handleSendReceiptWhatsApp = async (collection: CollectionRecord) => {
         const customer = customers.find(c => c.id === collection.customerId);
-        if (!customer?.phone) {
-            toast.error("العميل ليس لديه رقم هاتف");
+        const sendTarget = customer?.whatsappGroupId || customer?.phone;
+        if (!sendTarget) {
+            toast.error("العميل ليس لديه رقم هاتف أو جروب واتساب");
             return;
         }
 
         try {
-            toast.info("📄 جاري تجهيز إيصال القبض...");
+            toast.info("📄 جاري تجهيز إيصال القبض وكشف الحساب...");
 
             // حساب الأرصدة
             const currentBalance = getBalance(customer.id, Number(customer.currentBalance || 0));
@@ -853,7 +854,7 @@ export default function Collections() {
             const html = await buildReceiptHTML(collection, previousBalance, currentBalance, false);
 
             // تحويل HTML إلى PDF عبر iframe
-            toast.info("🖨️ جاري توليد PDF...");
+            toast.info("🖨️ جاري توليد PDF الإيصال...");
             const pdfBlob = await new Promise<Blob>((resolve, reject) => {
                 const iframe = document.createElement("iframe");
                 iframe.style.position = "fixed";
@@ -913,9 +914,16 @@ export default function Collections() {
                 }, 1500);
             });
 
+            // توليد كشف حساب PDF
+            toast.info("📊 جاري توليد كشف الحساب...");
+            const { generateStatementPDF } = await import("@/services/statementPdfService");
+            const now = new Date();
+            const yearStart = new Date(now.getFullYear(), 0, 1);
+            const statementBlob = await generateStatementPDF(customer.id, yearStart, now);
+
             toast.info("📤 جاري الإرسال عبر واتساب...");
 
-            // تحويل PDF إلى Base64
+            // تحويل PDF الإيصال إلى Base64
             const base64data = await new Promise<string>((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onloadend = () => resolve(reader.result as string);
@@ -932,7 +940,8 @@ export default function Collections() {
                 `*التاريخ:* ${new Date(collection.createdAt).toLocaleDateString("ar-EG")}\n` +
                 `شركة لونج تايم للصناعات الكهربائية`;
 
-            const phone = customer.phone.replace(/[^0-9]/g, "");
+            const phone = (customer.phone || "").replace(/[^0-9]/g, "");
+            const targetNumber = customer.whatsappGroupId || phone;
             const receiptNumber = collection.id.replace('collection_', '');
 
             // البحث عن حساب واتساب نشط
@@ -942,9 +951,10 @@ export default function Collections() {
             if (activeAccount) {
                 const { whatsappService } = await import("@/services/whatsapp/whatsappService");
 
-                const msgId = await whatsappService.sendMessage(
+                // 1) إرسال إيصال القبض
+                await whatsappService.sendMessage(
                     (activeAccount as any).id,
-                    phone,
+                    targetNumber,
                     message,
                     {
                         type: "document",
@@ -958,16 +968,38 @@ export default function Collections() {
                     }
                 );
 
-                try {
-                    const delivered = await (whatsappService as any).waitForMessage(msgId, 60000);
-                    if (delivered) {
-                        toast.success("✅ تم إرسال إيصال القبض بنجاح!");
-                    } else {
-                        toast.error("❌ فشل إرسال الإيصال");
-                    }
-                } catch {
-                    toast.success("✅ تم إرسال إيصال القبض!");
+                // 2) إرسال كشف الحساب إذا تم توليده بنجاح
+                if (statementBlob) {
+                    const statementBase64 = await new Promise<string>((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result as string);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(statementBlob);
+                    });
+
+                    const statementCaption = `📊 *كشف حساب*\n` +
+                        `*العميل:* ${collection.customerName}\n` +
+                        `*الرصيد الحالي:* ${fmtAmt(Number(currentBalance))} ${currency}\n` +
+                        `يرجى مراجعة الملف المرفق.`;
+
+                    await whatsappService.sendMessage(
+                        (activeAccount as any).id,
+                        targetNumber,
+                        statementCaption,
+                        {
+                            type: "document",
+                            url: statementBase64,
+                            caption: statementCaption,
+                            filename: `كشف حساب ${collection.customerName}.pdf`
+                        },
+                        {
+                            customerId: customer.id,
+                            type: "statement",
+                        }
+                    );
                 }
+
+                toast.success("✅ تم إرسال إيصال القبض وكشف الحساب بنجاح!");
             } else {
                 // Fallback to wa.me
                 const encodedMessage = encodeURIComponent(message);

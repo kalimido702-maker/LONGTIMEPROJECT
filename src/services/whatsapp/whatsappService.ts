@@ -155,6 +155,42 @@ class WhatsAppService {
     this.setupNetworkListener();
     this.loadQueue();
     this.startQueueProcessor();
+    // إعادة ربط الحسابات المتصلة تلقائياً عند بدء التطبيق
+    this.autoReconnectAccounts();
+  }
+
+  /**
+   * Auto-reconnect WhatsApp accounts that were previously connected
+   * Called once on service initialization (app startup)
+   */
+  private async autoReconnectAccounts() {
+    if (!isElectron()) return;
+
+    // Wait a bit for IndexedDB and Electron IPC to be ready
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    try {
+      const accounts = await db.getAll<WhatsAppAccount>("whatsappAccounts");
+      const activeAccounts = accounts.filter(
+        (a) => a.isActive && (a.status === "connected" || a.status === "connecting")
+      );
+
+      if (activeAccounts.length === 0) return;
+
+      console.log(`🔄 Auto-reconnecting ${activeAccounts.length} WhatsApp account(s)...`);
+
+      for (const account of activeAccounts) {
+        try {
+          console.log(`🔄 Reconnecting WhatsApp: ${account.phone} (${account.id})`);
+          await window.electronAPI.whatsapp.initAccount(account.id, account.phone);
+          console.log(`✅ WhatsApp reconnected: ${account.phone}`);
+        } catch (err) {
+          console.error(`❌ Failed to reconnect WhatsApp ${account.phone}:`, err);
+        }
+      }
+    } catch (error) {
+      console.error("❌ Auto-reconnect failed:", error);
+    }
   }
 
   // Network Monitoring

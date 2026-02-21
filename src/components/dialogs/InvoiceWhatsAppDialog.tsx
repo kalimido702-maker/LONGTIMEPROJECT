@@ -193,7 +193,8 @@ export const InvoiceWhatsAppDialog = ({
                 });
 
                 const caption = formatInvoiceMessage(inv);
-                const filename = `فاتورة-${inv.invoiceNumber || inv.id}.pdf`;
+                const customerName = customer?.name || inv.customerName || 'فاتورة';
+                const filename = `${customerName}-${inv.invoiceNumber || inv.id}.pdf`;
 
                 // Helper to send to a target
                 const sendToTarget = async (targetPhone: string, targetType: string) => {
