@@ -33,6 +33,9 @@ import {
   Download,
   Upload,
   FileSpreadsheet,
+  MessageCircle,
+  Loader2,
+  RefreshCw,
 } from "lucide-react";
 import { db, Customer, Invoice, PaymentMethod, Supervisor, SalesRep } from "@/shared/lib/indexedDB";
 import { toast } from "sonner";
@@ -48,6 +51,7 @@ import {
 } from "@/lib/customerImport";
 import { usePagination } from "@/hooks/usePagination";
 import { DataPagination } from "@/components/ui/DataPagination";
+import { whatsappService } from "@/services/whatsapp/whatsappService";
 
 const Customers = () => {
   const { can, user } = useAuth();
@@ -71,6 +75,8 @@ const Customers = () => {
   const [isImportResultOpen, setIsImportResultOpen] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const { getBalance, refresh: refreshBalances } = useCustomerBalances([customers]);
+  const [whatsappGroups, setWhatsappGroups] = useState<{ id: string; name: string }[]>([]);
+  const [isFetchingGroups, setIsFetchingGroups] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     phone: "",
@@ -158,6 +164,7 @@ const Customers = () => {
         const updatedCustomer: Customer = {
           ...editingCustomer,
           ...formData,
+          whatsappGroupId: formData.whatsappGroupId?.trim() || undefined,
         };
         await db.update("customers", updatedCustomer);
         toast.success("تم تحديث بيانات العميل");
@@ -165,6 +172,7 @@ const Customers = () => {
         const newCustomer: Customer = {
           id: Date.now().toString(),
           ...formData,
+          whatsappGroupId: formData.whatsappGroupId?.trim() || undefined,
           currentBalance: 0,
           bonusBalance: 0,
           loyaltyPoints: 0,
@@ -281,6 +289,31 @@ const Customers = () => {
       whatsappGroupId: "",
     });
     setEditingCustomer(null);
+    setWhatsappGroups([]);
+  };
+
+  const handleFetchWhatsAppGroups = async () => {
+    setIsFetchingGroups(true);
+    try {
+      const accounts = await db.getAll<any>("whatsappAccounts");
+      const activeAccount = accounts.find((a: any) => a.isActive && a.status === "connected");
+      if (!activeAccount) {
+        toast.error("يرجى التأكد من وجود حساب واتساب متصل");
+        return;
+      }
+      const groups = await whatsappService.getGroups(activeAccount.id);
+      if (groups.length === 0) {
+        toast.info("لم يتم العثور على مجموعات");
+      } else {
+        setWhatsappGroups(groups);
+        toast.success(`تم جلب ${groups.length} مجموعة`);
+      }
+    } catch (error) {
+      console.error("Error fetching groups:", error);
+      toast.error("فشل جلب المجموعات");
+    } finally {
+      setIsFetchingGroups(false);
+    }
   };
 
   const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -604,17 +637,59 @@ const Customers = () => {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="whatsappGroupId">جروب واتساب (اختياري)</Label>
-                    <Input
-                      id="whatsappGroupId"
-                      value={formData.whatsappGroupId}
-                      onChange={(e) =>
-                        setFormData({ ...formData, whatsappGroupId: e.target.value })
-                      }
-                      placeholder="معرف الجروب أو اسم الجروب (بديل عن رقم الهاتف)"
-                    />
+                    <Label className="flex items-center gap-2">
+                      <MessageCircle className="h-4 w-4 text-green-600" />
+                      جروب واتساب (اختياري)
+                    </Label>
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        {whatsappGroups.length > 0 ? (
+                          <Select
+                            value={formData.whatsappGroupId || "none"}
+                            onValueChange={(value) =>
+                              setFormData({ ...formData, whatsappGroupId: value === "none" ? "" : value })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="اختر جروب" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">بدون جروب</SelectItem>
+                              {whatsappGroups.map((group) => (
+                                <SelectItem key={group.id} value={group.id}>
+                                  {group.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Input
+                            value={formData.whatsappGroupId}
+                            onChange={(e) =>
+                              setFormData({ ...formData, whatsappGroupId: e.target.value })
+                            }
+                            placeholder="اضغط 'جلب' لتحميل المجموعات من الواتساب"
+                            className="font-mono text-sm"
+                          />
+                        )}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleFetchWhatsAppGroups}
+                        disabled={isFetchingGroups}
+                        className="gap-1 shrink-0"
+                      >
+                        {isFetchingGroups ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                        جلب
+                      </Button>
+                    </div>
                     <p className="text-xs text-muted-foreground">
-                      يمكن استخدام جروب واتساب بدلاً من رقم الهاتف للإرسال (مثل جروب المندوب)
+                      اضغط "جلب" لتحميل المجموعات من الواتساب — يُستخدم بديلاً عن رقم الهاتف
                     </p>
                   </div>
                   <div className="grid grid-cols-2 gap-4">

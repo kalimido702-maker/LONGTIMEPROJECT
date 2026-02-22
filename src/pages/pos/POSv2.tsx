@@ -1531,8 +1531,9 @@ const POSv2 = () => {
     if (!savedInvoiceForWhatsApp) return;
 
     const customer = customers.find(c => c.id === savedInvoiceForWhatsApp.customerId);
-    if (!customer?.phone) {
-      toast({ title: "لا يوجد رقم هاتف للعميل", variant: "destructive" });
+    const customerSendTarget = customer?.whatsappGroupId || customer?.phone;
+    if (!customerSendTarget && (whatsappSendTarget === "customer" || whatsappSendTarget === "both")) {
+      toast({ title: "العميل ليس لديه رقم هاتف أو جروب واتساب", variant: "destructive" });
       return;
     }
 
@@ -1597,7 +1598,10 @@ const POSv2 = () => {
       // Determine recipients
       const recipients: { phone: string; isGroup?: boolean; label: string }[] = [];
       if (whatsappSendTarget === "customer" || whatsappSendTarget === "both") {
-        if (phone) recipients.push({ phone, label: "العميل" });
+        const customerTarget = customer?.whatsappGroupId || phone;
+        if (customerTarget) {
+          recipients.push({ phone: customerTarget, isGroup: !!customer?.whatsappGroupId, label: "العميل" });
+        }
       }
       if (whatsappSendTarget === "salesRep") {
         if (repPhone) recipients.push({ phone: repPhone, label: "المندوب" });

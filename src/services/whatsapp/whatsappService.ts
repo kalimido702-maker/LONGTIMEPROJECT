@@ -160,37 +160,98 @@ class WhatsAppService {
   }
 
   /**
-   * Auto-reconnect WhatsApp accounts that were previously connected
-   * Called once on service initialization (app startup)
+   * Auto-reconnect WhatsApp accounts on app startup.
+   * Tries each account one by one:
+   * - If it connects immediately (has saved session) → stop, we're done
+   * - If it shows QR code (needs re-auth) → disconnect and try next account
    */
   private async autoReconnectAccounts() {
     if (!isElectron()) return;
 
-    // Wait a bit for IndexedDB and Electron IPC to be ready
+    // Wait for IndexedDB and Electron IPC to be ready
     await new Promise(resolve => setTimeout(resolve, 3000));
 
     try {
       const accounts = await db.getAll<WhatsAppAccount>("whatsappAccounts");
-      const activeAccounts = accounts.filter(
-        (a) => a.isActive && (a.status === "connected" || a.status === "connecting")
-      );
+      if (accounts.length === 0) return;
 
-      if (activeAccounts.length === 0) return;
+      console.log(`🔄 Auto-reconnect: checking ${accounts.length} WhatsApp account(s)...`);
 
-      console.log(`🔄 Auto-reconnecting ${activeAccounts.length} WhatsApp account(s)...`);
-
-      for (const account of activeAccounts) {
+      for (const account of accounts) {
         try {
-          console.log(`🔄 Reconnecting WhatsApp: ${account.phone} (${account.id})`);
+          console.log(`🔄 Trying to connect WhatsApp: ${account.phone} (${account.id})`);
           await window.electronAPI.whatsapp.initAccount(account.id, account.phone);
-          console.log(`✅ WhatsApp reconnected: ${account.phone}`);
+
+          // Poll state for up to 15 seconds to see if it connects or shows QR
+          const connected = await this.waitForConnectionResult(account.id, 15000);
+
+          if (connected) {
+            console.log(`✅ WhatsApp auto-connected: ${account.phone}`);
+            // Update status in DB
+            account.status = "connected";
+            account.isActive = true;
+            await db.update("whatsappAccounts", account);
+            return; // Done - one account connected successfully
+          } else {
+            // Got QR or timed out - close socket without logout (preserve session)
+            console.log(`⏭️ WhatsApp ${account.phone} needs QR scan, skipping to next...`);
+            try {
+              await window.electronAPI.whatsapp.closeSocket(account.id);
+            } catch (e) {
+              // Ignore close errors
+            }
+            // Update status in DB
+            account.status = "disconnected";
+            await db.update("whatsappAccounts", account);
+          }
         } catch (err) {
-          console.error(`❌ Failed to reconnect WhatsApp ${account.phone}:`, err);
+          console.error(`❌ Failed to connect WhatsApp ${account.phone}:`, err);
         }
       }
+
+      console.log("⚠️ No WhatsApp account could auto-connect. Manual QR scan needed.");
     } catch (error) {
       console.error("❌ Auto-reconnect failed:", error);
     }
+  }
+
+  /**
+   * Poll getState to check if account connected or needs QR.
+   * Returns true if connected, false if QR appeared or timed out.
+   */
+  private async waitForConnectionResult(accountId: string, timeoutMs: number): Promise<boolean> {
+    const pollInterval = 1000; // Check every 1 second
+    const maxAttempts = Math.ceil(timeoutMs / pollInterval);
+
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+      try {
+        const state = await window.electronAPI.whatsapp.getState(accountId);
+
+        if (state.status === "connected") {
+          return true;
+        }
+
+        if (state.status === "qr") {
+          // Needs QR scan - this account can't auto-connect
+          return false;
+        }
+
+        if (state.status === "disconnected" && state.error) {
+          // Failed with error
+          return false;
+        }
+
+        // Still "connecting" - keep waiting
+      } catch (e) {
+        console.error(`Error polling state for ${accountId}:`, e);
+        return false;
+      }
+    }
+
+    // Timed out while still connecting
+    return false;
   }
 
   // Network Monitoring
@@ -284,10 +345,13 @@ class WhatsAppService {
   ): Promise<string> {
     const messageId = Date.now().toString();
 
+    const formattedTo = this.formatPhoneNumber(to);
+    console.log(`📤 [WhatsApp] Queueing message - original to: "${to}", formatted: "${formattedTo}"`);
+
     const queueItem: WhatsAppMessage = {
       id: messageId,
       accountId,
-      to: this.formatPhoneNumber(to),
+      to: formattedTo,
       message,
       media,
       status: "pending",
@@ -504,9 +568,10 @@ class WhatsAppService {
         recipient
       );
 
+      const recipientTarget = recipient.whatsappGroupId || recipient.phone;
       await this.sendMessage(
         campaign.accountId,
-        recipient.phone,
+        recipientTarget,
         message,
         undefined,
         {
@@ -549,7 +614,8 @@ class WhatsAppService {
         };
       }
 
-      if (!(customer as any).phone) {
+      const sendTarget = (customer as any).whatsappGroupId || (customer as any).phone;
+      if (!sendTarget) {
         return { success: false, message: ERROR_MESSAGES_AR.NO_PHONE };
       }
 
@@ -568,7 +634,7 @@ class WhatsAppService {
 
       await this.sendMessage(
         activeAccount.id,
-        (customer as any).phone,
+        sendTarget,
         message,
         undefined,
         {
@@ -602,7 +668,8 @@ class WhatsAppService {
         };
       }
 
-      if (!(customer as any).phone) {
+      const sendTarget = (customer as any).whatsappGroupId || (customer as any).phone;
+      if (!sendTarget) {
         return { success: false, message: ERROR_MESSAGES_AR.NO_PHONE };
       }
 
@@ -620,7 +687,7 @@ class WhatsAppService {
 
       await this.sendMessage(
         activeAccount.id,
-        (customer as any).phone,
+        sendTarget,
         message,
         {
           type: "document",
@@ -689,6 +756,7 @@ class WhatsAppService {
   private formatPhoneNumber(phone: string): string {
     // If it's a group JID, keep it as-is
     if (phone.includes("@g.us")) {
+      console.log("📱 [WhatsApp] Group JID detected, sending as-is:", phone);
       return phone;
     }
 
@@ -807,6 +875,9 @@ class WhatsAppService {
         }
       }
     }
+
+    // فلترة العملاء اللي عندهم وسيلة تواصل (هاتف أو جروب واتساب)
+    customers = customers.filter((c: any) => c.phone || c.whatsappGroupId);
 
     // إضافة storeName لكل customer عشان يتعوض في الـ template
     const storeName = localStorage.getItem("storeName") || "متجرنا";

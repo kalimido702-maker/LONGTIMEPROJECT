@@ -335,6 +335,8 @@ async function sendTextMessage(accountId: string, to: string, message: string) {
     const isGroup = to.includes("@g.us");
     const cleanedNumber = to.replace(/\D/g, "");
 
+    console.log(`[WhatsApp sendText] to: "${to}", isGroup: ${isGroup}`);
+
     if (!isGroup && cleanedNumber.length < 10) {
       return {
         success: false,
@@ -347,6 +349,7 @@ async function sendTextMessage(accountId: string, to: string, message: string) {
     let formattedNumber: string;
     if (isGroup || to.includes("@g.us")) {
       formattedNumber = to; // Keep group JID as-is
+      console.log(`[WhatsApp sendText] Group message, using JID: ${formattedNumber}`);
     } else if (to.includes("@s.whatsapp.net")) {
       formattedNumber = to;
     } else {
@@ -428,6 +431,8 @@ async function sendMediaMessage(
     const isGroup = to.includes("@g.us");
     const cleanedNumber = to.replace(/\D/g, "");
 
+    console.log(`[WhatsApp sendMedia] to: "${to}", isGroup: ${isGroup}, mediaType: ${mediaType}`);
+
     if (!isGroup && cleanedNumber.length < 10) {
       return {
         success: false,
@@ -440,6 +445,7 @@ async function sendMediaMessage(
     let formattedNumber: string;
     if (isGroup || to.includes("@g.us")) {
       formattedNumber = to; // Keep group JID as-is
+      console.log(`[WhatsApp sendMedia] Group message, using JID: ${formattedNumber}`);
     } else if (to.includes("@s.whatsapp.net")) {
       formattedNumber = to;
     } else {
@@ -537,6 +543,27 @@ async function sendMediaMessage(
       messageAr: errorMessage,
       error: error.message,
     };
+  }
+}
+
+/**
+ * Soft-close account socket without logging out (preserves session)
+ * Used by auto-reconnect to skip accounts that need QR scan
+ */
+function closeSocket(accountId: string) {
+  try {
+    const sock = activeSockets.get(accountId);
+    if (sock) {
+      sock.end(undefined);
+      activeSockets.delete(accountId);
+      accountStates.delete(accountId);
+    }
+    return { success: true };
+  } catch (error: any) {
+    console.error("Failed to close socket:", error);
+    activeSockets.delete(accountId);
+    accountStates.delete(accountId);
+    return { success: true };
   }
 }
 
@@ -663,7 +690,12 @@ export function registerWhatsAppHandlers() {
     }
   );
 
-  // Disconnect account
+  // Close socket without logout (for auto-reconnect skip)
+  ipcMain.handle("whatsapp:close-socket", (_, accountId: string) => {
+    return closeSocket(accountId);
+  });
+
+  // Disconnect account (full logout)
   ipcMain.handle("whatsapp:disconnect", async (_, accountId: string) => {
     return await disconnectAccount(accountId);
   });

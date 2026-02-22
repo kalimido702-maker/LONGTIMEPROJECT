@@ -391,8 +391,9 @@ export default function Invoices() {
     // إرسال الفاتورة عبر واتساب مع PDF
     const handleSendInvoiceWhatsApp = async (invoice: Invoice) => {
         const customer = customers.find(c => c.id === invoice.customerId);
-        if (!customer?.phone) {
-            toast.error("العميل ليس لديه رقم هاتف");
+        const sendTarget = customer?.whatsappGroupId || customer?.phone;
+        if (!sendTarget) {
+            toast.error("العميل ليس لديه رقم هاتف أو جروب واتساب");
             return;
         }
 
@@ -432,7 +433,7 @@ export default function Invoices() {
                 `*الإجمالي:* ${formatCurrency(invoice.total)}\n\n` +
                 `شركة لونج تايم للصناعات الكهربائية`;
 
-            const phone = customer.phone.replace(/[^0-9]/g, "");
+            const targetNumber = customer!.whatsappGroupId || customer!.phone.replace(/[^0-9]/g, "");
 
             const accounts = await db.getAll("whatsappAccounts");
             const activeAccount = accounts.find((a: any) => a.isActive && a.status === "connected");
@@ -442,7 +443,7 @@ export default function Invoices() {
 
                 const msgId = await whatsappService.sendMessage(
                     (activeAccount as any).id,
-                    phone,
+                    targetNumber,
                     message,
                     {
                         type: "document",
@@ -468,10 +469,15 @@ export default function Invoices() {
                     toast.success("✅ تم إرسال الفاتورة!");
                 }
             } else {
-                // Fallback to wa.me
-                const encodedMessage = encodeURIComponent(message);
-                window.open(`https://wa.me/${phone}?text=${encodedMessage}`, "_blank");
-                toast.info("لا يوجد حساب واتساب متصل، تم فتح واتساب ويب");
+                // Fallback to wa.me (only works with phone numbers, not groups)
+                const phone = (customer!.phone || "").replace(/[^0-9]/g, "");
+                if (phone) {
+                    const encodedMessage = encodeURIComponent(message);
+                    window.open(`https://wa.me/${phone}?text=${encodedMessage}`, "_blank");
+                    toast.info("لا يوجد حساب واتساب متصل، تم فتح واتساب ويب");
+                } else {
+                    toast.error("لا يوجد حساب واتساب متصل ولا يوجد رقم هاتف للعميل");
+                }
             }
         } catch (error) {
             console.error("WhatsApp send error:", error);

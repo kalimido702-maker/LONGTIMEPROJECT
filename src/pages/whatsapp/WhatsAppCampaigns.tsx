@@ -271,7 +271,7 @@ const WhatsAppCampaigns = () => {
       filtered = filtered.filter((c: any) => c.salesRepId === newCampaign.salesRepId);
     }
 
-    filtered = filtered.filter((c: any) => c.phone);
+    filtered = filtered.filter((c: any) => c.phone || c.whatsappGroupId);
     setRecipientCount(filtered.length);
   };
 

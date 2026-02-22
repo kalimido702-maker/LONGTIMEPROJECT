@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { POSHeader } from "@/components/POS/POSHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -137,6 +137,9 @@ const WhatsAppManagement = () => {
     antiSpamDelay: 3000,
   });
 
+  // Track last notified status per account to prevent repeated toasts
+  const lastNotifiedStatusRef = useRef<Record<string, string>>({});
+
   // Bot settings state
   const [botSettings, setBotSettings] = useState<BotSettings>(getBotSettings());
 
@@ -192,14 +195,19 @@ const WhatsAppManagement = () => {
             // Reload to update UI
             await loadAccounts();
 
-            // Show notification
-            if (state.status === "connected") {
-              toast({ title: `✅ ${account.name} متصل الآن` });
-            } else if (state.status === "disconnected") {
-              toast({
-                title: `⚠️ ${account.name} غير متصل`,
-                variant: "destructive",
-              });
+            // Show notification only if we haven't already notified for this status
+            // This prevents repeated toasts from Baileys reconnection cycles
+            if (lastNotifiedStatusRef.current[account.id] !== state.status) {
+              lastNotifiedStatusRef.current[account.id] = state.status;
+
+              if (state.status === "connected") {
+                toast({ title: `✅ ${account.name} متصل الآن` });
+              } else if (state.status === "disconnected") {
+                toast({
+                  title: `⚠️ ${account.name} غير متصل`,
+                  variant: "destructive",
+                });
+              }
             }
           }
         } catch (error) {
@@ -377,6 +385,9 @@ const WhatsAppManagement = () => {
             setConnectingAccount(null);
             setConnectionError(null);
 
+            // Mark as notified so polling doesn't show duplicate toast
+            lastNotifiedStatusRef.current[accountId] = "connected";
+
             // Update database status with real phone number from WhatsApp
             const account = await db.get<WhatsAppAccount>(
               "whatsappAccounts",
@@ -462,6 +473,9 @@ const WhatsAppManagement = () => {
       if ((window as any).electronAPI?.whatsapp) {
         await (window as any).electronAPI.whatsapp.disconnect(id);
       }
+
+      // Clean up notification tracking
+      delete lastNotifiedStatusRef.current[id];
 
       // Delete from database
       await db.delete("whatsappAccounts", id);
@@ -919,6 +933,8 @@ const WhatsAppManagement = () => {
                                     ).electronAPI.whatsapp.disconnect(
                                       account.id
                                     );
+                                    // Reset notification tracking so reconnect shows toast
+                                    delete lastNotifiedStatusRef.current[account.id];
                                     toast({ title: "✅ تم قطع الاتصال" });
                                     await loadAccounts();
                                   }

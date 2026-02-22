@@ -56,6 +56,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
         caption,
         filename
       ),
+    closeSocket: (accountId: string) =>
+      ipcRenderer.invoke("whatsapp:close-socket", accountId),
     disconnect: (accountId: string) =>
       ipcRenderer.invoke("whatsapp:disconnect", accountId),
     isConnected: (accountId: string) =>
@@ -212,6 +214,9 @@ declare global {
           caption?: string,
           filename?: string
         ) => Promise<{ success: boolean; message: string }>;
+        closeSocket: (
+          accountId: string
+        ) => Promise<{ success: boolean }>;
         disconnect: (
           accountId: string
         ) => Promise<{ success: boolean; message: string }>;
