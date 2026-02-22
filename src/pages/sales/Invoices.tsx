@@ -390,8 +390,9 @@ export default function Invoices() {
 
     // إرسال الفاتورة عبر واتساب مع PDF
     const handleSendInvoiceWhatsApp = async (invoice: Invoice) => {
-        const customer = customers.find(c => c.id === invoice.customerId);
-        const sendTarget = customer?.whatsappGroupId || customer?.phone;
+        // Reload customer from DB to get latest group settings
+        const customer = await db.get<Customer>("customers", invoice.customerId || "");
+        const sendTarget = customer?.invoiceGroupId || customer?.whatsappGroupId || customer?.phone;
         if (!sendTarget) {
             toast.error("العميل ليس لديه رقم هاتف أو جروب واتساب");
             return;
@@ -433,7 +434,7 @@ export default function Invoices() {
                 `*الإجمالي:* ${formatCurrency(invoice.total)}\n\n` +
                 `شركة لونج تايم للصناعات الكهربائية`;
 
-            const targetNumber = customer!.whatsappGroupId || customer!.phone.replace(/[^0-9]/g, "");
+            const targetNumber = customer!.invoiceGroupId || customer!.whatsappGroupId || customer!.phone.replace(/[^0-9]/g, "");
 
             const accounts = await db.getAll("whatsappAccounts");
             const activeAccount = accounts.find((a: any) => a.isActive && a.status === "connected");
@@ -449,7 +450,7 @@ export default function Invoices() {
                         type: "document",
                         url: base64data,
                         caption: message,
-                        filename: `فاتورة-${invoice.invoiceNumber || invoice.id}.pdf`
+                        filename: `${customer?.name || invoice.customerName || 'عميل'} - ${invoice.invoiceNumber || invoice.id}.pdf`
                     },
                     {
                         invoiceId: invoice.id,

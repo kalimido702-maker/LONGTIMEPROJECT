@@ -679,7 +679,7 @@ export async function downloadInvoicePDF(
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = filename || `invoice-${data.invoiceNumber}.pdf`;
+    link.download = filename || `${data.customerName || 'عميل'} - ${data.invoiceNumber}.pdf`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

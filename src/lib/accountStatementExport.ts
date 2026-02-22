@@ -193,6 +193,31 @@ export async function generateAccountStatement(
     const endOfDay = new Date(dateTo);
     endOfDay.setHours(23, 59, 59, 999);
 
+    // First pass: Calculate opening balance from ALL movements BEFORE the date range
+    // This ensures the balance reflects the full history, not just the filtered period
+    let openingBalance = Number(customer.previousStatement) || 0;
+    movements.forEach((mov) => {
+        if (mov.date >= startOfDay) return; // Only process movements BEFORE the range
+
+        switch (mov.type) {
+            case "invoice":
+                openingBalance += Number(mov.data.total) || 0;
+                break;
+            case "payment":
+                openingBalance -= Number(mov.data.amount) || 0;
+                break;
+            case "return":
+                openingBalance -= Number(mov.data.total || mov.data.amount) || 0;
+                break;
+            case "bonus":
+                openingBalance -= Number(mov.data.bonusAmount || mov.data.amount) || 0;
+                break;
+        }
+    });
+
+    // Second pass: Build rows for movements IN the date range, starting from the calculated opening balance
+    runningBalance = openingBalance;
+
     movements.forEach((mov, index) => {
         // Filter by date range (using normalized dates)
         if (mov.date < startOfDay || mov.date > endOfDay) return;
@@ -255,7 +280,7 @@ export async function generateAccountStatement(
         dateTo,
         rows,
         summary,
-        openingBalance: Number(customer.previousStatement) || 0,
+        openingBalance: openingBalance,
         closingBalance: runningBalance,
     };
 }

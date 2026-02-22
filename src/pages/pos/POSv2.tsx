@@ -1530,8 +1530,11 @@ const POSv2 = () => {
   const handleSendWhatsApp = async () => {
     if (!savedInvoiceForWhatsApp) return;
 
-    const customer = customers.find(c => c.id === savedInvoiceForWhatsApp.customerId);
-    const customerSendTarget = customer?.whatsappGroupId || customer?.phone;
+    // Reload customer from DB to get latest group settings
+    const customer = savedInvoiceForWhatsApp.customerId
+      ? await db.get<Customer>("customers", savedInvoiceForWhatsApp.customerId)
+      : undefined;
+    const customerSendTarget = customer?.invoiceGroupId || customer?.whatsappGroupId || customer?.phone;
     if (!customerSendTarget && (whatsappSendTarget === "customer" || whatsappSendTarget === "both")) {
       toast({ title: "العميل ليس لديه رقم هاتف أو جروب واتساب", variant: "destructive" });
       return;
@@ -1598,9 +1601,9 @@ const POSv2 = () => {
       // Determine recipients
       const recipients: { phone: string; isGroup?: boolean; label: string }[] = [];
       if (whatsappSendTarget === "customer" || whatsappSendTarget === "both") {
-        const customerTarget = customer?.whatsappGroupId || phone;
+        const customerTarget = customer?.invoiceGroupId || customer?.whatsappGroupId || phone;
         if (customerTarget) {
-          recipients.push({ phone: customerTarget, isGroup: !!customer?.whatsappGroupId, label: "العميل" });
+          recipients.push({ phone: customerTarget, isGroup: !!(customer?.invoiceGroupId || customer?.whatsappGroupId), label: "العميل" });
         }
       }
       if (whatsappSendTarget === "salesRep") {
@@ -1649,7 +1652,7 @@ const POSv2 = () => {
               type: "document",
               url: base64data,
               caption: message,
-              filename: `فاتورة-${savedInvoiceForWhatsApp.invoiceNumber || savedInvoiceForWhatsApp.id}.pdf`
+              filename: `${savedInvoiceForWhatsApp.customerName || customer.name || 'عميل'} - ${savedInvoiceForWhatsApp.invoiceNumber || savedInvoiceForWhatsApp.id}.pdf`
             },
             {
               invoiceId: savedInvoiceForWhatsApp.id,

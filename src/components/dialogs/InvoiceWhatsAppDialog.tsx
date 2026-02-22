@@ -154,7 +154,8 @@ export const InvoiceWhatsAppDialog = ({
             const allProducts = await db.getAll("products");
 
             for (const inv of filteredInvoices) {
-                const customer = customers.find((c) => c.id === inv.customerId);
+                // Reload customer from DB to get latest group settings
+                const customer = await db.get<Customer>("customers", inv.customerId || "");
                 const salesRep = salesReps.find((r) => r.id === customer?.salesRepId);
 
                 // Update Progress Toast
@@ -194,7 +195,7 @@ export const InvoiceWhatsAppDialog = ({
 
                 const caption = formatInvoiceMessage(inv);
                 const customerName = customer?.name || inv.customerName || 'فاتورة';
-                const filename = `${customerName}-${inv.invoiceNumber || inv.id}.pdf`;
+                const filename = `${customerName} - ${inv.invoiceNumber || inv.id}.pdf`;
 
                 // Helper to send to a target
                 const sendToTarget = async (targetPhone: string, targetType: string) => {
@@ -221,9 +222,9 @@ export const InvoiceWhatsAppDialog = ({
                     }
                 };
 
-                // Send to Customer (prefer whatsappGroupId, fallback to phone)
-                if ((recipient === "customer" || recipient === "both") && (customer?.whatsappGroupId || customer?.phone)) {
-                    await sendToTarget(customer.whatsappGroupId || customer.phone, "Customer");
+                // Send to Customer (prefer invoiceGroupId, fallback to whatsappGroupId, then phone)
+                if ((recipient === "customer" || recipient === "both") && (customer?.invoiceGroupId || customer?.whatsappGroupId || customer?.phone)) {
+                    await sendToTarget(customer.invoiceGroupId || customer.whatsappGroupId || customer.phone, "Customer");
                 }
 
                 // Send to Sales Rep

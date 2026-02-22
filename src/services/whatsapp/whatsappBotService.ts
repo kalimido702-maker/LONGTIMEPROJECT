@@ -495,7 +495,7 @@ async function generateInvoicePDFForBot(invoice: Invoice): Promise<BotReply["med
 
         return {
             base64,
-            filename: `فاتورة-${invoice.invoiceNumber || invoice.id}.pdf`,
+            filename: `${customer?.name || invoice.customerName || 'عميل'} - ${invoice.invoiceNumber || invoice.id}.pdf`,
             caption: `📄 فاتورة رقم ${invoice.invoiceNumber || invoice.id}`,
         };
     } catch (error) {

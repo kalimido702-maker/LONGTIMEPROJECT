@@ -89,6 +89,8 @@ const Customers = () => {
     notes: "",
     salesRepId: "",
     whatsappGroupId: "",
+    invoiceGroupId: "",
+    collectionGroupId: "",
   });
 
   useEffect(() => {
@@ -165,6 +167,8 @@ const Customers = () => {
           ...editingCustomer,
           ...formData,
           whatsappGroupId: formData.whatsappGroupId?.trim() || undefined,
+          invoiceGroupId: formData.invoiceGroupId?.trim() || undefined,
+          collectionGroupId: formData.collectionGroupId?.trim() || undefined,
         };
         await db.update("customers", updatedCustomer);
         toast.success("تم تحديث بيانات العميل");
@@ -173,6 +177,8 @@ const Customers = () => {
           id: Date.now().toString(),
           ...formData,
           whatsappGroupId: formData.whatsappGroupId?.trim() || undefined,
+          invoiceGroupId: formData.invoiceGroupId?.trim() || undefined,
+          collectionGroupId: formData.collectionGroupId?.trim() || undefined,
           currentBalance: 0,
           bonusBalance: 0,
           loyaltyPoints: 0,
@@ -258,6 +264,8 @@ const Customers = () => {
       notes: customer.notes || "",
       salesRepId: customer.salesRepId || "",
       whatsappGroupId: customer.whatsappGroupId || "",
+      invoiceGroupId: customer.invoiceGroupId || "",
+      collectionGroupId: customer.collectionGroupId || "",
     });
     setIsDialogOpen(true);
   };
@@ -287,6 +295,8 @@ const Customers = () => {
       notes: "",
       salesRepId: "",
       whatsappGroupId: "",
+      invoiceGroupId: "",
+      collectionGroupId: "",
     });
     setEditingCustomer(null);
     setWhatsappGroups([]);
@@ -637,21 +647,41 @@ const Customers = () => {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label className="flex items-center gap-2">
-                      <MessageCircle className="h-4 w-4 text-green-600" />
-                      جروب واتساب (اختياري)
-                    </Label>
-                    <div className="flex gap-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="flex items-center gap-2">
+                        <MessageCircle className="h-4 w-4 text-green-600" />
+                        جروبات واتساب (اختياري)
+                      </Label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleFetchWhatsAppGroups}
+                        disabled={isFetchingGroups}
+                        className="gap-1 shrink-0"
+                      >
+                        {isFetchingGroups ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                        جلب المجموعات
+                      </Button>
+                    </div>
+
+                    {/* جروب الفواتير */}
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">📄 جروب الفواتير</Label>
                       <div className="flex-1">
                         {whatsappGroups.length > 0 ? (
                           <Select
-                            value={formData.whatsappGroupId || "none"}
+                            value={formData.invoiceGroupId || "none"}
                             onValueChange={(value) =>
-                              setFormData({ ...formData, whatsappGroupId: value === "none" ? "" : value })
+                              setFormData({ ...formData, invoiceGroupId: value === "none" ? "" : value })
                             }
                           >
                             <SelectTrigger>
-                              <SelectValue placeholder="اختر جروب" />
+                              <SelectValue placeholder="اختر جروب للفواتير" />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">بدون جروب</SelectItem>
@@ -664,32 +694,55 @@ const Customers = () => {
                           </Select>
                         ) : (
                           <Input
-                            value={formData.whatsappGroupId}
+                            value={formData.invoiceGroupId}
                             onChange={(e) =>
-                              setFormData({ ...formData, whatsappGroupId: e.target.value })
+                              setFormData({ ...formData, invoiceGroupId: e.target.value })
                             }
-                            placeholder="اضغط 'جلب' لتحميل المجموعات من الواتساب"
+                            placeholder="Group ID للفواتير"
                             className="font-mono text-sm"
                           />
                         )}
                       </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={handleFetchWhatsAppGroups}
-                        disabled={isFetchingGroups}
-                        className="gap-1 shrink-0"
-                      >
-                        {isFetchingGroups ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <RefreshCw className="h-4 w-4" />
-                        )}
-                        جلب
-                      </Button>
                     </div>
+
+                    {/* جروب القبض وكشف الحساب */}
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">💰 جروب القبض وكشف الحساب</Label>
+                      <div className="flex-1">
+                        {whatsappGroups.length > 0 ? (
+                          <Select
+                            value={formData.collectionGroupId || "none"}
+                            onValueChange={(value) =>
+                              setFormData({ ...formData, collectionGroupId: value === "none" ? "" : value })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="اختر جروب للقبض وكشف الحساب" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">بدون جروب</SelectItem>
+                              {whatsappGroups.map((group) => (
+                                <SelectItem key={group.id} value={group.id}>
+                                  {group.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Input
+                            value={formData.collectionGroupId}
+                            onChange={(e) =>
+                              setFormData({ ...formData, collectionGroupId: e.target.value })
+                            }
+                            placeholder="Group ID للقبض وكشف الحساب"
+                            className="font-mono text-sm"
+                          />
+                        )}
+                      </div>
+                    </div>
+
                     <p className="text-xs text-muted-foreground">
-                      اضغط "جلب" لتحميل المجموعات من الواتساب — يُستخدم بديلاً عن رقم الهاتف
+                      اضغط "جلب المجموعات" لتحميل الجروبات من الواتساب — حدد جروب مختلف للفواتير وللقبض
                     </p>
                   </div>
                   <div className="grid grid-cols-2 gap-4">

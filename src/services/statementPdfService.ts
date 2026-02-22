@@ -113,6 +113,20 @@ function numberToArabicWords(num: number): string {
 export async function generateStatementHTML(data: AccountStatementData): Promise<string> {
     const logoBase64 = await loadLogoBase64();
 
+    // Opening balance row (shows balance carried forward from before the date range)
+    const openingBalanceRow = `
+        <tr style="background: #f0f0f0; font-weight: 600;">
+            <td></td>
+            <td></td>
+            <td>رصيد سابق</td>
+            <td>-</td>
+            <td>-</td>
+            <td>${Math.round(data.openingBalance)}</td>
+            <td>-</td>
+            <td></td>
+        </tr>
+    `;
+
     const rowsHtml = data.rows.map((row, index) => {
         // Shorten long movement IDs (e.g., RET-1234567890 → RET-...7890)
         let displayId = row.movementId || '-';
@@ -402,6 +416,7 @@ export async function generateStatementHTML(data: AccountStatementData): Promise
                     </tr>
                 </thead>
                 <tbody>
+                    ${openingBalanceRow}
                     ${rowsHtml}
                 </tbody>
                 <tfoot>

@@ -836,8 +836,9 @@ export default function Collections() {
 
     // إرسال إيصال القبض عبر واتساب
     const handleSendReceiptWhatsApp = async (collection: CollectionRecord) => {
-        const customer = customers.find(c => c.id === collection.customerId);
-        const sendTarget = customer?.whatsappGroupId || customer?.phone;
+        // Reload customer from DB to get latest group settings
+        const customer = await db.get<Customer>("customers", collection.customerId || "");
+        const sendTarget = customer?.collectionGroupId || customer?.whatsappGroupId || customer?.phone;
         if (!sendTarget) {
             toast.error("العميل ليس لديه رقم هاتف أو جروب واتساب");
             return;
@@ -941,7 +942,7 @@ export default function Collections() {
                 `شركة لونج تايم للصناعات الكهربائية`;
 
             const phone = (customer.phone || "").replace(/[^0-9]/g, "");
-            const targetNumber = customer.whatsappGroupId || phone;
+            const targetNumber = customer.collectionGroupId || customer.whatsappGroupId || phone;
             const receiptNumber = collection.id.replace('collection_', '');
 
             // البحث عن حساب واتساب نشط

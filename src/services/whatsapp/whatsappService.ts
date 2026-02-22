@@ -614,7 +614,7 @@ class WhatsAppService {
         };
       }
 
-      const sendTarget = (customer as any).whatsappGroupId || (customer as any).phone;
+      const sendTarget = (customer as any).collectionGroupId || (customer as any).whatsappGroupId || (customer as any).phone;
       if (!sendTarget) {
         return { success: false, message: ERROR_MESSAGES_AR.NO_PHONE };
       }
@@ -668,7 +668,7 @@ class WhatsAppService {
         };
       }
 
-      const sendTarget = (customer as any).whatsappGroupId || (customer as any).phone;
+      const sendTarget = (customer as any).invoiceGroupId || (customer as any).whatsappGroupId || (customer as any).phone;
       if (!sendTarget) {
         return { success: false, message: ERROR_MESSAGES_AR.NO_PHONE };
       }
@@ -692,7 +692,7 @@ class WhatsAppService {
         {
           type: "document",
           url: pdfUrl,
-          filename: `invoice_${(invoice as any).id}.pdf`,
+          filename: `${(customer as any).name || (invoice as any).customerName || 'عميل'} - ${(invoice as any).invoiceNumber || (invoice as any).id}.pdf`,
         },
         {
           invoiceId,
@@ -877,7 +877,7 @@ class WhatsAppService {
     }
 
     // فلترة العملاء اللي عندهم وسيلة تواصل (هاتف أو جروب واتساب)
-    customers = customers.filter((c: any) => c.phone || c.whatsappGroupId);
+    customers = customers.filter((c: any) => c.phone || c.whatsappGroupId || c.invoiceGroupId || c.collectionGroupId);
 
     // إضافة storeName لكل customer عشان يتعوض في الـ template
     const storeName = localStorage.getItem("storeName") || "متجرنا";

@@ -14,6 +14,11 @@ import { app } from "electron";
 const activeSockets = new Map<string, WASocket>();
 const accountStates = new Map<string, any>();
 
+// Track reconnect attempts per account to prevent infinite loops
+const reconnectAttempts = new Map<string, number>();
+const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const MAX_RECONNECT_ATTEMPTS = 5;
+
 // Reference to main window for forwarding bot messages
 let mainWindowRef: BrowserWindow | null = null;
 
@@ -141,6 +146,27 @@ function getSessionPath(accountId: string): string {
  */
 async function initializeAccount(accountId: string, accountPhone: string) {
   try {
+    // Cancel any pending reconnect timer for this account
+    const existingTimer = reconnectTimers.get(accountId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      reconnectTimers.delete(accountId);
+    }
+
+    // Close any existing socket first to prevent "conflict" errors
+    const existingSock = activeSockets.get(accountId);
+    if (existingSock) {
+      try {
+        existingSock.ev.removeAllListeners("connection.update");
+        existingSock.ev.removeAllListeners("creds.update");
+        existingSock.ev.removeAllListeners("messages.upsert");
+        existingSock.end(undefined);
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+      activeSockets.delete(accountId);
+    }
+
     const sessionPath = getSessionPath(accountId);
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
     const { version } = await fetchLatestBaileysVersion();
@@ -176,37 +202,64 @@ async function initializeAccount(accountId: string, accountPhone: string) {
 
       if (connection === "close") {
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        const errorMsg = (lastDisconnect?.error as Boom)?.message || "";
+        const isConflict = statusCode === DisconnectReason.connectionReplaced || errorMsg.includes("conflict");
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
         let errorMessage = ERROR_MESSAGES.CONNECTION_FAILED;
 
-        if (statusCode === DisconnectReason.loggedOut) {
+        if (isLoggedOut) {
           errorMessage = ERROR_MESSAGES.ACCOUNT_LOGGED_OUT;
           activeSockets.delete(accountId);
+          reconnectAttempts.delete(accountId);
           accountStates.set(accountId, {
             status: "disconnected",
             phone: accountPhone,
             error: errorMessage,
             message: errorMessage,
           });
-        } else if (shouldReconnect) {
-          console.log("Reconnecting WhatsApp...", accountId);
-          accountStates.set(accountId, {
-            status: "connecting",
-            phone: accountPhone,
-            message: ERROR_MESSAGES.RECONNECTING,
-          });
-          setTimeout(() => initializeAccount(accountId, accountPhone), 3000);
-        } else {
+        } else if (isConflict) {
+          // "conflict" means another session took over - do NOT reconnect (causes infinite loop)
+          console.log(`⚠️ WhatsApp ${accountId} got conflict error - stopping reconnect to prevent loop`);
           activeSockets.delete(accountId);
+          reconnectAttempts.delete(accountId);
           accountStates.set(accountId, {
             status: "disconnected",
             phone: accountPhone,
-            error: errorMessage,
-            message: errorMessage,
+            error: "⚠️ تم الاتصال من جهاز آخر",
+            message: "⚠️ تم الاتصال من جهاز آخر - اضغط اتصال لإعادة الربط",
           });
+        } else {
+          // Other errors - reconnect with limit and exponential backoff
+          const attempts = (reconnectAttempts.get(accountId) || 0) + 1;
+          reconnectAttempts.set(accountId, attempts);
+
+          if (attempts <= MAX_RECONNECT_ATTEMPTS) {
+            const delay = Math.min(3000 * Math.pow(2, attempts - 1), 60000); // 3s, 6s, 12s, 24s, 48s
+            console.log(`🔄 Reconnecting WhatsApp ${accountId} (attempt ${attempts}/${MAX_RECONNECT_ATTEMPTS}) in ${delay/1000}s...`);
+            accountStates.set(accountId, {
+              status: "connecting",
+              phone: accountPhone,
+              message: ERROR_MESSAGES.RECONNECTING,
+            });
+            const timer = setTimeout(() => initializeAccount(accountId, accountPhone), delay);
+            reconnectTimers.set(accountId, timer);
+          } else {
+            console.log(`❌ WhatsApp ${accountId} max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`);
+            activeSockets.delete(accountId);
+            reconnectAttempts.delete(accountId);
+            accountStates.set(accountId, {
+              status: "disconnected",
+              phone: accountPhone,
+              error: "❌ فشل الاتصال بعد عدة محاولات",
+              message: "❌ فشل الاتصال - اضغط اتصال لإعادة المحاولة",
+            });
+          }
         }
       } else if (connection === "open") {
+        // Successfully connected - reset reconnect counter
+        reconnectAttempts.delete(accountId);
+
         // Get the real phone number from WhatsApp
         const realPhone =
           sock.user?.id?.split(":")[0] ||
@@ -552,8 +605,20 @@ async function sendMediaMessage(
  */
 function closeSocket(accountId: string) {
   try {
+    // Cancel any pending reconnect timer
+    const timer = reconnectTimers.get(accountId);
+    if (timer) {
+      clearTimeout(timer);
+      reconnectTimers.delete(accountId);
+    }
+    reconnectAttempts.delete(accountId);
+
     const sock = activeSockets.get(accountId);
     if (sock) {
+      // Remove all listeners first to prevent reconnect triggers
+      sock.ev.removeAllListeners("connection.update");
+      sock.ev.removeAllListeners("creds.update");
+      sock.ev.removeAllListeners("messages.upsert");
       sock.end(undefined);
       activeSockets.delete(accountId);
       accountStates.delete(accountId);
@@ -572,8 +637,19 @@ function closeSocket(accountId: string) {
  */
 async function disconnectAccount(accountId: string) {
   try {
+    // Cancel any pending reconnect timer
+    const timer = reconnectTimers.get(accountId);
+    if (timer) {
+      clearTimeout(timer);
+      reconnectTimers.delete(accountId);
+    }
+    reconnectAttempts.delete(accountId);
+
     const sock = activeSockets.get(accountId);
     if (sock) {
+      sock.ev.removeAllListeners("connection.update");
+      sock.ev.removeAllListeners("creds.update");
+      sock.ev.removeAllListeners("messages.upsert");
       await sock.logout();
       activeSockets.delete(accountId);
       accountStates.delete(accountId);
@@ -650,6 +726,8 @@ export function registerWhatsAppHandlers() {
   ipcMain.handle(
     "whatsapp:init-account",
     async (_, accountId: string, accountPhone: string) => {
+      // Reset reconnect counter when user manually initiates
+      reconnectAttempts.delete(accountId);
       return await initializeAccount(accountId, accountPhone);
     }
   );

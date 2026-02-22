@@ -208,8 +208,8 @@ ${dateStr} ${timeStr}`;
             return;
         }
 
-        // تحديد وجهة الإرسال (جروب أو رقم هاتف)
-        const sendTarget = selectedCustomer.whatsappGroupId || selectedCustomer.phone;
+        // تحديد وجهة الإرسال (جروب القبض/كشف الحساب أو رقم هاتف)
+        const sendTarget = selectedCustomer.collectionGroupId || selectedCustomer.whatsappGroupId || selectedCustomer.phone;
         if (!sendTarget) {
             toast({ title: "العميل ليس لديه رقم هاتف أو جروب واتساب", variant: "destructive" });
             return;
