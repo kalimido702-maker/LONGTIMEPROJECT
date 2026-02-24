@@ -110,6 +110,7 @@ export interface Campaign {
   name: string;
   accountId: string;
   template: string;
+  templateId?: string;
   variables: string[]; // e.g., ["customerName", "amount", "dueDate"]
   targetType: "credit" | "installment" | "all" | "custom";
   filters?: {
@@ -536,6 +537,11 @@ class WhatsAppService {
     const campaign = await db.get<Campaign>("whatsappCampaigns", campaignId);
     if (!campaign) throw new Error("Campaign not found");
 
+    // If this is a statement campaign, run the special statement flow
+    if (campaign.templateId === "account_statement") {
+      return this.runStatementCampaign(campaign);
+    }
+
     // Create task state
     const taskState: TaskState = {
       id: `campaign_${campaignId}`,
@@ -588,6 +594,117 @@ class WhatsAppService {
 
       campaign.sentCount++;
       await db.update("whatsappCampaigns", campaign);
+    }
+
+    campaign.status = "completed";
+    campaign.completedAt = new Date().toISOString();
+    await db.update("whatsappCampaigns", campaign);
+
+    taskState.status = "completed";
+    taskState.updatedAt = new Date().toISOString();
+    await db.update("whatsappTasks", taskState);
+  }
+
+  // Statement Campaign - sends PDF statement to each customer
+  private async runStatementCampaign(campaign: Campaign): Promise<void> {
+    const campaignId = campaign.id;
+
+    const taskState: TaskState = {
+      id: `campaign_${campaignId}`,
+      type: "send_campaign",
+      accountId: campaign.accountId,
+      status: "running",
+      currentStep: "loading_recipients",
+      currentIndex: 0,
+      totalItems: campaign.totalRecipients,
+      data: { campaignId },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await db.add("whatsappTasks", taskState);
+
+    const recipients = await this.loadCampaignRecipients(campaign);
+
+    // Dynamically import the PDF generator
+    const { generateStatementPDF } = await import("@/services/statementPdfService");
+
+    // Date range: from start of year to today
+    const fromDate = new Date(new Date().getFullYear(), 0, 1);
+    const toDate = new Date();
+
+    for (let i = 0; i < recipients.length; i++) {
+      if (!this.isOnline) {
+        await this.pauseTask(taskState.id);
+        break;
+      }
+
+      const recipient = recipients[i];
+      const recipientTarget = recipient.collectionGroupId || recipient.whatsappGroupId || recipient.phone;
+
+      if (!recipientTarget) {
+        campaign.failedCount++;
+        await db.update("whatsappCampaigns", campaign);
+        continue;
+      }
+
+      try {
+        // Generate PDF for this customer
+        const pdfBlob = await generateStatementPDF(recipient.id, fromDate, toDate);
+
+        if (!pdfBlob) {
+          console.warn(`⚠️ [Campaign] No statement data for customer: ${recipient.name}`);
+          campaign.failedCount++;
+          await db.update("whatsappCampaigns", campaign);
+          continue;
+        }
+
+        // Convert blob to base64
+        const base64data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(pdfBlob);
+        });
+
+        // Fill the caption template with customer data
+        const caption = this.fillTemplate(
+          campaign.template,
+          campaign.variables,
+          recipient
+        );
+
+        await this.sendMessage(
+          campaign.accountId,
+          recipientTarget,
+          caption,
+          {
+            type: "document",
+            url: base64data,
+            caption: caption,
+            filename: `كشف حساب ${recipient.name || "عميل"}.pdf`,
+          },
+          {
+            campaignId,
+            customerId: recipient.id,
+            type: "statement",
+          }
+        );
+
+        campaign.sentCount++;
+      } catch (error) {
+        console.error(`❌ [Campaign] Failed to send statement to ${recipient.name}:`, error);
+        campaign.failedCount++;
+      }
+
+      // Update task progress
+      taskState.currentIndex = i + 1;
+      taskState.updatedAt = new Date().toISOString();
+      await db.update("whatsappTasks", taskState);
+      await db.update("whatsappCampaigns", campaign);
+
+      // Small delay between PDF generations to avoid overwhelming the system
+      await this.delay(2000);
     }
 
     campaign.status = "completed";

@@ -373,5 +373,16 @@ export const STORES_SCHEMA: StoreConfig[] = [
       { name: "createdAt", keyPath: "createdAt", unique: false },
     ],
   },
+  {
+    name: "supervisorBonuses",
+    keyPath: "id",
+    indexes: [
+      { name: "supervisorId", keyPath: "supervisorId", unique: false },
+      { name: "periodStart", keyPath: "periodStart", unique: false },
+      { name: "periodEnd", keyPath: "periodEnd", unique: false },
+      { name: "userId", keyPath: "userId", unique: false },
+      { name: "createdAt", keyPath: "createdAt", unique: false },
+    ],
+  },
 ];
 

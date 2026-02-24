@@ -63,19 +63,23 @@ const Expenses = () => {
   }, [expenses, filters]);
 
   const loadData = async () => {
-    await db.init();
-    const [expensesData, categoriesData] = await Promise.all([
-      db.getAll<ExpenseItem>("expenseItems"),
-      db.getAll<ExpenseCategory>("expenseCategories"),
-    ]);
+    try {
+      await db.init();
+      const [expensesData, categoriesData] = await Promise.all([
+        db.getAll<ExpenseItem>("expenseItems"),
+        db.getAll<ExpenseCategory>("expenseCategories"),
+      ]);
 
-    setExpenses(
-      expensesData.sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      )
-    );
-    setCategories(categoriesData.filter((c) => c.active));
+      setExpenses(
+        (expensesData || []).sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        )
+      );
+      setCategories((categoriesData || []).filter((c) => c.active));
+    } catch (error) {
+      console.error("❌ [Expenses] Error loading data:", error);
+    }
   };
 
   const filterExpenses = () => {

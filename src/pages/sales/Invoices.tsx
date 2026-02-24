@@ -1119,11 +1119,61 @@ export default function Invoices() {
             {/* Invoice Details Dialog */}
             <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
                 <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" dir="rtl">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2 text-2xl">
+                    <DialogHeader className="flex flex-row items-center justify-between gap-4">
+                        <DialogTitle className="flex items-center gap-2 text-2xl shrink-0">
                             <FileText className="h-6 w-6 text-primary" />
-                            تفاصيل الفاتورة #{selectedInvoice?.invoiceNumber || selectedInvoice?.id}
+                            فاتورة #{selectedInvoice?.invoiceNumber || selectedInvoice?.id}
                         </DialogTitle>
+                        {selectedInvoice && (
+                            <div className="flex gap-1.5 items-center flex-wrap justify-end">
+                                {selectedInvoice.customerId && (
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="bg-green-50 hover:bg-green-100 text-green-700 border-green-200 h-8"
+                                        onClick={() => handleSendInvoiceWhatsApp(selectedInvoice)}
+                                    >
+                                        <MessageSquare className="h-3.5 w-3.5 ml-1" />
+                                        واتساب
+                                    </Button>
+                                )}
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8"
+                                    onClick={() => selectedInvoice && handlePrintInvoice(selectedInvoice)}
+                                >
+                                    <Printer className="h-3.5 w-3.5 ml-1" />
+                                    طباعة
+                                </Button>
+                                {canEditInvoice && (
+                                    <Button
+                                        size="sm"
+                                        className="bg-blue-600 hover:bg-blue-700 text-white h-8"
+                                        onClick={() => {
+                                            if (selectedInvoice) {
+                                                setIsDetailsOpen(false);
+                                                navigate(`/pos?invoiceId=${selectedInvoice.id}`);
+                                            }
+                                        }}
+                                    >
+                                        <Edit className="h-3.5 w-3.5 ml-1" />
+                                        تعديل
+                                    </Button>
+                                )}
+                                {canDeleteInvoice && (
+                                    <Button
+                                        size="sm"
+                                        variant="destructive"
+                                        className="h-8"
+                                        onClick={() => selectedInvoice && handleDeleteInvoice(selectedInvoice)}
+                                    >
+                                        <Trash2 className="h-3.5 w-3.5 ml-1" />
+                                        حذف
+                                    </Button>
+                                )}
+                            </div>
+                        )}
                     </DialogHeader>
 
                     {selectedInvoice && (
@@ -1354,61 +1404,7 @@ export default function Invoices() {
                                 </div>
                             )}
 
-                            {/* Actions */}
-                            <div className="flex gap-2 justify-end border-t pt-4 flex-wrap">
-                                <Button variant="outline" onClick={() => setIsDetailsOpen(false)}>
-                                    إغلاق
-                                </Button>
-                                {selectedInvoice.customerId && (
-                                    <Button
-                                        variant="outline"
-                                        className="bg-green-50 hover:bg-green-100 text-green-700 border-green-200"
-                                        onClick={() => handleSendInvoiceWhatsApp(selectedInvoice)}
-                                    >
-                                        <MessageSquare className="h-4 w-4 ml-2" />
-                                        واتساب
-                                    </Button>
-                                )}
-                                <Button
-                                    variant="outline"
-                                    onClick={() => selectedInvoice && handlePrintInvoice(selectedInvoice)}
-                                >
-                                    <Printer className="h-4 w-4 ml-2" />
-                                    طباعة
-                                </Button>
-                                {canEditInvoice && (
-                                    <Button
-                                        variant="default"
-                                        className="bg-blue-600 hover:bg-blue-700 text-white"
-                                        onClick={() => {
-                                            if (selectedInvoice) {
-                                                navigate(`/pos?invoiceId=${selectedInvoice.id}`);
-                                            }
-                                        }}
-                                    >
-                                        <Edit className="h-4 w-4 ml-2" />
-                                        تعديل الفاتورة
-                                    </Button>
-                                )}
-                                {canDeleteInvoice && (
-                                    <Button
-                                        variant="destructive"
-                                        onClick={() => selectedInvoice && handleDeleteInvoice(selectedInvoice)}
-                                    >
-                                        <Trash2 className="h-4 w-4 ml-2" />
-                                        حذف الفاتورة
-                                    </Button>
-                                )}
-                                {can("returns", "create") && (
-                                <Button
-                                    variant="outline"
-                                    onClick={() => selectedInvoice && handleOpenReturnDialog(selectedInvoice)}
-                                >
-                                    <RotateCcw className="h-4 w-4 ml-2" />
-                                    مرتجع
-                                </Button>
-                                )}
-                            </div>
+
                         </div>
                     )}
                 </DialogContent>

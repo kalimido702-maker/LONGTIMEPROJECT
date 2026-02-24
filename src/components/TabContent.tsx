@@ -3,9 +3,56 @@
  * Each tab's content is kept mounted to preserve state
  */
 
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, Component, ErrorInfo } from 'react';
 import { useTabs } from '@/contexts/TabContext';
 import { cn } from '@/lib/utils';
+
+// Error Boundary to catch runtime errors and prevent black screen
+interface ErrorBoundaryState {
+    hasError: boolean;
+    error: Error | null;
+}
+
+class TabErrorBoundary extends Component<
+    { children: React.ReactNode; tabPath: string },
+    ErrorBoundaryState
+> {
+    constructor(props: { children: React.ReactNode; tabPath: string }) {
+        super(props);
+        this.state = { hasError: false, error: null };
+    }
+
+    static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+        return { hasError: true, error };
+    }
+
+    componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+        console.error(`❌ [TabContent] Error in tab "${this.props.tabPath}":`, error, errorInfo);
+    }
+
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div className="flex flex-col items-center justify-center h-full min-h-[400px] gap-4">
+                    <div className="text-center p-6 rounded-lg bg-destructive/10 border border-destructive/20 max-w-md">
+                        <p className="text-destructive text-xl font-bold mb-2">⚠️ حدث خطأ في هذه الصفحة</p>
+                        <p className="text-muted-foreground text-sm mb-4">
+                            {this.state.error?.message || "خطأ غير معروف"}
+                        </p>
+                        <button
+                            className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+                            onClick={() => this.setState({ hasError: false, error: null })}
+                        >
+                            🔄 إعادة المحاولة
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        return this.props.children;
+    }
+}
 
 // Lazy load pages for better performance
 const POSv2 = lazy(() => import('@/pages/pos/POSv2'));
@@ -135,9 +182,11 @@ export function TabContent() {
                             isActive ? "block" : "hidden"
                         )}
                     >
-                        <Suspense fallback={<LoadingFallback />}>
-                            <Component />
-                        </Suspense>
+                        <TabErrorBoundary tabPath={tab.path}>
+                            <Suspense fallback={<LoadingFallback />}>
+                                <Component />
+                            </Suspense>
+                        </TabErrorBoundary>
                     </div>
                 );
             })}

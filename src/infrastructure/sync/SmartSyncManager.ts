@@ -98,6 +98,7 @@ const SYNCABLE_TABLES = [
     'deposit_sources',
     'payments',
     'payment_methods',
+    'supervisor_bonuses',
     // Operations
     'shifts',
     // Settings & Audit
@@ -120,6 +121,7 @@ const TABLE_TO_STORE_MAP: Record<string, string> = {
     'payment_methods': 'paymentMethods',
     'audit_logs': 'auditLogs',
     'sales_reps': 'salesReps',    // Added
+    'supervisor_bonuses': 'supervisorBonuses',  // Added
 };
 
 // Helper function to get the store name from table name

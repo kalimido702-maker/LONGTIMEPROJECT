@@ -56,6 +56,7 @@ import {
   RefreshCw,
   Smartphone,
   Calendar,
+  FileText,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
@@ -107,6 +108,18 @@ const MESSAGE_TEMPLATES = [
     template:
       "السلام عليكم {{name}} 💚\n\nنشكرك على ثقتك الغالية فينا!\nنتمنى نكون عند حسن ظنك دايماً 🌟\n\nأي وقت محتاج حاجة، إحنا موجودين 🤝\n{{storeName}}",
     targetType: "all",
+  },
+  {
+    id: "account_statement",
+    name: "📊 إرسال كشوفات حسابات",
+    icon: CreditCard,
+    color: "text-teal-500",
+    bgColor: "bg-teal-50 dark:bg-teal-950",
+    borderColor: "border-teal-200 dark:border-teal-800",
+    description: "ابعت كشف حساب PDF لكل عميل عليه رصيد",
+    template:
+      "📊 *كشف حساب تفصيلي*\n*العميل:* {{name}}\n\n*الرصيد النهائي:* {{amount}} جنيه\n\nيرجى مراجعة الملف المرفق.\nشكراً لتعاملكم معنا 🙏\n{{storeName}}",
+    targetType: "credit",
   },
   {
     id: "custom",
@@ -333,6 +346,7 @@ const WhatsAppCampaigns = () => {
         name: newCampaign.name,
         accountId: newCampaign.accountId,
         template: newCampaign.template,
+        templateId: selectedTemplate || undefined,
         variables,
         targetType: newCampaign.targetType,
         filters: {
@@ -1071,9 +1085,24 @@ const WhatsAppCampaigns = () => {
 
             {wizardStep === 3 && (
               <div className="space-y-6">
+                {selectedTemplate === "account_statement" && (
+                  <Alert className="border-teal-500 bg-teal-50 dark:bg-teal-950">
+                    <FileText className="h-5 w-5 text-teal-600" />
+                    <AlertTitle className="text-teal-700 dark:text-teal-300">
+                      📊 حملة كشوفات حسابات
+                    </AlertTitle>
+                    <AlertDescription className="text-teal-600 dark:text-teal-400">
+                      سيتم توليد ملف PDF كشف حساب تفصيلي لكل عميل وإرساله عبر الواتساب.
+                      <br />
+                      النص أدناه هو الرسالة المرفقة مع ملف الـ PDF.
+                    </AlertDescription>
+                  </Alert>
+                )}
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <Label className="text-base font-bold">نص الرسالة</Label>
+                    <Label className="text-base font-bold">
+                      {selectedTemplate === "account_statement" ? "نص الرسالة المرفقة مع الـ PDF" : "نص الرسالة"}
+                    </Label>
                     <Button
                       variant="outline"
                       size="sm"

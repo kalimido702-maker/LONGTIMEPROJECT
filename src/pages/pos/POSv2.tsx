@@ -2031,6 +2031,34 @@ const POSv2 = () => {
                 </div>
               </div>
 
+              {/* Quick Actions - Top */}
+              <div className="p-2 border-b bg-muted/30 space-y-2">
+                <div className="grid grid-cols-3 gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => saveInvoice(false)}
+                  >
+                    <Save className="h-4 w-4 ml-1" />
+                    حفظ
+                  </Button>
+                  <Button size="sm" onClick={() => saveInvoice(true)}>
+                    <Printer className="h-4 w-4 ml-1" />
+                    حفظ وطباعة
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={generateQuotePDF}>
+                    <FileText className="h-4 w-4 ml-1" />
+                    عرض سعر
+                  </Button>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={clearCart} className="flex-1">
+                    <X className="h-4 w-4 ml-1" />
+                    إلغاء
+                  </Button>
+                </div>
+              </div>
+
               {/* Invoice Data Section */}
               <div className="h-full overflow-auto p-3 space-y-3">
                 {/* Customer Selection */}
@@ -2575,31 +2603,7 @@ const POSv2 = () => {
                   </div>
                 )}
 
-                {/* Actions */}
-                <div className="flex gap-2">
-                  <Button variant="outline" onClick={clearCart} className="flex-1">
-                    <X className="h-4 w-4 ml-2" />
-                    إلغاء
-                  </Button>
-                </div>
 
-                <div className="grid grid-cols-3 gap-2">
-                  <Button
-                    variant="secondary"
-                    onClick={() => saveInvoice(false)}
-                  >
-                    <Save className="h-4 w-4 ml-2" />
-                    حفظ
-                  </Button>
-                  <Button onClick={() => saveInvoice(true)}>
-                    <Printer className="h-4 w-4 ml-2" />
-                    حفظ وطباعة
-                  </Button>
-                  <Button variant="outline" onClick={generateQuotePDF}>
-                    <FileText className="h-4 w-4 ml-2" />
-                    عرض سعر
-                  </Button>
-                </div>
               </div>
             </div>
           </ResizablePanel>

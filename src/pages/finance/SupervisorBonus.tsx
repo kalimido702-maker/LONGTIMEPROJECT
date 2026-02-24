@@ -30,13 +30,25 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogFooter,
+    DialogDescription,
+} from "@/components/ui/dialog";
+import {
     Award,
     DollarSign,
     Users,
     Calendar,
     TrendingUp,
     Percent,
-    UserCheck
+    UserCheck,
+    Trash2,
+    Pencil,
+    Printer,
+    AlertTriangle,
 } from "lucide-react";
 import { db, Supervisor, SalesRep, Invoice, Product, ProductCategory, Customer } from "@/shared/lib/indexedDB";
 import { useSettingsContext } from "@/contexts/SettingsContext";
@@ -56,6 +68,8 @@ interface SupervisorBonusRecord {
     totalTeamSales: number;
     bonusPercentage: number;
     bonusAmount: number;
+    manualBonusAmount?: number; // مبلغ يدوي مضاف بجانب النسبة
+    totalDeposits?: number; // إجمالي إيداعات المشرف خلال الفترة
     createdAt: string;
     userId: string;
     userName: string;
@@ -84,6 +98,15 @@ const SupervisorBonus = () => {
     const [notes, setNotes] = useState<string>("");
     const [recentBonuses, setRecentBonuses] = useState<SupervisorBonusRecord[]>([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [manualBonusAmount, setManualBonusAmount] = useState<string>("");
+    const [collections, setCollections] = useState<any[]>([]);
+
+    // Edit/Delete states
+    const [editingBonus, setEditingBonus] = useState<SupervisorBonusRecord | null>(null);
+    const [editDialog, setEditDialog] = useState(false);
+    const [editNotes, setEditNotes] = useState("");
+    const [editManualAmount, setEditManualAmount] = useState("");
+    const [deleteConfirmDialog, setDeleteConfirmDialog] = useState<string | null>(null);
 
     // Load data on mount
     useEffect(() => {
@@ -111,22 +134,61 @@ const SupervisorBonus = () => {
         const allCustomers = await db.getAll<Customer>("customers");
         setCustomers(allCustomers);
 
+        // Collections are stored in "payments" store with paymentType filter
+        const allPayments = await db.getAll<any>("payments");
+        const allCollections = (allPayments || []).filter(
+            (p: any) => p.paymentType === "collection" || p.paymentType === "credit_payment"
+        );
+        setCollections(allCollections);
+
         loadRecentBonuses();
     };
 
-    const loadRecentBonuses = () => {
+    const loadRecentBonuses = async () => {
         try {
-            const saved = localStorage.getItem("supervisorBonuses");
-            if (saved) {
-                const bonuses = JSON.parse(saved) as SupervisorBonusRecord[];
-                // ترتيب من الأحدث للأقدم
-                setRecentBonuses(
-                    bonuses.sort(
-                        (a, b) =>
-                            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-                    )
-                );
+            await db.init();
+            let bonuses: SupervisorBonusRecord[] = [];
+
+            // Try loading from IndexedDB first
+            try {
+                bonuses = await db.getAll<SupervisorBonusRecord>("supervisorBonuses");
+            } catch {
+                bonuses = [];
             }
+
+            // Migrate from localStorage if IndexedDB is empty and localStorage has data
+            if (bonuses.length === 0) {
+                const saved = localStorage.getItem("supervisorBonuses");
+                if (saved) {
+                    try {
+                        const localBonuses = JSON.parse(saved) as SupervisorBonusRecord[];
+                        if (localBonuses.length > 0) {
+                            // Migrate each record to IndexedDB
+                            for (const bonus of localBonuses) {
+                                try {
+                                    await db.add("supervisorBonuses", bonus);
+                                } catch (e) {
+                                    console.warn("Migration: skipped duplicate bonus", bonus.id);
+                                }
+                            }
+                            bonuses = localBonuses;
+                            // Clear localStorage after successful migration
+                            localStorage.removeItem("supervisorBonuses");
+                            console.log(`[SupervisorBonus] Migrated ${localBonuses.length} bonuses from localStorage to IndexedDB`);
+                        }
+                    } catch (e) {
+                        console.error("Error migrating bonuses from localStorage:", e);
+                    }
+                }
+            }
+
+            // Sort newest first
+            setRecentBonuses(
+                bonuses.sort(
+                    (a, b) =>
+                        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+                )
+            );
         } catch (error) {
             console.error("Error loading bonuses:", error);
         }
@@ -272,14 +334,44 @@ const SupervisorBonus = () => {
         return { total, byRep, categoryBonus, byCategorySales };
     }, [selectedSupervisorId, dateFrom, dateTo, teamMembers, invoices, productCategoryMap, categoryBonusMap, customerSalesRepMap]);
 
-    // Calculate bonus amount
-    const bonusAmount = useMemo(() => {
+    // Calculate bonus amount (percentage-based + manual amount)
+    const calculatedBonusFromPercentage = useMemo(() => {
         if (useCategoryBonus) {
             return teamSalesData.categoryBonus;
         }
         const percentage = parseFloat(bonusPercentage) || 0;
         return Math.round(teamSalesData.total * (percentage / 100));
     }, [teamSalesData.total, teamSalesData.categoryBonus, bonusPercentage, useCategoryBonus]);
+
+    const manualAmount = parseFloat(manualBonusAmount) || 0;
+    const bonusAmount = calculatedBonusFromPercentage + manualAmount;
+
+    // Calculate supervisor's team deposits (collections) for the period
+    const supervisorDeposits = useMemo(() => {
+        if (!selectedSupervisorId || !dateFrom || !dateTo) return 0;
+        const startDate = new Date(dateFrom);
+        const endDate = new Date(dateTo + "T23:59:59");
+        const teamRepIds = teamMembers.map(rep => rep.id);
+
+        // Get customer IDs belonging to this supervisor's reps
+        const teamCustomerIds = new Set(
+            customers
+                .filter(c => c.salesRepId && teamRepIds.includes(c.salesRepId))
+                .map(c => c.id)
+        );
+
+        // Sum collections from these customers in the period
+        return collections
+            .filter((col: any) => {
+                const colDate = new Date(col.createdAt);
+                return colDate >= startDate && colDate <= endDate && teamCustomerIds.has(col.customerId);
+            })
+            .reduce((sum: number, col: any) => sum + (Number(col.amount) || 0), 0);
+    }, [selectedSupervisorId, dateFrom, dateTo, teamMembers, customers, collections]);
+
+    // Check if bonus exceeds 10% of deposits
+    const depositsCap = Math.round(supervisorDeposits * 0.10);
+    const exceedsDepositCap = supervisorDeposits > 0 && bonusAmount > depositsCap;
 
     // Apply bonus
     const handleApplyBonus = async () => {
@@ -296,10 +388,19 @@ const SupervisorBonus = () => {
             return;
         }
 
+        // Validate 10% deposit cap
+        if (exceedsDepositCap) {
+            toast.error(`قيمة البونص (${formatCurrency(bonusAmount)}) تتجاوز 10% من إيداعات المشرف (${formatCurrency(depositsCap)}). الحد الأقصى المسموح: ${formatCurrency(depositsCap)}`);
+            return;
+        }
+
         // Check for duplicate bonus
-        const existingBonuses = JSON.parse(
-            localStorage.getItem("supervisorBonuses") || "[]"
-        ) as SupervisorBonusRecord[];
+        let existingBonuses: SupervisorBonusRecord[] = [];
+        try {
+            existingBonuses = await db.getAll<SupervisorBonusRecord>("supervisorBonuses");
+        } catch {
+            existingBonuses = [];
+        }
 
         // Collect invoice IDs for this bonus period
         const startDate = new Date(dateFrom);
@@ -347,9 +448,11 @@ const SupervisorBonus = () => {
                 periodEnd: dateTo,
                 totalTeamSales: teamSalesData.total,
                 bonusPercentage: useCategoryBonus
-                    ? (teamSalesData.total > 0 ? parseFloat((bonusAmount / teamSalesData.total * 100).toFixed(2)) : 0)
+                    ? (teamSalesData.total > 0 ? parseFloat((calculatedBonusFromPercentage / teamSalesData.total * 100).toFixed(2)) : 0)
                     : (parseFloat(bonusPercentage) || 0),
                 bonusAmount,
+                manualBonusAmount: manualAmount > 0 ? manualAmount : undefined,
+                totalDeposits: supervisorDeposits > 0 ? supervisorDeposits : undefined,
                 createdAt: new Date().toISOString(),
                 userId: user?.id || "",
                 userName: user?.username || user?.name || "",
@@ -358,9 +461,8 @@ const SupervisorBonus = () => {
                 invoiceIds: periodInvoiceIds,
             };
 
-            // Save to localStorage (use existingBonuses already loaded for duplicate check)
-            existingBonuses.push(newBonusRecord);
-            localStorage.setItem("supervisorBonuses", JSON.stringify(existingBonuses));
+            // Save to IndexedDB (synced automatically via SyncableRepository)
+            await db.add("supervisorBonuses", newBonusRecord);
 
             toast.success(
                 `تم تسجيل بونص ${Math.round(bonusAmount)} ${currency} للمشرف ${supervisor?.name}`
@@ -371,6 +473,7 @@ const SupervisorBonus = () => {
             setDateFrom("");
             setDateTo("");
             setBonusPercentage("5");
+            setManualBonusAmount("");
             setNotes("");
             loadRecentBonuses();
         } catch (error) {
@@ -385,6 +488,177 @@ const SupervisorBonus = () => {
 
     const formatDate = (dateString: string) => {
         return new Date(dateString).toLocaleDateString("ar-EG");
+    };
+
+    // Delete bonus
+    const handleDeleteBonus = async (bonusId: string) => {
+        try {
+            await db.delete("supervisorBonuses", bonusId);
+            setDeleteConfirmDialog(null);
+            toast.success("تم حذف البونص بنجاح");
+            loadRecentBonuses();
+        } catch (error) {
+            toast.error("حدث خطأ أثناء الحذف");
+            console.error(error);
+        }
+    };
+
+    // Open edit dialog
+    const openEditDialog = (bonus: SupervisorBonusRecord) => {
+        setEditingBonus(bonus);
+        setEditNotes(bonus.notes || "");
+        setEditManualAmount(bonus.manualBonusAmount ? String(bonus.manualBonusAmount) : "");
+        setEditDialog(true);
+    };
+
+    // Save edit
+    const handleSaveEdit = async () => {
+        if (!editingBonus) return;
+        try {
+            const newManual = parseFloat(editManualAmount) || 0;
+            const oldManual = editingBonus.manualBonusAmount || 0;
+            const baseBonusAmount = editingBonus.bonusAmount - oldManual;
+            const newBonusAmount = baseBonusAmount + newManual;
+
+            // Check 10% deposit cap if deposits info exists
+            if (editingBonus.totalDeposits && editingBonus.totalDeposits > 0) {
+                const cap = Math.round(editingBonus.totalDeposits * 0.10);
+                if (newBonusAmount > cap) {
+                    toast.error(`البونص الجديد (${formatCurrency(newBonusAmount)}) يتجاوز 10% من الإيداعات (${formatCurrency(cap)})`);
+                    return;
+                }
+            }
+
+            const updatedBonus: SupervisorBonusRecord = {
+                ...editingBonus,
+                notes: editNotes,
+                manualBonusAmount: newManual > 0 ? newManual : undefined,
+                bonusAmount: newBonusAmount,
+            };
+
+            await db.update("supervisorBonuses", updatedBonus);
+            setEditDialog(false);
+            setEditingBonus(null);
+            toast.success("تم تعديل البونص بنجاح");
+            loadRecentBonuses();
+        } catch (error) {
+            toast.error("حدث خطأ أثناء التعديل");
+            console.error(error);
+        }
+    };
+
+    // Print comprehensive report
+    const handlePrintReport = (bonus: SupervisorBonusRecord) => {
+        const printWindow = window.open("", "_blank");
+        if (!printWindow) {
+            toast.error("يرجى السماح بالنوافذ المنبثقة للطباعة");
+            return;
+        }
+
+        const repRows = bonus.salesReps
+            .map((rep, i) => `<tr><td>${i + 1}</td><td>${rep.name}</td><td>${Math.round(rep.sales).toLocaleString("ar-EG")} ${currency}</td></tr>`)
+            .join("");
+
+        const storeName = getSetting("storeName") || "المتجر";
+
+        printWindow.document.write(`
+            <!DOCTYPE html>
+            <html dir="rtl" lang="ar">
+            <head>
+                <meta charset="UTF-8">
+                <title>تقرير بونص المشرف - ${bonus.supervisorName}</title>
+                <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
+                    body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; padding: 30px; color: #333; direction: rtl; }
+                    .header { text-align: center; border-bottom: 3px solid #2563eb; padding-bottom: 15px; margin-bottom: 25px; }
+                    .header h1 { font-size: 22px; color: #2563eb; margin-bottom: 5px; }
+                    .header h2 { font-size: 16px; color: #666; }
+                    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; background: #f8f9fa; padding: 15px; border-radius: 8px; }
+                    .info-item { display: flex; gap: 8px; }
+                    .info-label { font-weight: bold; color: #555; }
+                    .info-value { color: #333; }
+                    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                    th { background: #2563eb; color: white; padding: 10px; text-align: right; }
+                    td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }
+                    tr:nth-child(even) { background: #f8fafc; }
+                    .summary { background: #f0fdf4; border: 2px solid #22c55e; border-radius: 8px; padding: 20px; margin-top: 20px; }
+                    .summary-row { display: flex; justify-content: space-between; padding: 5px 0; }
+                    .summary-label { font-weight: bold; }
+                    .summary-value { font-size: 18px; color: #16a34a; font-weight: bold; }
+                    .total-row { border-top: 2px solid #22c55e; padding-top: 10px; margin-top: 10px; font-size: 20px; }
+                    .deposits-section { background: #eff6ff; border: 2px solid #3b82f6; border-radius: 8px; padding: 15px; margin-top: 15px; }
+                    .deposits-label { font-weight: bold; color: #1d4ed8; }
+                    .footer { text-align: center; margin-top: 30px; padding-top: 15px; border-top: 1px solid #e2e8f0; color: #999; font-size: 12px; }
+                    .notes { background: #fffbeb; border: 1px solid #f59e0b; border-radius: 8px; padding: 10px; margin-top: 15px; }
+                    @media print { body { padding: 15px; } }
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h1>🏆 ${storeName}</h1>
+                    <h2>تقرير بونص المشرف</h2>
+                </div>
+
+                <div class="info-grid">
+                    <div class="info-item"><span class="info-label">المشرف:</span><span class="info-value">${bonus.supervisorName}</span></div>
+                    <div class="info-item"><span class="info-label">تاريخ التسجيل:</span><span class="info-value">${formatDate(bonus.createdAt)}</span></div>
+                    <div class="info-item"><span class="info-label">من:</span><span class="info-value">${formatDate(bonus.periodStart)}</span></div>
+                    <div class="info-item"><span class="info-label">إلى:</span><span class="info-value">${formatDate(bonus.periodEnd)}</span></div>
+                    <div class="info-item"><span class="info-label">المسجّل:</span><span class="info-value">${bonus.userName}</span></div>
+                    <div class="info-item"><span class="info-label">نسبة البونص:</span><span class="info-value">${bonus.bonusPercentage}%</span></div>
+                </div>
+
+                <h3 style="margin-bottom: 10px;">📊 مبيعات المندوبين</h3>
+                <table>
+                    <thead><tr><th>#</th><th>المندوب</th><th>المبيعات</th></tr></thead>
+                    <tbody>
+                        ${repRows}
+                        <tr style="font-weight: bold; background: #e2e8f0;">
+                            <td colspan="2">الإجمالي</td>
+                            <td>${Math.round(bonus.totalTeamSales).toLocaleString("ar-EG")} ${currency}</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="summary">
+                    <h3 style="margin-bottom: 10px;">💰 ملخص البونص</h3>
+                    <div class="summary-row">
+                        <span class="summary-label">بونص من النسبة:</span>
+                        <span>${Math.round(bonus.bonusAmount - (bonus.manualBonusAmount || 0)).toLocaleString("ar-EG")} ${currency}</span>
+                    </div>
+                    ${bonus.manualBonusAmount ? `
+                    <div class="summary-row">
+                        <span class="summary-label">مبلغ يدوي مضاف:</span>
+                        <span>${Math.round(bonus.manualBonusAmount).toLocaleString("ar-EG")} ${currency}</span>
+                    </div>` : ""}
+                    <div class="summary-row total-row">
+                        <span class="summary-label">إجمالي البونص النهائي:</span>
+                        <span class="summary-value">${Math.round(bonus.bonusAmount).toLocaleString("ar-EG")} ${currency}</span>
+                    </div>
+                </div>
+
+                ${bonus.totalDeposits ? `
+                <div class="deposits-section">
+                    <div class="summary-row">
+                        <span class="deposits-label">إيداعات الفريق خلال الفترة:</span>
+                        <span>${Math.round(bonus.totalDeposits).toLocaleString("ar-EG")} ${currency}</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="deposits-label">الحد الأقصى (10%):</span>
+                        <span>${Math.round(bonus.totalDeposits * 0.10).toLocaleString("ar-EG")} ${currency}</span>
+                    </div>
+                </div>` : ""}
+
+                ${bonus.notes ? `<div class="notes"><strong>ملاحظات:</strong> ${bonus.notes}</div>` : ""}
+
+                <div class="footer">
+                    طُبع بتاريخ ${new Date().toLocaleDateString("ar-EG")} ${new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}
+                </div>
+            </body>
+            </html>
+        `);
+        printWindow.document.close();
+        setTimeout(() => printWindow.print(), 500);
     };
 
     const pagination = usePagination(recentBonuses);
@@ -551,6 +825,50 @@ const SupervisorBonus = () => {
                                 )}
                             </div>
 
+                            {/* Manual Bonus Amount */}
+                            <div className="space-y-2">
+                                <Label className="flex items-center gap-2">
+                                    <DollarSign className="h-4 w-4" />
+                                    مبلغ يدوي إضافي (اختياري)
+                                </Label>
+                                <Input
+                                    type="number"
+                                    min="0"
+                                    value={manualBonusAmount}
+                                    onChange={(e) => setManualBonusAmount(e.target.value)}
+                                    placeholder="أدخل مبلغ إضافي بجانب النسبة..."
+                                />
+                                {manualAmount > 0 && (
+                                    <p className="text-xs text-muted-foreground">
+                                        سيتم إضافة {formatCurrency(manualAmount)} إلى بونص النسبة ({formatCurrency(calculatedBonusFromPercentage)})
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* Deposits Cap Info */}
+                            {selectedSupervisorId && dateFrom && dateTo && (
+                                <div className={`p-3 rounded-lg border ${exceedsDepositCap ? "bg-red-50 dark:bg-red-950 border-red-300" : "bg-blue-50 dark:bg-blue-950 border-blue-200"}`}>
+                                    <div className="flex items-center gap-2 mb-1">
+                                        {exceedsDepositCap ? (
+                                            <AlertTriangle className="h-4 w-4 text-red-600" />
+                                        ) : (
+                                            <DollarSign className="h-4 w-4 text-blue-600" />
+                                        )}
+                                        <span className="font-semibold text-sm">
+                                            إيداعات الفريق (تحصيلات): {formatCurrency(supervisorDeposits)}
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">
+                                        الحد الأقصى للبونص (10% من الإيداعات): {formatCurrency(depositsCap)}
+                                    </p>
+                                    {exceedsDepositCap && (
+                                        <p className="text-xs text-red-600 font-semibold mt-1">
+                                            ⚠️ البونص الحالي ({formatCurrency(bonusAmount)}) يتجاوز الحد المسموح!
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
                             {/* Category Breakdown */}
                             {useCategoryBonus && Object.keys(teamSalesData.byCategorySales || {}).length > 0 && (
                                 <div className="space-y-2">
@@ -599,6 +917,11 @@ const SupervisorBonus = () => {
                                             محسوب من نسب الأقسام المختلفة
                                         </p>
                                     )}
+                                    {manualAmount > 0 && (
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            ({formatCurrency(calculatedBonusFromPercentage)} من النسبة + {formatCurrency(manualAmount)} مبلغ يدوي)
+                                        </p>
+                                    )}
                                 </div>
                             )}
 
@@ -615,7 +938,7 @@ const SupervisorBonus = () => {
                             {/* Submit Button */}
                             <Button
                                 onClick={handleApplyBonus}
-                                disabled={isLoading || teamSalesData.total <= 0}
+                                disabled={isLoading || teamSalesData.total <= 0 || exceedsDepositCap}
                                 className="w-full"
                                 size="lg"
                             >
@@ -643,7 +966,7 @@ const SupervisorBonus = () => {
                                     {pagination.paginatedItems.map((bonus) => (
                                         <Card key={bonus.id} className="p-4">
                                             <div className="flex justify-between items-start">
-                                                <div>
+                                                <div className="flex-1">
                                                     <p className="font-bold text-lg">{bonus.supervisorName}</p>
                                                     <p className="text-sm text-muted-foreground">
                                                         الفترة: {formatDate(bonus.periodStart)} - {formatDate(bonus.periodEnd)}
@@ -654,17 +977,56 @@ const SupervisorBonus = () => {
                                                     <p className="text-sm text-muted-foreground">
                                                         المندوبين: {bonus.salesReps.map(r => r.name).join("، ")}
                                                     </p>
+                                                    {bonus.manualBonusAmount && bonus.manualBonusAmount > 0 && (
+                                                        <p className="text-sm text-blue-600">
+                                                            يشمل مبلغ يدوي: {formatCurrency(bonus.manualBonusAmount)}
+                                                        </p>
+                                                    )}
+                                                    {bonus.totalDeposits && bonus.totalDeposits > 0 && (
+                                                        <p className="text-sm text-muted-foreground">
+                                                            إيداعات الفريق: {formatCurrency(bonus.totalDeposits)}
+                                                        </p>
+                                                    )}
                                                     {bonus.notes && (
                                                         <p className="text-sm text-muted-foreground mt-1">
                                                             {bonus.notes}
                                                         </p>
                                                     )}
                                                 </div>
-                                                <div className="text-left">
+                                                <div className="text-left space-y-2">
                                                     <p className="text-xl font-bold text-green-600">
                                                         {formatCurrency(bonus.bonusAmount)}
                                                     </p>
                                                     <Badge variant="outline">{bonus.bonusPercentage}%</Badge>
+                                                    <div className="flex gap-1 mt-2">
+                                                        <Button
+                                                            size="icon"
+                                                            variant="ghost"
+                                                            className="h-8 w-8"
+                                                            onClick={() => openEditDialog(bonus)}
+                                                            title="تعديل"
+                                                        >
+                                                            <Pencil className="h-4 w-4 text-blue-500" />
+                                                        </Button>
+                                                        <Button
+                                                            size="icon"
+                                                            variant="ghost"
+                                                            className="h-8 w-8"
+                                                            onClick={() => handlePrintReport(bonus)}
+                                                            title="طباعة تقرير"
+                                                        >
+                                                            <Printer className="h-4 w-4 text-gray-600" />
+                                                        </Button>
+                                                        <Button
+                                                            size="icon"
+                                                            variant="ghost"
+                                                            className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                                            onClick={() => setDeleteConfirmDialog(bonus.id)}
+                                                            title="حذف"
+                                                        >
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </Card>
@@ -675,6 +1037,97 @@ const SupervisorBonus = () => {
                         </CardContent>
                     </Card>
                 </div>
+
+                {/* Edit Dialog */}
+                <Dialog open={editDialog} onOpenChange={(open) => { if (!open) { setEditDialog(false); setEditingBonus(null); } }}>
+                    <DialogContent dir="rtl">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2">
+                                <Pencil className="h-5 w-5 text-blue-500" />
+                                تعديل البونص - {editingBonus?.supervisorName}
+                            </DialogTitle>
+                            <DialogDescription>
+                                الفترة: {editingBonus && formatDate(editingBonus.periodStart)} - {editingBonus && formatDate(editingBonus.periodEnd)}
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4 py-4">
+                            <div className="p-3 bg-muted rounded-lg text-sm space-y-1">
+                                <p>إجمالي المبيعات: <strong>{editingBonus && formatCurrency(editingBonus.totalTeamSales)}</strong></p>
+                                <p>بونص النسبة: <strong>{editingBonus && formatCurrency(editingBonus.bonusAmount - (editingBonus.manualBonusAmount || 0))}</strong></p>
+                                {editingBonus?.totalDeposits && editingBonus.totalDeposits > 0 && (
+                                    <p>الحد الأقصى (10% من الإيداعات): <strong>{formatCurrency(editingBonus.totalDeposits * 0.10)}</strong></p>
+                                )}
+                            </div>
+                            <div className="space-y-2">
+                                <Label>مبلغ يدوي إضافي</Label>
+                                <Input
+                                    type="number"
+                                    min="0"
+                                    value={editManualAmount}
+                                    onChange={(e) => setEditManualAmount(e.target.value)}
+                                    placeholder="0"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>ملاحظات</Label>
+                                <Textarea
+                                    value={editNotes}
+                                    onChange={(e) => setEditNotes(e.target.value)}
+                                    placeholder="ملاحظات..."
+                                />
+                            </div>
+                            {editingBonus && (
+                                <div className="p-3 bg-green-50 dark:bg-green-950 rounded-lg">
+                                    <p className="font-semibold text-green-700 dark:text-green-400">
+                                        البونص الجديد: {formatCurrency(
+                                            (editingBonus.bonusAmount - (editingBonus.manualBonusAmount || 0)) + (parseFloat(editManualAmount) || 0)
+                                        )}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                        <DialogFooter className="gap-2">
+                            <Button variant="outline" onClick={() => { setEditDialog(false); setEditingBonus(null); }}>
+                                إلغاء
+                            </Button>
+                            <Button onClick={handleSaveEdit}>
+                                <Pencil className="h-4 w-4 ml-2" />
+                                حفظ التعديلات
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                {/* Delete Confirmation Dialog */}
+                <Dialog open={!!deleteConfirmDialog} onOpenChange={() => setDeleteConfirmDialog(null)}>
+                    <DialogContent dir="rtl">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2 text-red-600">
+                                <Trash2 className="h-5 w-5" />
+                                حذف البونص؟
+                            </DialogTitle>
+                        </DialogHeader>
+                        <p className="text-center py-4">
+                            هل أنت متأكد من حذف هذا البونص؟
+                            <br />
+                            <span className="text-muted-foreground text-sm">
+                                لا يمكن التراجع عن هذا الإجراء
+                            </span>
+                        </p>
+                        <DialogFooter className="gap-2">
+                            <Button variant="outline" onClick={() => setDeleteConfirmDialog(null)}>
+                                لا، إلغاء
+                            </Button>
+                            <Button
+                                variant="destructive"
+                                onClick={() => deleteConfirmDialog && handleDeleteBonus(deleteConfirmDialog)}
+                            >
+                                <Trash2 className="h-4 w-4 ml-2" />
+                                نعم، احذف
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
             </div>
         </div>
     );

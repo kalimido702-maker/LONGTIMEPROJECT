@@ -43,6 +43,7 @@ export interface WhatsAppCampaign {
   name: string;
   accountId: string;
   template: string;
+  templateId?: string;
   variables: string[];
   targetType: "credit" | "installment" | "all" | "custom";
   filters?: {
