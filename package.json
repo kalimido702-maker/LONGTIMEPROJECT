@@ -1,7 +1,7 @@
 {
   "name": "masr-pos-pro-custstom",
   "private": true,
-  "version": "6.4.0",
+  "version": "6.5.0",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -73,6 +73,7 @@
     "escpos": "^3.0.0-alpha.6",
     "escpos-usb": "^3.0.0-alpha.4",
     "events": "^3.3.0",
+    "googleapis": "^171.4.0",
     "html-to-image": "^1.11.13",
     "html2canvas": "^1.4.1",
     "idb": "^8.0.3",

@@ -14,6 +14,7 @@ interface BackupConfig {
     keepDays: number; // عدد أيام الاحتفاظ بالنسخ
     lastBackupAt?: string;
     backupPath?: string;
+    driveEnabled?: boolean; // تفعيل رفع على Google Drive
 }
 
 // سجل النسخ الاحتياطي
@@ -136,13 +137,52 @@ const createBackup = async (): Promise<BackupRecord | null> => {
         const size = blob.size;
 
         // في Electron، يمكن حفظ الملف على القرص
-        if (typeof window !== "undefined" && (window as any).electron) {
-            try {
-                const path = await (window as any).electron.saveBackup(filename, backupContent);
-                console.log("Backup saved to:", path);
-            } catch (e) {
-                console.log("Electron backup save failed, using browser download");
+        if (typeof window !== "undefined" && (window as any).electronAPI?.file?.saveToPath) {
+            const config = getBackupConfig();
+            if (config.backupPath) {
+                try {
+                    const fullPath = config.backupPath + "/" + filename;
+                    const result = await (window as any).electronAPI.file.saveToPath({
+                        filePath: fullPath,
+                        content: backupContent,
+                    });
+                    if (result.success) {
+                        console.log("Backup saved to:", result.filePath);
+                    } else {
+                        console.log("Save to path failed, using browser download");
+                        downloadBackup(blob, filename);
+                    }
+                } catch (e) {
+                    console.log("Electron backup save failed, using browser download");
+                    downloadBackup(blob, filename);
+                }
+            } else {
+                // لا يوجد مسار محدد — تحميل عادي
                 downloadBackup(blob, filename);
+            }
+
+            // رفع على Google Drive (جميع الحسابات المفعلة)
+            if ((window as any).electronAPI?.drive?.uploadToAll) {
+                try {
+                    const driveResult = await (window as any).electronAPI.drive.uploadToAll({
+                        filename,
+                        content: backupContent,
+                    });
+                    if (driveResult.success && driveResult.results?.length > 0) {
+                        const successCount = driveResult.results.filter((r: any) => r.success).length;
+                        const failCount = driveResult.results.filter((r: any) => !r.success).length;
+                        console.log(`Drive backup: ${successCount} succeeded, ${failCount} failed`);
+                        driveResult.results.forEach((r: any) => {
+                            if (r.success) {
+                                console.log(`  ✅ ${r.email}`);
+                            } else {
+                                console.log(`  ❌ ${r.email}: ${r.error}`);
+                            }
+                        });
+                    }
+                } catch (driveErr) {
+                    console.warn("Drive backup failed:", driveErr);
+                }
             }
         } else {
             // تحميل كملف في المتصفح

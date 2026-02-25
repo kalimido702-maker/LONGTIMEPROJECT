@@ -30,6 +30,11 @@ export default defineConfig(({ mode }) => {
                   /^diagnostics_channel/,
                   /^sonic-boom/,
                   /^thread-stream/,
+                  /^googleapis/, // Google APIs - too large to bundle
+                  "google-auth-library",
+                  "gaxios",
+                  "gtoken",
+                  "gcp-metadata",
                 ],
               },
             },

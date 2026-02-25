@@ -71,8 +71,8 @@ export default function Invoices() {
 
     // Filters
     const [searchQuery, setSearchQuery] = useState("");
-    const [dateFrom, setDateFrom] = useState("");
-    const [dateTo, setDateTo] = useState("");
+    const [dateFrom, setDateFrom] = useState(new Date().toISOString().split('T')[0]);
+    const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0]);
     const [paymentTypeFilter, setPaymentTypeFilter] = useState<string>("all");
     const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>("all");
 

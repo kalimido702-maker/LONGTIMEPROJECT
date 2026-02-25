@@ -520,17 +520,28 @@ async function sendMediaMessage(
     // Fetch media from URL with timeout
     let buffer: Buffer;
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      // Handle base64 data URLs directly (e.g., from PDF generator)
+      if (mediaUrl.startsWith("data:")) {
+        const base64Match = mediaUrl.match(/^data:[^;]+;base64,(.+)$/);
+        if (base64Match) {
+          buffer = Buffer.from(base64Match[1], "base64");
+          console.log(`[WhatsApp sendMedia] Decoded base64 data URL, size: ${buffer.length} bytes`);
+        } else {
+          throw new Error("Invalid data URL format");
+        }
+      } else {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-      const response = await fetch(mediaUrl, { signal: controller.signal });
-      clearTimeout(timeoutId);
+        const response = await fetch(mediaUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        throw new Error("Failed to fetch media");
+        if (!response.ok) {
+          throw new Error("Failed to fetch media");
+        }
+
+        buffer = Buffer.from(await response.arrayBuffer());
       }
-
-      buffer = Buffer.from(await response.arrayBuffer());
 
       // Check file size (max 16MB for WhatsApp)
       if (buffer.length > 16 * 1024 * 1024) {

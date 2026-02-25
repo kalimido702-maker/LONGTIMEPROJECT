@@ -330,6 +330,16 @@ const Settings = () => {
                 </div>
                 <div className="flex items-center gap-2">
                   <Switch
+                    id="auto-print-collection"
+                    checked={getValue("auto_print_collection_receipt", "true") !== "false"}
+                    onCheckedChange={(checked) =>
+                      handleChange("auto_print_collection_receipt", checked ? "true" : "false")
+                    }
+                  />
+                  <Label htmlFor="auto-print-collection">طباعة تلقائية لإيصال القبض</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
                     id="sound"
                     checked={getBoolValue("soundEnabled")}
                     onCheckedChange={(checked) =>

@@ -13,6 +13,7 @@ import {
   registerAutoUpdaterHandlers,
 } from "./handlers/autoUpdater.js";
 import { registerPrinterHandlers } from "./handlers/printerHandler.js";
+import { registerDriveHandlers, setDriveMainWindow } from "./handlers/driveHandler.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -140,11 +141,17 @@ if (!gotTheLock) {
     registerAutoUpdaterHandlers();
     // Register Printer IPC handlers
     registerPrinterHandlers();
+    // Register Google Drive IPC handlers
+    registerDriveHandlers();
     // Create main window
     createWindow();
     // Set main window reference for WhatsApp bot
     if (mainWindow) {
       setMainWindow(mainWindow);
+    }
+    // Set main window reference for Drive auth
+    if (mainWindow) {
+      setDriveMainWindow(mainWindow);
     }
     // Initialize auto-updater with main window (only in production)
     if (mainWindow) {
@@ -230,6 +237,45 @@ if (!gotTheLock) {
           success: false,
           error: error.message,
         };
+      }
+    }
+  );
+
+  // ==================== Select Folder ====================
+  ipcMain.handle("file:select-folder", async (_event, defaultPath?: string) => {
+    try {
+      if (!mainWindow) {
+        throw new Error("Main window not available");
+      }
+      const result = await dialog.showOpenDialog(mainWindow, {
+        defaultPath: defaultPath || app.getPath("documents"),
+        properties: ["openDirectory", "createDirectory"],
+        title: "اختر مجلد النسخ الاحتياطي",
+      });
+      if (result.canceled || !result.filePaths.length) {
+        return { success: false, canceled: true };
+      }
+      return { success: true, folderPath: result.filePaths[0] };
+    } catch (error: any) {
+      console.error("Select folder error:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // ==================== Save To Path ====================
+  ipcMain.handle(
+    "file:save-to-path",
+    async (_event, options: { filePath: string; content: string }) => {
+      try {
+        const dir = path.dirname(options.filePath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        fs.writeFileSync(options.filePath, options.content, "utf8");
+        return { success: true, filePath: options.filePath };
+      } catch (error: any) {
+        console.error("Save to path error:", error);
+        return { success: false, error: error.message };
       }
     }
   );

@@ -252,10 +252,11 @@ export async function generateAccountStatement(
                 break;
             case "bonus":
                 credit = Number(mov.data.bonusAmount || mov.data.amount) || 0;
-                movementType = "بونص";
+                movementType = "بونص/خصم";
                 movementId = mov.data.id;
-                notes = `بونص ${mov.data.bonusPercentage || 0}%`;
-                summary.totalPayments += credit; // Treat bonus as credit like payment
+                const bonusDate = mov.data.createdAt ? new Date(mov.data.createdAt).toLocaleDateString("ar-EG") : "";
+                notes = `بونص ${mov.data.bonusPercentage || 0}%${bonusDate ? ` (تسجيل: ${bonusDate})` : ""}`;
+                // البونص تنزل من الرصيد لكن لا تُحسب ضمن إجمالي المدفوعات
                 break;
         }
 

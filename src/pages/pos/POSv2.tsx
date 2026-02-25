@@ -118,6 +118,7 @@ const POSv2 = () => {
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>("");
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [highlightedProductIndex, setHighlightedProductIndex] = useState(-1);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
@@ -1782,19 +1783,46 @@ const POSv2 = () => {
                   <Input
                     ref={searchInputRef}
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setHighlightedProductIndex(-1);
+                    }}
                     onKeyDown={(e) => {
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setHighlightedProductIndex((prev) => {
+                          const max = Math.min(filteredProducts.length, 10) - 1;
+                          const next = prev < max ? prev + 1 : 0;
+                          setTimeout(() => {
+                            document.querySelector(`[data-product-index="${next}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+                          }, 0);
+                          return next;
+                        });
+                      }
+                      if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setHighlightedProductIndex((prev) => {
+                          const max = Math.min(filteredProducts.length, 10) - 1;
+                          const next = prev > 0 ? prev - 1 : max;
+                          setTimeout(() => {
+                            document.querySelector(`[data-product-index="${next}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+                          }, 0);
+                          return next;
+                        });
+                      }
                       if (e.key === "Enter") {
                         e.preventDefault();
-                        if (filteredProducts.length === 1) {
-                          addToCart(filteredProducts[0]);
-                        } else if (filteredProducts.length > 1) {
-                          // Open first product if multiple
+                        if (highlightedProductIndex >= 0 && highlightedProductIndex < filteredProducts.length) {
+                          addToCart(filteredProducts[highlightedProductIndex]);
+                          setSearchQuery("");
+                          setHighlightedProductIndex(-1);
+                        } else if (filteredProducts.length >= 1) {
                           addToCart(filteredProducts[0]);
                         }
                       }
                       if (e.key === "Escape") {
                         setSearchQuery("");
+                        setHighlightedProductIndex(-1);
                       }
                     }}
                     placeholder="ابحث بالاسم أو الكود أو الباركود..."
@@ -1807,12 +1835,14 @@ const POSv2 = () => {
                       {filteredProducts.slice(0, 10).map((product, index) => (
                         <div
                           key={product.id}
+                          data-product-index={index}
                           onClick={() => {
                             addToCart(product);
                             setSearchQuery("");
+                            setHighlightedProductIndex(-1);
                           }}
-                          className={`flex items-center gap-3 p-3 cursor-pointer hover:bg-muted/50 transition ${index !== 0 ? "border-t" : ""
-                            }`}
+                          className={`flex items-center gap-3 p-3 cursor-pointer transition ${index !== 0 ? "border-t" : ""
+                            } ${highlightedProductIndex === index ? "bg-primary/10 ring-1 ring-primary" : "hover:bg-muted/50"}`}
                         >
                           {/* Product Image */}
                           {product.imageUrl ? (
@@ -2096,6 +2126,7 @@ const POSv2 = () => {
                                   onSelect={() => {
                                     setSelectedCustomer(c.id);
                                     setCustomerSearchOpen(false);
+                                    setTimeout(() => searchInputRef.current?.focus(), 100);
                                   }}
                                 >
                                   <Check

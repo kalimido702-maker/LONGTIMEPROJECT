@@ -1304,7 +1304,11 @@ class WhatsAppService {
         if (!recipientTarget) continue;
 
         const pdfBlob = await generateStatementPDF((customer as any).id, fromDate, toDate);
-        if (!pdfBlob) continue;
+        if (!pdfBlob) {
+          console.warn(`⚠️ [Scheduler] PDF generation returned null for ${(customer as any).name}`);
+          continue;
+        }
+        console.log(`📄 [Scheduler] PDF generated for ${(customer as any).name}, size: ${pdfBlob.size} bytes`);
 
         const base64data = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();

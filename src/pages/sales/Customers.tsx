@@ -51,6 +51,7 @@ import {
 } from "@/lib/customerImport";
 import { usePagination } from "@/hooks/usePagination";
 import { DataPagination } from "@/components/ui/DataPagination";
+import { Switch } from "@/components/ui/switch";
 import { whatsappService } from "@/services/whatsapp/whatsappService";
 
 const Customers = () => {
@@ -69,6 +70,7 @@ const Customers = () => {
   const [salesReps, setSalesReps] = useState<SalesRep[]>([]);
   const [filterBySalesRep, setFilterBySalesRep] = useState<string>("all");
   const [filterBySupervisor, setFilterBySupervisor] = useState<string>("all");
+  const [hideZeroBalance, setHideZeroBalance] = useState(true);
   const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
@@ -141,12 +143,15 @@ const Customers = () => {
         matchesSupervisor = !!rep && rep.supervisorId === filterBySupervisor;
       }
 
-      return matchesSearch && matchesSalesRep && matchesSupervisor;
+      // Filter by zero balance
+      const matchesBalance = !hideZeroBalance || getBalance(customer.id, Number(customer.currentBalance || 0)) !== 0;
+
+      return matchesSearch && matchesSalesRep && matchesSupervisor && matchesBalance;
     }
   );
 
   const pagination = usePagination(filteredCustomers, {
-    resetDeps: [searchQuery, filterBySalesRep, filterBySupervisor],
+    resetDeps: [searchQuery, filterBySalesRep, filterBySupervisor, hideZeroBalance],
   });
 
   const { getSetting } = useSettingsContext();
@@ -526,40 +531,7 @@ const Customers = () => {
               sheetName="العملاء"
             />
 
-            {/* أزرار استيراد العملاء */}
-            {can("customers", "create") && (
-              <>
-                <Button
-                  variant="outline"
-                  onClick={downloadCustomerImportTemplate}
-                >
-                  <Download className="ml-2 h-4 w-4" />
-                  تحميل نموذج الاستيراد
-                </Button>
-
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept=".xlsx,.xls"
-                  onChange={handleFileImport}
-                  className="hidden"
-                />
-                <Button
-                  variant="outline"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isImporting}
-                >
-                  {isImporting ? (
-                    <>جاري الاستيراد...</>
-                  ) : (
-                    <>
-                      <Upload className="ml-2 h-4 w-4" />
-                      استيراد عملاء
-                    </>
-                  )}
-                </Button>
-              </>
-            )}
+            {/* أزرار استيراد العملاء - تم إخفاؤها بناءً على طلب العميل */}
 
             {/* Dialog نتيجة الاستيراد */}
             <Dialog open={isImportResultOpen} onOpenChange={setIsImportResultOpen}>
@@ -941,6 +913,17 @@ const Customers = () => {
               ))}
             </SelectContent>
           </Select>
+          <div className="flex items-center gap-2 h-12 px-3 border rounded-md bg-background">
+            <Switch
+              dir="ltr"
+              id="hideZeroBalance"
+              checked={hideZeroBalance}
+              onCheckedChange={setHideZeroBalance}
+            />
+            <Label htmlFor="hideZeroBalance" className="text-sm whitespace-nowrap cursor-pointer">
+              إخفاء الأرصدة الصفرية
+            </Label>
+          </div>
         </div>
 
         {/* Customers Grid */}

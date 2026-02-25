@@ -63,6 +63,7 @@ import {
     Edit,
     ShieldAlert,
     MessageCircle,
+    Send,
 } from "lucide-react";
 import { db, Customer, PaymentMethod, SalesRep, Supervisor, Invoice } from "@/shared/lib/indexedDB";
 import { useSettingsContext } from "@/contexts/SettingsContext";
@@ -386,19 +387,25 @@ export default function Collections() {
         exportToExcel({
             title: "تقرير عمليات القبض",
             fileName: `تقرير_القبض_${filterDateFrom || 'all'}_${filterDateTo || 'all'}`,
-            data: filteredCollections.map((c) => ({
-                customerName: c.customerName,
-                date: new Date(c.createdAt).toLocaleDateString("ar-EG"),
-                amount: c.amount,
-                transactionId: c.id,
-                paymentMethod: c.paymentMethodName,
-                user: c.userName,
-                notes: c.notes || "",
-            })),
+            data: filteredCollections.map((c) => {
+                const customer = customers.find(cust => cust.id === c.customerId);
+                const customerBalance = customer ? getBalance(customer.id, Number(customer.currentBalance || 0)) : 0;
+                return {
+                    customerName: c.customerName,
+                    date: new Date(c.createdAt).toLocaleDateString("ar-EG"),
+                    amount: c.amount,
+                    customerBalance,
+                    transactionId: c.id,
+                    paymentMethod: c.paymentMethodName,
+                    user: c.userName,
+                    notes: c.notes || "",
+                };
+            }),
             columns: [
                 { header: "اسم العميل", dataKey: "customerName" },
                 { header: "التاريخ", dataKey: "date" },
                 { header: "المبلغ", dataKey: "amount" },
+                { header: "رصيد العميل الحالي", dataKey: "customerBalance" },
                 { header: "رقم العملية", dataKey: "transactionId" },
                 { header: "طريقة الدفع", dataKey: "paymentMethod" },
                 { header: "المستخدم", dataKey: "user" },
@@ -533,8 +540,11 @@ export default function Collections() {
                 `تم قبض ${amountValue.toFixed(2)} ${currency} من ${customer.name}`
             );
 
-            // Generate and print receipt
-            generateCollectionReceipt(paymentRecord, previousBalance, newBalance);
+            // Generate and print receipt (only if auto-print is enabled)
+            const autoPrintReceipt = getSetting("auto_print_collection_receipt") !== "false";
+            if (autoPrintReceipt) {
+                generateCollectionReceipt(paymentRecord, previousBalance, newBalance);
+            }
 
             // إعادة تعيين النموذج
             setSelectedCustomerId("");
@@ -1013,6 +1023,95 @@ export default function Collections() {
         }
     };
 
+    // إرسال تحصيلات اليوم عبر واتساب (مجمّعة لكل عميل)
+    const handleSendTodayCollectionsWhatsApp = async () => {
+        if (todayCollections.length === 0) {
+            toast.error("لا توجد تحصيلات اليوم");
+            return;
+        }
+
+        // البحث عن حساب واتساب نشط
+        const accounts = await db.getAll("whatsappAccounts");
+        const activeAccount = accounts.find((a: any) => a.isActive && a.status === "connected");
+        if (!activeAccount) {
+            toast.error("لا يوجد حساب واتساب متصل");
+            return;
+        }
+
+        const { whatsappService } = await import("@/services/whatsapp/whatsappService");
+
+        // تجميع التحصيلات حسب العميل
+        const byCustomer = new Map<string, CollectionRecord[]>();
+        for (const c of todayCollections) {
+            const list = byCustomer.get(c.customerId) || [];
+            list.push(c);
+            byCustomer.set(c.customerId, list);
+        }
+
+        let sentCount = 0;
+        let failCount = 0;
+        const fmtAmt = (v: number) => v % 1 !== 0 ? v.toFixed(2) : v.toLocaleString();
+        const todayStr = new Date().toLocaleDateString("ar-EG");
+
+        toast.info(`📤 جاري إرسال تحصيلات اليوم لـ ${byCustomer.size} عميل...`);
+
+        for (const [customerId, collections] of byCustomer) {
+            try {
+                const customer = await db.get<Customer>("customers", customerId);
+                if (!customer) continue;
+
+                const sendTarget = customer.collectionGroupId || customer.whatsappGroupId || customer.phone;
+                if (!sendTarget) continue;
+
+                const currentBalance = getBalance(customer.id, Number(customer.currentBalance || 0));
+                const totalCollected = collections.reduce((s, c) => s + Number(c.amount), 0);
+
+                let message = `💰 *ملخص تحصيلات اليوم*\n`;
+                message += `📅 *التاريخ:* ${todayStr}\n`;
+                message += `*العميل:* ${customer.name}\n\n`;
+
+                if (collections.length === 1) {
+                    message += `*المبلغ:* ${fmtAmt(totalCollected)} ${currency}\n`;
+                } else {
+                    collections.forEach((c, i) => {
+                        message += `${i + 1}. ${fmtAmt(Number(c.amount))} ${currency}`;
+                        if (c.notes) message += ` (${c.notes})`;
+                        message += `\n`;
+                    });
+                    message += `\n*الإجمالي:* ${fmtAmt(totalCollected)} ${currency}\n`;
+                }
+
+                message += `*الرصيد الحالي:* ${fmtAmt(currentBalance)} ${currency}\n\n`;
+                message += `شكراً لتعاملكم معنا 🙏`;
+
+                const phone = (customer.phone || "").replace(/[^0-9]/g, "");
+                const targetNumber = customer.collectionGroupId || customer.whatsappGroupId || phone;
+
+                await whatsappService.sendMessage(
+                    (activeAccount as any).id,
+                    targetNumber,
+                    message,
+                    undefined,
+                    { customerId: customer.id, type: "payment_receipt" }
+                );
+
+                sentCount++;
+                // تأخير بسيط بين الرسائل
+                await new Promise((r) => setTimeout(r, 1000));
+            } catch (error) {
+                console.error(`Failed to send collections for customer ${customerId}:`, error);
+                failCount++;
+            }
+        }
+
+        if (sentCount > 0) {
+            toast.success(`✅ تم إرسال تحصيلات اليوم لـ ${sentCount} عميل`);
+        }
+        if (failCount > 0) {
+            toast.error(`❌ فشل الإرسال لـ ${failCount} عميل`);
+        }
+    };
+
     // الحصول على آخر فاتورة للعميل
     const getLastInvoiceAmount = (customerId: string): number | null => {
         const customerInvoices = allInvoices
@@ -1303,14 +1402,24 @@ export default function Collections() {
                             </div>
                             <div className="space-y-2">
                                 <Label>تصدير</Label>
-                                <Button
-                                    variant="outline"
-                                    onClick={handleExportToExcel}
-                                    className="h-10 gap-2"
-                                >
-                                    <FileSpreadsheet className="h-4 w-4" />
-                                    تصدير Excel
-                                </Button>
+                                <div className="flex gap-2">
+                                    <Button
+                                        variant="outline"
+                                        onClick={handleExportToExcel}
+                                        className="h-10 gap-2"
+                                    >
+                                        <FileSpreadsheet className="h-4 w-4" />
+                                        تصدير Excel
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        onClick={handleSendTodayCollectionsWhatsApp}
+                                        className="h-10 gap-2 text-green-600 border-green-300 hover:bg-green-50"
+                                    >
+                                        <Send className="h-4 w-4" />
+                                        إرسال تحصيلات اليوم
+                                    </Button>
+                                </div>
                             </div>
                         </div>
                     </Card>
@@ -1384,6 +1493,30 @@ export default function Collections() {
                         </h2>
 
                         <form onSubmit={handleSubmit} className="space-y-4">
+                            {/* المبلغ */}
+                            <div className="space-y-2">
+                                <Label>المبلغ *</Label>
+                                <Input
+                                    ref={amountInputRef}
+                                    type="number"
+                                    value={amount}
+                                    onChange={(e) => setAmount(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                            e.preventDefault();
+                                            if (!selectedCustomerId) {
+                                                setCustomerSearchOpen(true);
+                                            } else if (selectedCustomerId && amount) {
+                                                handleSubmit();
+                                            }
+                                        }
+                                    }}
+                                    placeholder="0.00"
+                                    className="h-14 text-2xl font-bold text-center"
+                                    autoFocus
+                                />
+                            </div>
+
                             {/* اختيار العميل */}
                             <div className="space-y-2">
                                 <Label>العميل *</Label>
@@ -1431,10 +1564,6 @@ export default function Collections() {
                                                             onSelect={() => {
                                                                 setSelectedCustomerId(customer.id);
                                                                 setCustomerSearchOpen(false);
-                                                                // التركيز على حقل المبلغ
-                                                                setTimeout(() => {
-                                                                    amountInputRef.current?.focus();
-                                                                }, 100);
                                                             }}
                                                         >
                                                             <Check
@@ -1467,20 +1596,6 @@ export default function Collections() {
                                         </Command>
                                     </PopoverContent>
                                 </Popover>
-                            </div>
-
-                            {/* المبلغ */}
-                            <div className="space-y-2">
-                                <Label>المبلغ *</Label>
-                                <Input
-                                    ref={amountInputRef}
-                                    type="number"
-                                    value={amount}
-                                    onChange={(e) => setAmount(e.target.value)}
-                                    onKeyDown={handleKeyDown}
-                                    placeholder="0.00"
-                                    className="h-14 text-2xl font-bold text-center"
-                                />
                                 {selectedCustomer && (
                                     <div className="flex gap-2">
                                         <Button

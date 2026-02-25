@@ -63,8 +63,15 @@ export function SyncProgressBar() {
     });
     const [dismissed, setDismissed] = useState(false);
     const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const hasDataRef = useRef(false);
 
     const handleProgress = useCallback((event: SyncProgressEvent) => {
+        // Only show the bar when there's actual data being synced
+        if (event.recordCount && event.recordCount > 0) {
+            hasDataRef.current = true;
+        }
+        if (!hasDataRef.current) return;
+
         setDismissed(false);
         // Clear any pending hide timer
         if (hideTimerRef.current) {
@@ -97,43 +104,33 @@ export function SyncProgressBar() {
 
     const handleStatusChange = useCallback((status: string) => {
         if (status === 'pulling') {
-            setDismissed(false);
-            if (hideTimerRef.current) {
-                clearTimeout(hideTimerRef.current);
-                hideTimerRef.current = null;
-            }
-            setState(prev => ({
-                ...prev,
-                phase: 'pulling',
-                message: 'جاري الاتصال بالسيرفر...',
-            }));
+            // Reset data flag at start of sync cycle
+            hasDataRef.current = false;
+            // Don't show bar yet - wait for actual progress with records
         } else if (status === 'pushing') {
-            setDismissed(false);
-            if (hideTimerRef.current) {
-                clearTimeout(hideTimerRef.current);
-                hideTimerRef.current = null;
-            }
-            setState(prev => ({
-                ...prev,
-                phase: 'pushing',
-                message: 'جاري رفع البيانات...',
-            }));
+            // Don't show bar yet - wait for actual progress with records
         } else if (status === 'idle' || status === 'offline') {
-            // Show "done" for a moment then hide
-            setState(prev => {
-                if (prev.phase === 'pulling' || prev.phase === 'pushing' || prev.phase === 'processing') {
-                    return {
-                        ...prev,
-                        phase: 'done',
-                        message: `تمت المزامنة بنجاح${prev.recordCount > 0 ? ` — ${prev.recordCount} سجل` : ''}`,
-                    };
-                }
-                return prev;
-            });
-            // Auto-hide after 3 seconds
-            hideTimerRef.current = setTimeout(() => {
+            // Only show "done" if actual data was synced
+            if (hasDataRef.current) {
+                setState(prev => {
+                    if (prev.phase === 'pulling' || prev.phase === 'pushing' || prev.phase === 'processing') {
+                        return {
+                            ...prev,
+                            phase: 'done',
+                            message: `تمت المزامنة بنجاح${prev.recordCount > 0 ? ` — ${prev.recordCount} سجل` : ''}`,
+                        };
+                    }
+                    return prev;
+                });
+                // Auto-hide after 3 seconds
+                hideTimerRef.current = setTimeout(() => {
+                    setState({ phase: 'idle', message: '', current: 0, total: 0, recordCount: 0 });
+                    hasDataRef.current = false;
+                }, 3000);
+            } else {
+                // No data was synced, just reset silently
                 setState({ phase: 'idle', message: '', current: 0, total: 0, recordCount: 0 });
-            }, 3000);
+            }
         } else if (status === 'error') {
             setState(prev => ({
                 ...prev,

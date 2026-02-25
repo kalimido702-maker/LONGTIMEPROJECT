@@ -86,6 +86,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
       filters?: any[];
       content: string;
     }) => ipcRenderer.invoke("file:save-dialog", options),
+    selectFolder: (defaultPath?: string) =>
+      ipcRenderer.invoke("file:select-folder", defaultPath),
+    saveToPath: (options: { filePath: string; content: string }) =>
+      ipcRenderer.invoke("file:save-to-path", options),
   },
 
   // Printer APIs
@@ -122,6 +126,28 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.removeAllListeners("auto-updater:update-downloaded");
       ipcRenderer.removeAllListeners("auto-updater:update-error");
     },
+  },
+
+  // Google Drive APIs
+  drive: {
+    saveCredentials: (credentials: { clientId: string; clientSecret: string }) =>
+      ipcRenderer.invoke("drive:save-credentials", credentials),
+    getCredentials: () =>
+      ipcRenderer.invoke("drive:get-credentials"),
+    authenticate: () =>
+      ipcRenderer.invoke("drive:authenticate"),
+    listAccounts: () =>
+      ipcRenderer.invoke("drive:list-accounts"),
+    toggleAccount: (accountId: string, enabled: boolean) =>
+      ipcRenderer.invoke("drive:toggle-account", accountId, enabled),
+    removeAccount: (accountId: string) =>
+      ipcRenderer.invoke("drive:remove-account", accountId),
+    uploadBackup: (options: { accountId: string; filename: string; content: string }) =>
+      ipcRenderer.invoke("drive:upload-backup", options),
+    uploadToAll: (options: { filename: string; content: string }) =>
+      ipcRenderer.invoke("drive:upload-to-all", options),
+    testConnection: (accountId: string) =>
+      ipcRenderer.invoke("drive:test-connection", accountId),
   },
 });
 
@@ -239,6 +265,20 @@ declare global {
           fileName?: string;
           error?: string;
         }>;
+        selectFolder: (defaultPath?: string) => Promise<{
+          success: boolean;
+          canceled?: boolean;
+          folderPath?: string;
+          error?: string;
+        }>;
+        saveToPath: (options: {
+          filePath: string;
+          content: string;
+        }) => Promise<{
+          success: boolean;
+          filePath?: string;
+          error?: string;
+        }>;
       };
       printer: {
         getPrinters: () => Promise<
@@ -267,6 +307,17 @@ declare global {
         onUpdateDownloaded: (callback: (info: { version: string; releaseDate: string }) => void) => void;
         onError: (callback: (error: { message: string }) => void) => void;
         removeAllListeners: () => void;
+      };
+      drive: {
+        saveCredentials: (credentials: { clientId: string; clientSecret: string }) => Promise<{ success: boolean; error?: string }>;
+        getCredentials: () => Promise<{ success: boolean; clientId?: string; clientSecret?: string; hasCredentials?: boolean; error?: string }>;
+        authenticate: () => Promise<{ success: boolean; account?: { id: string; email: string; enabled: boolean }; error?: string }>;
+        listAccounts: () => Promise<{ success: boolean; accounts: Array<{ id: string; email: string; enabled: boolean; lastUploadAt?: string }>; error?: string }>;
+        toggleAccount: (accountId: string, enabled: boolean) => Promise<{ success: boolean; error?: string }>;
+        removeAccount: (accountId: string) => Promise<{ success: boolean; error?: string }>;
+        uploadBackup: (options: { accountId: string; filename: string; content: string }) => Promise<{ success: boolean; fileId?: string; fileName?: string; error?: string }>;
+        uploadToAll: (options: { filename: string; content: string }) => Promise<{ success: boolean; results: Array<{ accountId: string; email: string; success: boolean; error?: string }>; error?: string }>;
+        testConnection: (accountId: string) => Promise<{ success: boolean; message?: string; error?: string }>;
       };
     };
   }
