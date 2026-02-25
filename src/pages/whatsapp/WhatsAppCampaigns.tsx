@@ -57,6 +57,8 @@ import {
   Smartphone,
   Calendar,
   FileText,
+  UserCheck,
+  UsersRound,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
@@ -188,6 +190,7 @@ const WhatsAppCampaigns = () => {
     accountId: "",
     template: "",
     targetType: "all" as "credit" | "installment" | "all" | "custom",
+    sendTo: "customer" as "customer" | "salesRep" | "both",
     minAmount: "",
     maxAmount: "",
     class: "all",
@@ -211,6 +214,7 @@ const WhatsAppCampaigns = () => {
     newCampaign.class,
     newCampaign.supervisorId,
     newCampaign.salesRepId,
+    newCampaign.sendTo,
     customers,
   ]);
 
@@ -284,7 +288,29 @@ const WhatsAppCampaigns = () => {
       filtered = filtered.filter((c: any) => c.salesRepId === newCampaign.salesRepId);
     }
 
-    filtered = filtered.filter((c: any) => c.phone || c.whatsappGroupId || c.invoiceGroupId || c.collectionGroupId);
+    // Filter based on sendTo - ensure recipients have reachable target
+    if (newCampaign.sendTo === "customer") {
+      filtered = filtered.filter((c: any) => c.phone || c.whatsappGroupId || c.invoiceGroupId || c.collectionGroupId);
+    } else if (newCampaign.sendTo === "salesRep") {
+      // Only include customers whose sales rep has a phone/group
+      filtered = filtered.filter((c: any) => {
+        if (!c.salesRepId) return false;
+        const rep = salesReps.find(r => r.id === c.salesRepId);
+        return rep && (rep.phone || rep.whatsappGroupId);
+      });
+    } else {
+      // "both" - include if either customer or their rep has a reachable target
+      filtered = filtered.filter((c: any) => {
+        const customerReachable = c.phone || c.whatsappGroupId || c.invoiceGroupId || c.collectionGroupId;
+        let repReachable = false;
+        if (c.salesRepId) {
+          const rep = salesReps.find(r => r.id === c.salesRepId);
+          repReachable = !!(rep && (rep.phone || rep.whatsappGroupId));
+        }
+        return customerReachable || repReachable;
+      });
+    }
+
     setRecipientCount(filtered.length);
   };
 
@@ -349,6 +375,7 @@ const WhatsAppCampaigns = () => {
         templateId: selectedTemplate || undefined,
         variables,
         targetType: newCampaign.targetType,
+        sendTo: newCampaign.sendTo,
         filters: {
           minAmount: newCampaign.minAmount
             ? parseFloat(newCampaign.minAmount)
@@ -394,6 +421,7 @@ const WhatsAppCampaigns = () => {
       accountId: "",
       template: "",
       targetType: "all",
+      sendTo: "customer",
       minAmount: "",
       maxAmount: "",
       class: "all",
@@ -933,6 +961,43 @@ const WhatsAppCampaigns = () => {
                             setNewCampaign({
                               ...newCampaign,
                               targetType: option.value as any,
+                            })
+                          }
+                        >
+                          <div className="flex flex-col items-center gap-2 text-center">
+                            <Icon className="h-8 w-8 text-primary" />
+                            <span className="font-medium">{option.label}</span>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* اختيار مستلم الرسالة */}
+                <div>
+                  <Label className="text-base font-bold mb-2 block">
+                    إرسال الرسالة إلى
+                  </Label>
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { value: "customer", label: "العميل فقط", icon: Users },
+                      { value: "salesRep", label: "المندوب فقط", icon: UserCheck },
+                      { value: "both", label: "العميل والمندوب", icon: UsersRound },
+                    ].map((option) => {
+                      const Icon = option.icon;
+                      return (
+                        <Card
+                          key={option.value}
+                          className={`cursor-pointer transition-all p-4 ${
+                            newCampaign.sendTo === option.value
+                              ? "ring-2 ring-primary bg-primary/5"
+                              : "hover:bg-muted"
+                          }`}
+                          onClick={() =>
+                            setNewCampaign({
+                              ...newCampaign,
+                              sendTo: option.value as any,
                             })
                           }
                         >

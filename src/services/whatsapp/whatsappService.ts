@@ -113,6 +113,7 @@ export interface Campaign {
   templateId?: string;
   variables: string[]; // e.g., ["customerName", "amount", "dueDate"]
   targetType: "credit" | "installment" | "all" | "custom";
+  sendTo?: "customer" | "salesRep" | "both"; // من يستلم الرسالة
   filters?: {
     minAmount?: number;
     maxAmount?: number;
@@ -151,6 +152,7 @@ class WhatsAppService {
   private isProcessing: boolean = false;
   private isOnline: boolean = navigator.onLine;
   private processingInterval?: any;
+  private schedulerInterval?: any;
 
   constructor() {
     this.setupNetworkListener();
@@ -158,6 +160,8 @@ class WhatsAppService {
     this.startQueueProcessor();
     // إعادة ربط الحسابات المتصلة تلقائياً عند بدء التطبيق
     this.autoReconnectAccounts();
+    // بدء مراقبة الجدولة التلقائية
+    this.startScheduleChecker();
   }
 
   /**
@@ -560,6 +564,7 @@ class WhatsAppService {
 
     // Load recipients based on filters
     const recipients = await this.loadCampaignRecipients(campaign);
+    const salesRepsMap = await this.loadSalesRepsMap();
 
     for (let i = 0; i < recipients.length; i++) {
       if (!this.isOnline) {
@@ -574,18 +579,22 @@ class WhatsAppService {
         recipient
       );
 
-      const recipientTarget = recipient.whatsappGroupId || recipient.phone;
-      await this.sendMessage(
-        campaign.accountId,
-        recipientTarget,
-        message,
-        undefined,
-        {
-          campaignId,
-          customerId: recipient.id,
-          type: "campaign",
-        }
-      );
+      // Resolve send targets based on sendTo setting
+      const targets = this.resolveSendTargets(recipient, campaign.sendTo || "customer", salesRepsMap);
+
+      for (const target of targets) {
+        await this.sendMessage(
+          campaign.accountId,
+          target,
+          message,
+          undefined,
+          {
+            campaignId,
+            customerId: recipient.id,
+            type: "campaign",
+          }
+        );
+      }
 
       // Update task progress
       taskState.currentIndex = i + 1;
@@ -625,6 +634,7 @@ class WhatsAppService {
     await db.add("whatsappTasks", taskState);
 
     const recipients = await this.loadCampaignRecipients(campaign);
+    const salesRepsMap = await this.loadSalesRepsMap();
 
     // Dynamically import the PDF generator
     const { generateStatementPDF } = await import("@/services/statementPdfService");
@@ -640,9 +650,11 @@ class WhatsAppService {
       }
 
       const recipient = recipients[i];
-      const recipientTarget = recipient.collectionGroupId || recipient.whatsappGroupId || recipient.phone;
 
-      if (!recipientTarget) {
+      // Resolve send targets based on sendTo setting
+      const targets = this.resolveSendTargets(recipient, campaign.sendTo || "customer", salesRepsMap);
+
+      if (targets.length === 0) {
         campaign.failedCount++;
         await db.update("whatsappCampaigns", campaign);
         continue;
@@ -674,22 +686,25 @@ class WhatsAppService {
           recipient
         );
 
-        await this.sendMessage(
-          campaign.accountId,
-          recipientTarget,
-          caption,
-          {
-            type: "document",
-            url: base64data,
-            caption: caption,
-            filename: `كشف حساب ${recipient.name || "عميل"}.pdf`,
-          },
-          {
-            campaignId,
-            customerId: recipient.id,
-            type: "statement",
-          }
-        );
+        // Send to all resolved targets
+        for (const target of targets) {
+          await this.sendMessage(
+            campaign.accountId,
+            target,
+            caption,
+            {
+              type: "document",
+              url: base64data,
+              caption: caption,
+              filename: `كشف حساب ${recipient.name || "عميل"}.pdf`,
+            },
+            {
+              campaignId,
+              customerId: recipient.id,
+              type: "statement",
+            }
+          );
+        }
 
         campaign.sentCount++;
       } catch (error) {
@@ -1119,10 +1134,248 @@ class WhatsAppService {
     });
   }
 
+  /**
+   * Resolve send targets based on sendTo configuration
+   * @returns array of phone/JID strings to send to
+   */
+  private resolveSendTargets(
+    customer: any,
+    sendTo: "customer" | "salesRep" | "both",
+    salesRepsMap: Map<string, any>
+  ): string[] {
+    const targets: string[] = [];
+
+    // Customer target
+    if (sendTo === "customer" || sendTo === "both") {
+      const customerTarget = customer.collectionGroupId || customer.whatsappGroupId || customer.phone;
+      if (customerTarget) targets.push(customerTarget);
+    }
+
+    // Sales rep target
+    if (sendTo === "salesRep" || sendTo === "both") {
+      if (customer.salesRepId) {
+        const rep = salesRepsMap.get(customer.salesRepId);
+        if (rep) {
+          const repTarget = rep.whatsappGroupId || rep.phone;
+          if (repTarget && !targets.includes(repTarget)) {
+            targets.push(repTarget);
+          }
+        }
+      }
+    }
+
+    return targets;
+  }
+
+  /**
+   * Load sales reps into a Map for quick lookup
+   */
+  private async loadSalesRepsMap(): Promise<Map<string, any>> {
+    const reps = await db.getAll("salesReps");
+    const map = new Map<string, any>();
+    reps.forEach((r: any) => map.set(r.id, r));
+    return map;
+  }
+
+  /**
+   * Start checking scheduled statements every 60 seconds
+   */
+  private startScheduleChecker() {
+    // Initial check after 10 seconds (give time for WhatsApp to connect)
+    setTimeout(() => this.checkScheduledStatements(), 10000);
+
+    // Then check every 60 seconds
+    this.schedulerInterval = setInterval(() => {
+      this.checkScheduledStatements();
+    }, 60 * 1000);
+  }
+
+  /**
+   * Check and execute scheduled statements that are due
+   */
+  private async checkScheduledStatements() {
+    try {
+      const saved = localStorage.getItem("scheduledStatements");
+      if (!saved) return;
+
+      const statements = JSON.parse(saved);
+      if (!Array.isArray(statements) || statements.length === 0) return;
+
+      const now = new Date();
+      const currentHour = now.getHours();
+      const currentMinute = now.getMinutes();
+      const currentDay = now.getDay(); // 0=Sunday
+      const currentDate = now.getDate(); // 1-31
+      const currentTimeStr = `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`;
+
+      for (const statement of statements) {
+        if (!statement.isActive) continue;
+
+        // Check if already ran in the last 2 hours (prevent double execution)
+        if (statement.lastRunAt) {
+          const lastRun = new Date(statement.lastRunAt);
+          const hoursSinceLastRun = (now.getTime() - lastRun.getTime()) / (1000 * 60 * 60);
+          if (hoursSinceLastRun < 2) continue;
+        }
+
+        // Check if it's the right time (within 1-minute window)
+        if (statement.scheduleTime !== currentTimeStr) continue;
+
+        // Check schedule type
+        let shouldRun = false;
+
+        if (statement.scheduleType === "daily") {
+          shouldRun = true;
+        } else if (statement.scheduleType === "weekly") {
+          shouldRun = (statement.scheduleDay === currentDay);
+        } else if (statement.scheduleType === "monthly") {
+          shouldRun = (statement.scheduleDay === currentDate);
+        }
+
+        if (!shouldRun) continue;
+
+        console.log(`📅 [Scheduler] Running scheduled statement: ${statement.name}`);
+
+        try {
+          await this.executeScheduledStatement(statement);
+
+          // Update lastRunAt
+          statement.lastRunAt = now.toISOString();
+
+          // Calculate next run
+          statement.nextRunAt = this.calculateNextRun(statement);
+
+          // Save back to localStorage
+          localStorage.setItem("scheduledStatements", JSON.stringify(statements));
+
+          console.log(`✅ [Scheduler] Completed: ${statement.name}`);
+        } catch (error) {
+          console.error(`❌ [Scheduler] Failed: ${statement.name}`, error);
+        }
+      }
+    } catch (error) {
+      console.error("❌ [Scheduler] Error checking scheduled statements:", error);
+    }
+  }
+
+  /**
+   * Execute a scheduled statement - send PDF statements to all customers with balance
+   */
+  private async executeScheduledStatement(statement: any) {
+    // Get active WhatsApp account
+    const accounts = await db.getAll<WhatsAppAccount>("whatsappAccounts");
+    const activeAccount = accounts.find(a => a.isActive && a.status === "connected");
+
+    if (!activeAccount) {
+      console.warn("⚠️ [Scheduler] No active WhatsApp account");
+      return;
+    }
+
+    const accountId = statement.accountId !== "default" ? statement.accountId : activeAccount.id;
+
+    // Get all customers with balance > 0
+    const allCustomers = await db.getAll("customers");
+    let recipients = allCustomers.filter((c: any) =>
+      (Number(c.currentBalance) || 0) > 0 &&
+      (c.phone || c.whatsappGroupId || c.collectionGroupId)
+    );
+
+    // If targetIds specified, filter to those
+    if (statement.targetIds && statement.targetIds.length > 0) {
+      const targetSet = new Set(statement.targetIds);
+      recipients = recipients.filter((c: any) => targetSet.has(c.id));
+    }
+
+    if (recipients.length === 0) {
+      console.log("📭 [Scheduler] No recipients with balance");
+      return;
+    }
+
+    console.log(`📤 [Scheduler] Sending statements to ${recipients.length} customers`);
+
+    // Dynamically import the PDF generator
+    const { generateStatementPDF } = await import("@/services/statementPdfService");
+    const fromDate = new Date(new Date().getFullYear(), 0, 1);
+    const toDate = new Date();
+
+    for (const customer of recipients) {
+      try {
+        const recipientTarget = (customer as any).collectionGroupId || (customer as any).whatsappGroupId || (customer as any).phone;
+        if (!recipientTarget) continue;
+
+        const pdfBlob = await generateStatementPDF((customer as any).id, fromDate, toDate);
+        if (!pdfBlob) continue;
+
+        const base64data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(pdfBlob);
+        });
+
+        // Fill template
+        let message = statement.template || "كشف حساب";
+        message = message.replace(/{customer_name}/g, (customer as any).name || "");
+        message = message.replace(/{balance}/g, String(Number((customer as any).currentBalance) || 0));
+        message = message.replace(/{date_from}/g, fromDate.toLocaleDateString("ar-EG"));
+        message = message.replace(/{date_to}/g, toDate.toLocaleDateString("ar-EG"));
+
+        await this.sendMessage(
+          accountId,
+          recipientTarget,
+          message,
+          {
+            type: "document",
+            url: base64data,
+            caption: message,
+            filename: `كشف حساب ${(customer as any).name || "عميل"}.pdf`,
+          },
+          {
+            customerId: (customer as any).id,
+            type: "statement",
+          }
+        );
+
+        // Delay between sends
+        await this.delay(3000);
+      } catch (error) {
+        console.error(`❌ [Scheduler] Failed for ${(customer as any).name}:`, error);
+      }
+    }
+  }
+
+  /**
+   * Calculate next run time for a scheduled statement
+   */
+  private calculateNextRun(statement: any): string {
+    const now = new Date();
+    const [hours, minutes] = (statement.scheduleTime || "09:00").split(":").map(Number);
+    const next = new Date(now);
+    next.setHours(hours, minutes, 0, 0);
+
+    if (statement.scheduleType === "daily") {
+      next.setDate(next.getDate() + 1);
+    } else if (statement.scheduleType === "weekly") {
+      const targetDay = statement.scheduleDay || 0;
+      let daysUntil = targetDay - now.getDay();
+      if (daysUntil <= 0) daysUntil += 7;
+      next.setDate(next.getDate() + daysUntil);
+    } else if (statement.scheduleType === "monthly") {
+      const targetDate = statement.scheduleDay || 1;
+      next.setMonth(next.getMonth() + 1);
+      next.setDate(targetDate);
+    }
+
+    return next.toISOString();
+  }
+
   // Cleanup
   cleanup(): void {
     if (this.processingInterval) {
       clearInterval(this.processingInterval);
+    }
+    if (this.schedulerInterval) {
+      clearInterval(this.schedulerInterval);
     }
     // Sockets are managed in Electron main process
   }
