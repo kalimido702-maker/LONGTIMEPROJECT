@@ -120,6 +120,12 @@ function setupEventHandlers() {
             return;
         }
 
+        // Ignore YAML parse errors - usually caused by ISP redirect (e.g. quota page HTML instead of YAML)
+        if (error.message.includes("Cannot parse update info") || error.message.includes("YAMLException")) {
+            console.warn("[AutoUpdater] Update check returned invalid response (likely ISP redirect):", error.message.substring(0, 200));
+            return;
+        }
+
         console.error("[AutoUpdater] Error:", error);
         sendToRenderer("update-error", {
             message: error.message,

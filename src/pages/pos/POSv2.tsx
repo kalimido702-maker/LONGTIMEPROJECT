@@ -1940,8 +1940,8 @@ const POSv2 = () => {
                   <table className="w-full text-sm">
                     <thead className="bg-muted/50 sticky top-0">
                       <tr className="border-b">
-                        <th className="text-right p-2">المنتج</th>
                         <th className="text-center p-2 w-28">الكمية</th>
+                        <th className="text-right p-2">المنتج</th>
                         <th className="text-center p-2 w-24">السعر</th>
                         <th className="text-right p-2 w-24">المجموع</th>
                         <th className="w-8"></th>
@@ -1953,29 +1953,6 @@ const POSv2 = () => {
                           key={`${item.id}-${item.productUnitId || "base"}-${index}`}
                           className={`border-b hover:bg-muted/30 ${item.isPriceVerified === false && mode === "return" ? "bg-amber-50" : ""}`}
                         >
-                          <td className="p-2">
-                            <div className="font-bold text-xs flex items-center gap-1">
-                              {item.nameAr}
-                              {item.isPriceVerified === false && mode === "return" && (
-                                <div className="text-[10px] text-amber-600 bg-amber-100 px-1 rounded border border-amber-200" title="لم يتم شراء هذا المنتج من قبل من هذا العميل">
-                                  ! لم يُشترى
-                                </div>
-                              )}
-                            </div>
-                            {item.selectedUnitName && (
-                              <div className="text-[10px] text-muted-foreground flex items-center gap-1">
-                                <Badge variant="secondary" className="text-[9px] h-4 px-1">
-                                  {item.selectedUnitName}
-                                </Badge>
-                                {item.conversionFactor && item.conversionFactor > 1 && (
-                                  <span>({item.conversionFactor} قطعة)</span>
-                                )}
-                              </div>
-                            )}
-                            {!item.selectedUnitName && item.unitName && (
-                              <div className="text-[10px] text-muted-foreground">{item.unitName}</div>
-                            )}
-                          </td>
                           <td className="p-2">
                             <div className="flex items-center justify-center gap-1">
                               <Button
@@ -2002,6 +1979,29 @@ const POSv2 = () => {
                                 <Plus className="h-3 w-3" />
                               </Button>
                             </div>
+                          </td>
+                          <td className="p-2">
+                            <div className="font-bold text-xs flex items-center gap-1">
+                              {item.nameAr}
+                              {item.isPriceVerified === false && mode === "return" && (
+                                <div className="text-[10px] text-amber-600 bg-amber-100 px-1 rounded border border-amber-200" title="لم يتم شراء هذا المنتج من قبل من هذا العميل">
+                                  ! لم يُشترى
+                                </div>
+                              )}
+                            </div>
+                            {item.selectedUnitName && (
+                              <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                <Badge variant="secondary" className="text-[9px] h-4 px-1">
+                                  {item.selectedUnitName}
+                                </Badge>
+                                {item.conversionFactor && item.conversionFactor > 1 && (
+                                  <span>({item.conversionFactor} قطعة)</span>
+                                )}
+                              </div>
+                            )}
+                            {!item.selectedUnitName && item.unitName && (
+                              <div className="text-[10px] text-muted-foreground">{item.unitName}</div>
+                            )}
                           </td>
                           <td className="p-2">
                             <Input

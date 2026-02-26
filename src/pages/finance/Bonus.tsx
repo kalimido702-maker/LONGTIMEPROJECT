@@ -91,6 +91,7 @@ export default function Bonus() {
     const [isLoading, setIsLoading] = useState(false);
     const [editingBonus, setEditingBonus] = useState<BonusRecord | null>(null);
     const [bonusType, setBonusType] = useState<'bonus' | 'discount'>('bonus');
+    const [bonusDate, setBonusDate] = useState<string>(new Date().toISOString().split('T')[0]);
     const { getBalance, refresh: refreshBalances } = useCustomerBalances([customers]);
 
     // الفترة الزمنية
@@ -267,11 +268,12 @@ export default function Bonus() {
                 const updatedBonus: BonusRecord = {
                     ...editingBonus,
                     type: bonusType,
-                    periodStart: bonusType === 'bonus' ? periodStart : '',
+                    periodStart: bonusType === 'bonus' ? periodStart : periodStart,
                     periodEnd: bonusType === 'bonus' ? periodEnd : '',
                     totalPayments: bonusType === 'bonus' ? customerPayments : 0,
                     bonusPercentage: bonusType === 'bonus' ? (parseFloat(bonusPercentage) || 0) : 0,
                     bonusAmount: bonusValue,
+                    createdAt: new Date(bonusDate + 'T12:00:00').toISOString(),
                     notes: notes || undefined,
                 };
                 await db.update("customerBonuses", updatedBonus);
@@ -283,12 +285,12 @@ export default function Bonus() {
                     type: bonusType,
                     customerId: selectedCustomerId,
                     customerName: customer.name,
-                    periodStart: bonusType === 'bonus' ? periodStart : '',
+                    periodStart: bonusType === 'bonus' ? periodStart : periodStart,
                     periodEnd: bonusType === 'bonus' ? periodEnd : '',
                     totalPayments: bonusType === 'bonus' ? customerPayments : 0,
                     bonusPercentage: bonusType === 'bonus' ? (parseFloat(bonusPercentage) || 0) : 0,
                     bonusAmount: bonusValue,
-                    createdAt: new Date().toISOString(),
+                    createdAt: new Date(bonusDate + 'T12:00:00').toISOString(),
                     userId: user?.id || "",
                     userName: user?.name || "",
                     notes: notes || undefined,
@@ -309,6 +311,7 @@ export default function Bonus() {
             setCustomerSearchQuery("");
             setCustomerPayments(0);
             setBonusType('bonus');
+            setBonusDate(new Date().toISOString().split('T')[0]);
 
             // إعادة تحميل البيانات
             await loadData();
@@ -331,6 +334,7 @@ export default function Bonus() {
         setPeriodStart(bonus.periodStart);
         setPeriodEnd(bonus.periodEnd);
         setCustomerPayments(bonus.totalPayments);
+        setBonusDate(bonus.createdAt ? new Date(bonus.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
     };
 
     // حذف البونص
@@ -378,9 +382,14 @@ export default function Bonus() {
         const titleText = isDiscount ? 'خصم خاص' : 'بونص';
         const titleColor = isDiscount ? '#e65100' : '#2e7d32';
         const amountLabel = isDiscount ? 'الخصم' : 'البونص';
+        const periodStartFormatted = bonus.periodStart ? new Date(bonus.periodStart).toLocaleDateString('en-GB').replace(/\//g, '/') : '';
+        const periodEndFormatted = bonus.periodEnd ? new Date(bonus.periodEnd).toLocaleDateString('en-GB').replace(/\//g, '/') : '';
+
         const bodyText = isDiscount
-            ? 'نود اعلام سيادتكم انه تم تنزيل خصم خاص وقدره:'
-            : 'نود اعلام سيادتكم انه وفقا لمسحوباتكم عن الفتره/السنة  فقد تم خصم مبلغ وقدره';
+            ? (bonus.periodStart ? `نود اعلام سيادتكم انه بتاريخ ${periodStartFormatted} تم تنزيل خصم خاص وقدره:` : 'نود اعلام سيادتكم انه تم تنزيل خصم خاص وقدره:')
+            : (bonus.periodStart && bonus.periodEnd
+                ? `نود اعلام سيادتكم انه وفقا لمسحوباتكم عن الفترة من ${periodStartFormatted} الى ${periodEndFormatted} فقد تم خصم مبلغ وقدره`
+                : 'نود اعلام سيادتكم انه وفقا لمسحوباتكم فقد تم خصم مبلغ وقدره');
 
         const formatAmount = (val: number) => {
             const abs = Math.abs(val);
@@ -609,8 +618,8 @@ export default function Bonus() {
                                 </div>
                             </div>
 
-                            {/* الفترة الزمنية - تظهر فقط في البونص */}
-                            {bonusType === 'bonus' && (
+                            {/* الفترة الزمنية */}
+                            {bonusType === 'bonus' ? (
                                 <div className="grid grid-cols-2 gap-2">
                                     <div className="space-y-2">
                                         <Label className="flex items-center gap-1">
@@ -634,6 +643,18 @@ export default function Bonus() {
                                             onChange={(e) => setPeriodEnd(e.target.value)}
                                         />
                                     </div>
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    <Label className="flex items-center gap-1">
+                                        <Calendar className="h-4 w-4" />
+                                        تاريخ التسجيل
+                                    </Label>
+                                    <Input
+                                        type="date"
+                                        value={periodStart}
+                                        onChange={(e) => setPeriodStart(e.target.value)}
+                                    />
                                 </div>
                             )}
 
@@ -783,6 +804,19 @@ export default function Bonus() {
                                 </p>
                             </div>
 
+                            {/* تاريخ الإجراء */}
+                            <div className="space-y-2">
+                                <Label className="flex items-center gap-1">
+                                    <Calendar className="h-4 w-4" />
+                                    تاريخ الإجراء
+                                </Label>
+                                <Input
+                                    type="date"
+                                    value={bonusDate}
+                                    onChange={(e) => setBonusDate(e.target.value)}
+                                />
+                            </div>
+
                             {/* ملاحظات */}
                             <div className="space-y-2">
                                 <Label>ملاحظات (اختياري)</Label>
@@ -861,6 +895,8 @@ export default function Bonus() {
                                             <TableCell className="text-xs text-muted-foreground">
                                                 {(!bonus.type || bonus.type === 'bonus') && bonus.periodStart ? (
                                                     <>{formatDate(bonus.periodStart)} - {formatDate(bonus.periodEnd)}</>
+                                                ) : bonus.periodStart ? (
+                                                    <>{formatDate(bonus.periodStart)}</>
                                                 ) : (
                                                     <>{formatDate(bonus.createdAt)}</>
                                                 )}
