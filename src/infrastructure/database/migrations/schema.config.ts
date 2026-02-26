@@ -1,7 +1,7 @@
 import { StoreConfig } from "../types";
 
 // DB Version
-export const DB_VERSION = 16;
+export const DB_VERSION = 20;
 export const DB_NAME = "MyPOS_DB";
 
 // تعريف كل الـ Object Stores بشكل منظم
@@ -378,6 +378,18 @@ export const STORES_SCHEMA: StoreConfig[] = [
     keyPath: "id",
     indexes: [
       { name: "supervisorId", keyPath: "supervisorId", unique: false },
+      { name: "periodStart", keyPath: "periodStart", unique: false },
+      { name: "periodEnd", keyPath: "periodEnd", unique: false },
+      { name: "userId", keyPath: "userId", unique: false },
+      { name: "createdAt", keyPath: "createdAt", unique: false },
+    ],
+  },
+  {
+    name: "customerBonuses",
+    keyPath: "id",
+    indexes: [
+      { name: "customerId", keyPath: "customerId", unique: false },
+      { name: "type", keyPath: "type", unique: false },
       { name: "periodStart", keyPath: "periodStart", unique: false },
       { name: "periodEnd", keyPath: "periodEnd", unique: false },
       { name: "userId", keyPath: "userId", unique: false },

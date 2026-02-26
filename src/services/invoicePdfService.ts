@@ -744,11 +744,18 @@ export async function convertToPDFData(
                 db.getAll<any>("salesReturns"),
             ]);
 
-            // جلب البونص
+            // جلب البونص من IndexedDB
             let allBonuses: any[] = [];
             try {
+                allBonuses = await db.getAll<any>("customerBonuses");
+                // Fallback from localStorage
                 const saved = localStorage.getItem("pos-bonuses");
-                if (saved) allBonuses = JSON.parse(saved);
+                if (saved) {
+                    const oldBonuses = JSON.parse(saved);
+                    const existingIds = new Set(allBonuses.map((b: any) => b.id));
+                    const missing = oldBonuses.filter((b: any) => !existingIds.has(b.id));
+                    if (missing.length > 0) allBonuses = [...allBonuses, ...missing];
+                }
             } catch { /* ignore */ }
 
             // تجميع كل الحركات مع أنواعها - استخدام String() للمقارنة الآمنة

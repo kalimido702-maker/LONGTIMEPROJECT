@@ -76,6 +76,7 @@ interface SupervisorBonusRecord {
     notes?: string;
     salesReps: { id: string; name: string; sales: number }[];
     invoiceIds?: string[]; // track individual invoices to prevent duplicates
+    byCategorySales?: Record<string, { sales: number; bonus: number; percentage: number }>; // تفصيل المبيعات حسب الأقسام
 }
 
 const SupervisorBonus = () => {
@@ -459,6 +460,7 @@ const SupervisorBonus = () => {
                 notes: useCategoryBonus ? `${notes ? notes + " | " : ""}بونص حسب القسم` : notes,
                 salesReps: teamSalesData.byRep,
                 invoiceIds: periodInvoiceIds,
+                byCategorySales: teamSalesData.byCategorySales,
             };
 
             // Save to IndexedDB (synced automatically via SyncableRepository)
@@ -559,6 +561,49 @@ const SupervisorBonus = () => {
             .map((rep, i) => `<tr><td>${i + 1}</td><td>${rep.name}</td><td>${Math.round(rep.sales).toLocaleString("ar-EG")} ${currency}</td></tr>`)
             .join("");
 
+        // Build category rows if available
+        let categoryTableHtml = "";
+        if (bonus.byCategorySales && Object.keys(bonus.byCategorySales).length > 0) {
+            const catRows = Object.entries(bonus.byCategorySales)
+                .sort(([, a], [, b]) => b.sales - a.sales)
+                .map(([catName, data], i) => `
+                    <tr>
+                        <td>${i + 1}</td>
+                        <td>${catName || "بدون تصنيف"}</td>
+                        <td>${Math.round(data.sales).toLocaleString("ar-EG")} ${currency}</td>
+                        <td>${data.percentage}%</td>
+                        <td>${Math.round(data.bonus).toLocaleString("ar-EG")} ${currency}</td>
+                    </tr>
+                `).join("");
+
+            const totalCatSales = Object.values(bonus.byCategorySales).reduce((s, d) => s + d.sales, 0);
+            const totalCatBonus = Object.values(bonus.byCategorySales).reduce((s, d) => s + d.bonus, 0);
+
+            categoryTableHtml = `
+                <h3 style="margin: 20px 0 10px;">📦 تفصيل المبيعات حسب الأقسام</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>القسم</th>
+                            <th>المبيعات</th>
+                            <th>نسبة البونص</th>
+                            <th>البونص</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${catRows}
+                        <tr style="font-weight: bold; background: #e2e8f0;">
+                            <td colspan="2">الإجمالي</td>
+                            <td>${Math.round(totalCatSales).toLocaleString("ar-EG")} ${currency}</td>
+                            <td></td>
+                            <td>${Math.round(totalCatBonus).toLocaleString("ar-EG")} ${currency}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            `;
+        }
+
         const storeName = getSetting("storeName") || "المتجر";
 
         printWindow.document.write(`
@@ -582,10 +627,9 @@ const SupervisorBonus = () => {
                     td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }
                     tr:nth-child(even) { background: #f8fafc; }
                     .summary { background: #f0fdf4; border: 2px solid #22c55e; border-radius: 8px; padding: 20px; margin-top: 20px; }
-                    .summary-row { display: flex; justify-content: space-between; padding: 5px 0; }
+                    .summary-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 18px; }
                     .summary-label { font-weight: bold; }
-                    .summary-value { font-size: 18px; color: #16a34a; font-weight: bold; }
-                    .total-row { border-top: 2px solid #22c55e; padding-top: 10px; margin-top: 10px; font-size: 20px; }
+                    .summary-value { font-size: 20px; color: #16a34a; font-weight: bold; }
                     .deposits-section { background: #eff6ff; border: 2px solid #3b82f6; border-radius: 8px; padding: 15px; margin-top: 15px; }
                     .deposits-label { font-weight: bold; color: #1d4ed8; }
                     .footer { text-align: center; margin-top: 30px; padding-top: 15px; border-top: 1px solid #e2e8f0; color: #999; font-size: 12px; }
@@ -595,7 +639,7 @@ const SupervisorBonus = () => {
             </head>
             <body>
                 <div class="header">
-                    <h1>🏆 ${storeName}</h1>
+                    <h1>${storeName}</h1>
                     <h2>تقرير بونص المشرف</h2>
                 </div>
 
@@ -604,8 +648,6 @@ const SupervisorBonus = () => {
                     <div class="info-item"><span class="info-label">تاريخ التسجيل:</span><span class="info-value">${formatDate(bonus.createdAt)}</span></div>
                     <div class="info-item"><span class="info-label">من:</span><span class="info-value">${formatDate(bonus.periodStart)}</span></div>
                     <div class="info-item"><span class="info-label">إلى:</span><span class="info-value">${formatDate(bonus.periodEnd)}</span></div>
-                    <div class="info-item"><span class="info-label">المسجّل:</span><span class="info-value">${bonus.userName}</span></div>
-                    <div class="info-item"><span class="info-label">نسبة البونص:</span><span class="info-value">${bonus.bonusPercentage}%</span></div>
                 </div>
 
                 <h3 style="margin-bottom: 10px;">📊 مبيعات المندوبين</h3>
@@ -620,20 +662,17 @@ const SupervisorBonus = () => {
                     </tbody>
                 </table>
 
+                ${categoryTableHtml}
+
                 <div class="summary">
                     <h3 style="margin-bottom: 10px;">💰 ملخص البونص</h3>
                     <div class="summary-row">
-                        <span class="summary-label">بونص من النسبة:</span>
-                        <span>${Math.round(bonus.bonusAmount - (bonus.manualBonusAmount || 0)).toLocaleString("ar-EG")} ${currency}</span>
-                    </div>
-                    ${bonus.manualBonusAmount ? `
-                    <div class="summary-row">
-                        <span class="summary-label">مبلغ يدوي مضاف:</span>
-                        <span>${Math.round(bonus.manualBonusAmount).toLocaleString("ar-EG")} ${currency}</span>
-                    </div>` : ""}
-                    <div class="summary-row total-row">
-                        <span class="summary-label">إجمالي البونص النهائي:</span>
+                        <span class="summary-label">البونص:</span>
                         <span class="summary-value">${Math.round(bonus.bonusAmount).toLocaleString("ar-EG")} ${currency}</span>
+                    </div>
+                    <div class="summary-row" style="border-top: 2px solid #22c55e; padding-top: 12px; margin-top: 8px;">
+                        <span class="summary-label">إجمالي المبيعات خلال الفترة:</span>
+                        <span>${Math.round(bonus.totalTeamSales).toLocaleString("ar-EG")} ${currency}</span>
                     </div>
                 </div>
 
@@ -825,26 +864,6 @@ const SupervisorBonus = () => {
                                 )}
                             </div>
 
-                            {/* Manual Bonus Amount */}
-                            <div className="space-y-2">
-                                <Label className="flex items-center gap-2">
-                                    <DollarSign className="h-4 w-4" />
-                                    مبلغ يدوي إضافي (اختياري)
-                                </Label>
-                                <Input
-                                    type="number"
-                                    min="0"
-                                    value={manualBonusAmount}
-                                    onChange={(e) => setManualBonusAmount(e.target.value)}
-                                    placeholder="أدخل مبلغ إضافي بجانب النسبة..."
-                                />
-                                {manualAmount > 0 && (
-                                    <p className="text-xs text-muted-foreground">
-                                        سيتم إضافة {formatCurrency(manualAmount)} إلى بونص النسبة ({formatCurrency(calculatedBonusFromPercentage)})
-                                    </p>
-                                )}
-                            </div>
-
                             {/* Deposits Cap Info */}
                             {selectedSupervisorId && dateFrom && dateTo && (
                                 <div className={`p-3 rounded-lg border ${exceedsDepositCap ? "bg-red-50 dark:bg-red-950 border-red-300" : "bg-blue-50 dark:bg-blue-950 border-blue-200"}`}>
@@ -902,26 +921,22 @@ const SupervisorBonus = () => {
 
                             {/* Bonus Amount */}
                             {teamSalesData.total > 0 && (
-                                <div className="p-4 bg-green-50 dark:bg-green-950 rounded-lg">
+                                <div className="p-4 bg-green-50 dark:bg-green-950 rounded-lg space-y-3">
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2">
                                             <DollarSign className="h-5 w-5 text-green-600" />
-                                            <span className="font-semibold">إجمالي البونص</span>
+                                            <span className="font-semibold">البونص</span>
                                         </div>
                                         <span className="text-2xl font-bold text-green-600">
                                             {formatCurrency(bonusAmount)}
                                         </span>
                                     </div>
-                                    {useCategoryBonus && (
-                                        <p className="text-xs text-muted-foreground mt-2">
-                                            محسوب من نسب الأقسام المختلفة
-                                        </p>
-                                    )}
-                                    {manualAmount > 0 && (
-                                        <p className="text-xs text-muted-foreground mt-1">
-                                            ({formatCurrency(calculatedBonusFromPercentage)} من النسبة + {formatCurrency(manualAmount)} مبلغ يدوي)
-                                        </p>
-                                    )}
+                                    <div className="flex items-center justify-between border-t pt-2">
+                                        <span className="font-semibold text-sm">إجمالي المبيعات خلال الفترة</span>
+                                        <span className="font-bold">
+                                            {formatCurrency(teamSalesData.total)}
+                                        </span>
+                                    </div>
                                 </div>
                             )}
 

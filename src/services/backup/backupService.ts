@@ -72,7 +72,7 @@ const createBackup = async (): Promise<BackupRecord | null> => {
     try {
         await db.init();
 
-        // جمع البيانات من جميع الجداول
+        // جمع البيانات من جميع الجداول (IndexedDB)
         const tables = [
             "products",
             "customers",
@@ -80,7 +80,9 @@ const createBackup = async (): Promise<BackupRecord | null> => {
             "invoiceItems",
             "salesReturns",
             "purchases",
+            "purchaseItems",
             "purchaseReturns",
+            "purchasePayments",
             "suppliers",
             "employees",
             "expenses",
@@ -97,13 +99,27 @@ const createBackup = async (): Promise<BackupRecord | null> => {
             "units",
             "productUnits",
             "warehouses",
+            "productStock",
             "priceTypes",
             "salesReps",
             "supervisors",
+            "supervisorBonuses",
+            "customerBonuses",
             "users",
             "roles",
             "settings",
             "auditLogs",
+            "tables",
+            "halls",
+            "printers",
+            "paymentApps",
+            "cashMovements",
+            "employeeAdvances",
+            "employeeDeductions",
+            "whatsappAccounts",
+            "whatsappMessages",
+            "whatsappCampaigns",
+            "whatsappTasks",
         ];
 
         const backupData: Record<string, any[]> = {};
@@ -122,6 +138,20 @@ const createBackup = async (): Promise<BackupRecord | null> => {
             }
         }
 
+        // جمع البيانات من localStorage
+        const localStorageKeys = ["pos-saved-quotes", "pos-recurring-expenses"];
+        const localStorageData: Record<string, any> = {};
+        for (const key of localStorageKeys) {
+            try {
+                const value = localStorage.getItem(key);
+                if (value) {
+                    localStorageData[key] = JSON.parse(value);
+                }
+            } catch (error) {
+                console.log(`localStorage key ${key} not found or invalid`);
+            }
+        }
+
         // إنشاء ملف النسخ الاحتياطي
         const now = new Date();
         const filename = `backup_${now.toISOString().split("T")[0]}_${now.getHours().toString().padStart(2, "0")}${now.getMinutes().toString().padStart(2, "0")}.json`;
@@ -131,6 +161,7 @@ const createBackup = async (): Promise<BackupRecord | null> => {
             createdAt: now.toISOString(),
             app: "MYPOS",
             data: backupData,
+            localStorage: localStorageData,
         }, null, 2);
 
         const blob = new Blob([backupContent], { type: "application/json" });
@@ -313,6 +344,18 @@ const restoreBackup = async (
             console.log(`  ${r.status} ${r.table}: ${r.count} records`);
         }
         console.log(`  Total restored: ${restoredCount} records\n`);
+
+        // Restore localStorage data if present
+        if (backup.localStorage && typeof backup.localStorage === 'object') {
+            for (const [key, value] of Object.entries(backup.localStorage)) {
+                try {
+                    localStorage.setItem(key, JSON.stringify(value));
+                    console.log(`✅ Restored localStorage: ${key}`);
+                } catch (lsErr) {
+                    console.warn(`⚠️ Could not restore localStorage key ${key}:`, lsErr);
+                }
+            }
+        }
 
         // After all data is in IndexedDB, push to server automatically
         onProgress?.({ stage: 'syncing', detail: 'جاري رفع البيانات للسيرفر...', percent: 75 });

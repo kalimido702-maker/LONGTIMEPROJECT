@@ -95,15 +95,14 @@ export const StatementWhatsAppDialog = ({
         return customers.find((c) => c.id === selectedCustomerId);
     }, [customers, selectedCustomerId]);
 
-    // Filtered customers for search (include zero and positive balance - all customers with balance >= 0)
+    // Filtered customers for search (show ALL customers - no balance filter)
     const filteredCustomersForSearch = useMemo(() => {
-        const withBalance = customers.filter((c) => getBalance(c.id, Number(c.currentBalance) || 0) >= 0);
-        if (!customerSearchQuery.trim()) return withBalance;
+        if (!customerSearchQuery.trim()) return customers;
         const q = customerSearchQuery.toLowerCase();
-        return withBalance.filter(
+        return customers.filter(
             (c) => c.name?.toLowerCase().includes(q) || c.phone?.includes(q)
         );
-    }, [customers, customerSearchQuery, getBalance]);
+    }, [customers, customerSearchQuery]);
 
     // Get customer invoices for statement
     const customerInvoices = useMemo(() => {

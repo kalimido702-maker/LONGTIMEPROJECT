@@ -101,6 +101,7 @@ const SYNCABLE_TABLES = [
   "supervisors",
   "sales_reps",
   "supervisor_bonuses",
+  "customer_bonuses",
   "roles",
   "users",
 ];
@@ -133,6 +134,7 @@ const TABLE_NAME_MAP: Record<string, string> = {
   purchasePayments: "purchase_payments",
   productUnits: "product_units",
   supervisorBonuses: "supervisor_bonuses",
+  customerBonuses: "customer_bonuses",
 };
 
 

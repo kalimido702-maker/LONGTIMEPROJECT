@@ -954,9 +954,19 @@ class WhatsAppService {
   private async loadCampaignRecipients(campaign: Campaign): Promise<any[]> {
     let customers = await db.getAll("customers");
 
+    // حساب الأرصدة الفعلية من الحركات (فواتير + مدفوعات + مرتجعات + بونص)
+    // بدلاً من الاعتماد على currentBalance المخزن في IndexedDB الذي قد يكون قديماً
+    const { calculateAllCustomerBalances } = await import("@/hooks/useCustomerBalances");
+    const balanceMap = await calculateAllCustomerBalances();
+
+    // Helper to get accurate balance
+    const getBalance = (customerId: string, fallback: number = 0) => {
+      return balanceMap[String(customerId)] ?? fallback;
+    };
+
     if (campaign.targetType === "credit") {
-      // Filter customers with credit
-      customers = customers.filter((c: any) => c.currentBalance > 0);
+      // Filter customers with credit (using real calculated balance)
+      customers = customers.filter((c: any) => getBalance(c.id, Number(c.currentBalance) || 0) > 0);
     } else if (campaign.targetType === "installment") {
       // Filter customers with installments
       // Implementation depends on your data structure
@@ -965,12 +975,12 @@ class WhatsAppService {
     if (campaign.filters) {
       if (campaign.filters.minAmount) {
         customers = customers.filter(
-          (c: any) => c.currentBalance >= campaign.filters!.minAmount!
+          (c: any) => getBalance(c.id, Number(c.currentBalance) || 0) >= campaign.filters!.minAmount!
         );
       }
       if (campaign.filters.maxAmount) {
         customers = customers.filter(
-          (c: any) => c.currentBalance <= campaign.filters!.maxAmount!
+          (c: any) => getBalance(c.id, Number(c.currentBalance) || 0) <= campaign.filters!.maxAmount!
         );
       }
 
@@ -1011,10 +1021,11 @@ class WhatsAppService {
     // فلترة العملاء اللي عندهم وسيلة تواصل (هاتف أو جروب واتساب)
     customers = customers.filter((c: any) => c.phone || c.whatsappGroupId || c.invoiceGroupId || c.collectionGroupId);
 
-    // إضافة storeName لكل customer عشان يتعوض في الـ template
+    // إضافة storeName و الرصيد الفعلي لكل customer عشان يتعوض في الـ template
     const storeName = localStorage.getItem("storeName") || "متجرنا";
     return customers.map((c: any) => ({
       ...c,
+      currentBalance: getBalance(c.id, Number(c.currentBalance) || 0),
       storeName,
     }));
   }

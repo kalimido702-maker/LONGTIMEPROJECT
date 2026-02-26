@@ -99,6 +99,7 @@ const SYNCABLE_TABLES = [
     'payments',
     'payment_methods',
     'supervisor_bonuses',
+    'customer_bonuses',
     // Operations
     'shifts',
     // Settings & Audit
@@ -122,6 +123,7 @@ const TABLE_TO_STORE_MAP: Record<string, string> = {
     'audit_logs': 'auditLogs',
     'sales_reps': 'salesReps',    // Added
     'supervisor_bonuses': 'supervisorBonuses',  // Added
+    'customer_bonuses': 'customerBonuses',  // Added
 };
 
 // Helper function to get the store name from table name
@@ -982,6 +984,13 @@ export class SmartSyncManager extends EventEmitter {
                 try { record.items = JSON.parse(record.items); } catch { record.items = []; }
             }
             if (!Array.isArray(record.items)) record.items = [];
+        }
+
+        // For users: keep roleId in sync with role (roleId is used client-side but not synced to server)
+        if (tableName === 'users') {
+            if (record.role) {
+                record.roleId = record.role;
+            }
         }
 
         // For customers: ensure numeric fields
