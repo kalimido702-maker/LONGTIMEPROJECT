@@ -39,6 +39,7 @@ import adminPackagesRoutes from "./routes/admin/packages.js";
 import updateRoutes from "./routes/updates.js";
 import { supervisorRoutes } from "./routes/supervisors.js";
 import { salesRepRoutes } from "./routes/salesReps.js";
+import { mobileRoutes } from "./routes/mobile.js";
 
 const fastify = Fastify({
   logger: logger,
@@ -159,6 +160,11 @@ async function registerRoutes() {
   });
   await fastify.register(salesRepRoutes, {
     prefix: `${env.API_PREFIX}/sales-reps`,
+  });
+
+  // Mobile routes
+  await fastify.register(mobileRoutes, {
+    prefix: `${env.API_PREFIX}/mobile`,
   });
 
   // Admin routes

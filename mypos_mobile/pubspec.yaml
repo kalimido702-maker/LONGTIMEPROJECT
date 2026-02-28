@@ -1,0 +1,74 @@
+name: mypos_mobile
+description: "LONGTIME POS - تطبيق إدارة العملاء والفواتير"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.8.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  # HTTP & API
+  dio: ^5.4.0
+  # State Management
+  provider: ^6.1.1
+  # Secure Storage
+  flutter_secure_storage: ^9.0.0
+  # Navigation
+  go_router: ^14.0.0
+  # Date formatting
+  intl: ^0.19.0
+  # Pull to refresh
+  pull_to_refresh_flutter3: ^2.0.2
+  # Notifications (uncomment after Firebase setup)
+  # firebase_core: ^3.0.0
+  # firebase_messaging: ^15.0.0
+  flutter_local_notifications: ^18.0.0
+  # Icons
+  lucide_icons: ^0.257.0
+  # Shimmer loading
+  shimmer: ^3.0.0
+  # Cached network image
+  cached_network_image: ^3.3.1
+  # URL launcher
+  url_launcher: ^6.2.0
+  # Google Fonts (Cairo)
+  google_fonts: ^6.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  # App Launcher Icon
+  flutter_launcher_icons: ^0.14.0
+
+# Launcher icon configuration
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/app_icon.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/app_icon.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true
+  web:
+    generate: true
+    image_path: "assets/images/app_icon.png"
+
+# For information on the generic Dart part of this file, see the
+# following page: https://dart.dev/tools/pub/pubspec
+
+# The following section is specific to Flutter packages.
+flutter:
+
+  # The following line ensures that the Material Icons font is
+  # included with your application, so that you can use the icons in
+  # the material Icons class.
+  uses-material-design: true
+
+  assets:
+    - assets/images/logo.png
+    - assets/images/app_icon.png
