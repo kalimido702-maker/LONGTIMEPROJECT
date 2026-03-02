@@ -516,7 +516,10 @@ export async function closeDatabase(): Promise<void> {
 export const db = {
     async query<T = any>(sql: string, params?: any[]): Promise<[T, any]> {
         const database = getDatabase();
-        const result = await database.execute(sql, params);
+        // Use query() instead of execute() to avoid BigInt serialization issues
+        // pool.query uses text protocol (returns regular numbers)
+        // pool.execute uses prepared statements (can return BigInt)
+        const result = await database.query(sql, params);
         // Return in MySQL format: [rows, fields]
         // T is expected to be RowDataPacket[] or ResultSetHeader, so result.rows is T
         return [result.rows as unknown as T, null];
@@ -525,7 +528,7 @@ export const db = {
     // Alias for query - some routes use execute instead of query
     async execute<T = any>(sql: string, params?: any[]): Promise<[T, any]> {
         const database = getDatabase();
-        const result = await database.execute(sql, params);
+        const result = await database.query(sql, params);
         return [result.rows as unknown as T, null];
     },
 

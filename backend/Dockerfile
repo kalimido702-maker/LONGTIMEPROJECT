@@ -1,12 +1,15 @@
 # Build stage
 FROM node:20-alpine AS builder
 
+# Install build tools needed for native modules (bcrypt)
+RUN apk add --no-cache python3 make g++
+
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
+# Install all dependencies (including dev)
 RUN npm ci
 
 # Copy source code
@@ -15,14 +18,17 @@ COPY . .
 # Build TypeScript
 RUN npm run build
 
-# Production stage
+# Install production-only dependencies in a clean folder
+RUN rm -rf node_modules && npm ci --omit=dev
+
+# Production stage (clean, no build tools)
 FROM node:20-alpine AS production
 
 WORKDIR /app
 
-# Install production dependencies only
+# Copy production node_modules from builder (already compiled)
 COPY package*.json ./
-RUN npm ci --only=production
+COPY --from=builder /app/node_modules ./node_modules
 
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist

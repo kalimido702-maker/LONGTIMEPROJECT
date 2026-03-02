@@ -1,7 +1,7 @@
 {
   "name": "masr-pos-pro-custstom",
   "private": true,
-  "version": "6.6.0",
+  "version": "6.7.0",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -10,7 +10,7 @@
     "build:dev": "vite build --mode development --outDir dist-dev --appId com.masrpos.app.custom.dev",
     "lint": "eslint .",
     "preview": "vite preview",
-    "electron:dev": "cross-env ELECTRON=true APP_ID=com.masrpos.app.custom.olive vite",
+    "electron:dev": "cross-env ELECTRON=true APP_ID=com.masrpos.app.custom vite",
     "electron:production": "cross-env ELECTRON=true vite build && electron-builder --publish=never",
     "electron:build": "cross-env ELECTRON=true vite build && electron-builder",
     "electron:build:win": "cross-env ELECTRON=true vite build && electron-builder --win",

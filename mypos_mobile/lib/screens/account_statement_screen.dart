@@ -27,7 +27,8 @@ class _AccountStatementScreenState extends State<AccountStatementScreen> {
     final user = authProvider.user;
 
     await dataProvider.loadAccountStatement(
-      customerId: user?.isCustomer == true ? user?.id : null,
+      // Backend resolves customer_id automatically for customer role
+      customerId: null,
     );
   }
 
@@ -107,7 +108,7 @@ class _AccountStatementScreenState extends State<AccountStatementScreen> {
                             style: TextStyle(fontSize: 15, color: AppColors.textSecondary),
                           ),
                           Text(
-                            '${formatter.format(balance)} ر.س',
+                            '${formatter.format(balance)} جنيه',
                             style: TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.bold,
@@ -199,7 +200,7 @@ class _SummaryItem extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          '$value ر.س',
+          '$value جنيه',
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,

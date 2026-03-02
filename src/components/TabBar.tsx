@@ -104,6 +104,7 @@ const menuGroups = [
             { path: '/backup-settings', permission: 'settings', name: 'النسخ الاحتياطي' },
             { path: '/roles-permissions', permission: 'settings', name: 'الأدوار والصلاحيات' },
             { path: '/print-settings', permission: 'settings', name: 'إعدادات الطباعة' },
+            { path: '/mobile-accounts', permission: 'settings', name: 'حسابات الموبايل' },
         ],
     },
 ];

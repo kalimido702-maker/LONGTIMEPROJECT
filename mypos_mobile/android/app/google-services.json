@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "576339607775",
+    "project_id": "longtime-mypos",
+    "storage_bucket": "longtime-mypos.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:576339607775:android:83a69b000e55f80152696a",
+        "android_client_info": {
+          "package_name": "com.longtime.mypos.mypos_mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC6tIqk4ymeeEW7sgnouvg6Se1FcPvGgWY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

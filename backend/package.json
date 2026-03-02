@@ -32,6 +32,7 @@
     "better-sqlite3": "^12.6.0",
     "dotenv": "^16.4.5",
     "fastify": "^4.28.0",
+    "firebase-admin": "^13.7.0",
     "idb": "^8.0.3",
     "mysql2": "^3.11.3",
     "nodemailer": "^6.9.15",

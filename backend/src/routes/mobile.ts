@@ -62,14 +62,40 @@ export async function mobileRoutes(server: FastifyInstance) {
         conditions.push("1 = 0");
       }
     } else if (role === 'sales_rep' || role === 'salesman' || role === 'salesRep') {
-      // Sales rep: show only their assigned customers
-      conditions.push(`${prefix}${customerIdColumn} IN (
-        SELECT id FROM customers 
-        WHERE sales_rep_id = ? AND client_id = ? AND branch_id = ? AND is_deleted = 0
-      )`);
-      params.push(userId, clientId, branchId);
+      // Sales rep: find their linked_sales_rep_id, then get their assigned customers
+      const [users] = await db.query<RowDataPacket[]>(
+        "SELECT linked_sales_rep_id FROM users WHERE id = ? AND client_id = ?",
+        [userId, clientId]
+      );
+
+      if (users.length > 0 && users[0].linked_sales_rep_id) {
+        conditions.push(`${prefix}${customerIdColumn} IN (
+          SELECT id FROM customers 
+          WHERE sales_rep_id = ? AND client_id = ? AND is_deleted = 0
+        )`);
+        params.push(users[0].linked_sales_rep_id, clientId);
+      } else {
+        // No linked sales rep — show nothing
+        conditions.push("1 = 0");
+      }
+    } else if (role === 'supervisor') {
+      // Supervisor: find their linked_supervisor_id, then get their sales reps' customers
+      const [users] = await db.query<RowDataPacket[]>(
+        "SELECT linked_supervisor_id FROM users WHERE id = ? AND client_id = ?",
+        [userId, clientId]
+      );
+
+      if (users.length > 0 && users[0].linked_supervisor_id) {
+        conditions.push(`${prefix}${customerIdColumn} IN (
+          SELECT c.id FROM customers c
+          JOIN sales_reps sr ON c.sales_rep_id = sr.id
+          WHERE sr.supervisor_id = ? AND c.client_id = ? AND c.is_deleted = 0
+        )`);
+        params.push(users[0].linked_supervisor_id, clientId);
+      }
+      // If no linked_supervisor_id — supervisor sees everything (fallback)
     }
-    // admin/supervisor: no additional filtering (sees everything in client+branch)
+    // admin/super_admin: no additional filtering (sees everything in client+branch)
 
     return { conditions, params };
   }
@@ -88,13 +114,15 @@ export async function mobileRoutes(server: FastifyInstance) {
 
         let whereConditions = [
           "i.client_id = ?",
-          "i.branch_id = ?",
           "i.is_deleted = 0",
         ];
-        let params: any[] = [clientId, branchId];
+        let params: any[] = [clientId];
 
-        // Only delivered invoices for mobile
-        whereConditions.push("i.delivery_status = 'delivered'");
+        // Handle null branchId
+        if (branchId && branchId !== 'null') {
+          whereConditions.push("i.branch_id = ?");
+          params.push(branchId);
+        }
 
         if (scope.conditions.length > 0) {
           whereConditions.push(...scope.conditions);
@@ -107,9 +135,9 @@ export async function mobileRoutes(server: FastifyInstance) {
         const [stats] = await db.query<RowDataPacket[]>(
           `SELECT 
             COUNT(*) as total_invoices,
-            COALESCE(SUM(i.total_amount), 0) as total_sales,
+            COALESCE(SUM(i.total), 0) as total_sales,
             COALESCE(SUM(i.paid_amount), 0) as total_paid,
-            COALESCE(SUM(i.total_amount - i.paid_amount), 0) as total_remaining
+            COALESCE(SUM(i.remaining_amount), 0) as total_remaining
           FROM invoices i
           WHERE ${whereClause}`,
           params
@@ -124,10 +152,10 @@ export async function mobileRoutes(server: FastifyInstance) {
           );
           if (users.length > 0 && users[0].linked_customer_id) {
             const [balanceRows] = await db.query<RowDataPacket[]>(
-              `SELECT current_balance, credit_limit, bonus_balance, name, phone
+              `SELECT balance as current_balance, credit_limit, bonus_balance, name, phone
               FROM customers 
-              WHERE id = ? AND client_id = ? AND branch_id = ? AND is_deleted = 0`,
-              [users[0].linked_customer_id, clientId, branchId]
+              WHERE id = ? AND client_id = ? AND is_deleted = 0`,
+              [users[0].linked_customer_id, clientId]
             );
             if (balanceRows.length > 0) {
               customerBalance = balanceRows[0];
@@ -138,10 +166,14 @@ export async function mobileRoutes(server: FastifyInstance) {
         // Payment stats (same scope)
         let payWhereConditions = [
           "p.client_id = ?",
-          "p.branch_id = ?",
           "p.is_deleted = 0",
         ];
-        let payParams: any[] = [clientId, branchId];
+        let payParams: any[] = [clientId];
+
+        if (branchId && branchId !== 'null') {
+          payWhereConditions.push("p.branch_id = ?");
+          payParams.push(branchId);
+        }
 
         const payScope = await getCustomerScope(userId, clientId, branchId, role, 'p');
         if (payScope.conditions.length > 0) {
@@ -162,10 +194,14 @@ export async function mobileRoutes(server: FastifyInstance) {
         // Returns stats
         let retWhereConditions = [
           "sr.client_id = ?",
-          "sr.branch_id = ?",
           "sr.is_deleted = 0",
         ];
-        let retParams: any[] = [clientId, branchId];
+        let retParams: any[] = [clientId];
+
+        if (branchId && branchId !== 'null') {
+          retWhereConditions.push("sr.branch_id = ?");
+          retParams.push(branchId);
+        }
 
         const retScope = await getCustomerScope(userId, clientId, branchId, role, 'sr');
         if (retScope.conditions.length > 0) {
@@ -214,11 +250,15 @@ export async function mobileRoutes(server: FastifyInstance) {
 
         let whereConditions = [
           "i.client_id = ?",
-          "i.branch_id = ?",
           "i.is_deleted = 0",
-          "i.delivery_status = 'delivered'", // Only delivered invoices
         ];
-        let params: any[] = [clientId, branchId];
+        let params: any[] = [clientId];
+
+        // Handle null branchId
+        if (branchId && branchId !== 'null') {
+          whereConditions.push("i.branch_id = ?");
+          params.push(branchId);
+        }
 
         // Role-based scoping
         const scope = await getCustomerScope(userId, clientId, branchId, role, 'i');
@@ -233,23 +273,36 @@ export async function mobileRoutes(server: FastifyInstance) {
           params.push(`%${search}%`, `%${search}%`);
         }
         if (from_date) {
-          whereConditions.push("i.created_at >= ?");
+          whereConditions.push("i.invoice_date >= ?");
           params.push(from_date);
         }
         if (to_date) {
-          whereConditions.push("i.created_at <= ?");
+          whereConditions.push("i.invoice_date <= ?");
           params.push(to_date);
         }
         if (payment_status === "paid") {
-          whereConditions.push("i.paid_amount >= i.total_amount");
+          whereConditions.push("i.payment_status = 'paid'");
         } else if (payment_status === "unpaid") {
-          whereConditions.push("i.paid_amount < i.total_amount");
+          whereConditions.push("i.payment_status IN ('unpaid', 'partial')");
         }
 
-        if (query.customer_id) {
+        if (query.customer_id && role !== 'customer') {
+          // For non-customer roles, resolve user UUID to actual customer_id if needed
+          let resolvedCustomerId = query.customer_id;
+          if (query.customer_id.includes('-')) {
+            // Looks like a user UUID, resolve to linked_customer_id
+            const [linkedUser] = await db.query<RowDataPacket[]>(
+              "SELECT linked_customer_id FROM users WHERE id = ? AND client_id = ?",
+              [query.customer_id, clientId]
+            );
+            if (linkedUser.length > 0 && linkedUser[0].linked_customer_id) {
+              resolvedCustomerId = linkedUser[0].linked_customer_id;
+            }
+          }
           whereConditions.push("i.customer_id = ?");
-          params.push(query.customer_id);
+          params.push(resolvedCustomerId);
         }
+        // Customer role: customer_id filter is handled by getCustomerScope
 
         const whereClause = whereConditions.join(" AND ");
 
@@ -264,12 +317,11 @@ export async function mobileRoutes(server: FastifyInstance) {
 
         // Get invoices
         const [invoices] = await db.query<RowDataPacket[]>(
-          `SELECT i.*, c.name as customer_name, c.phone as customer_phone,
-                  (i.total_amount - i.paid_amount) as remaining_amount
+          `SELECT i.*, c.name as customer_name, c.phone as customer_phone
            FROM invoices i
            LEFT JOIN customers c ON i.customer_id = c.id
            WHERE ${whereClause}
-           ORDER BY i.created_at DESC
+           ORDER BY i.invoice_date DESC
            LIMIT ? OFFSET ?`,
           [...params, Number(limit), Number(offset)]
         );
@@ -300,10 +352,14 @@ export async function mobileRoutes(server: FastifyInstance) {
         let whereConditions = [
           "i.id = ?",
           "i.client_id = ?",
-          "i.branch_id = ?",
           "i.is_deleted = 0",
         ];
-        let params: any[] = [id, clientId, branchId];
+        let params: any[] = [id, clientId];
+
+        if (branchId && branchId !== 'null') {
+          whereConditions.push("i.branch_id = ?");
+          params.push(branchId);
+        }
 
         const scope = await getCustomerScope(userId, clientId, branchId, role, 'i');
         if (scope.conditions.length > 0) {
@@ -314,8 +370,7 @@ export async function mobileRoutes(server: FastifyInstance) {
         const whereClause = whereConditions.join(" AND ");
 
         const [invoices] = await db.query<RowDataPacket[]>(
-          `SELECT i.*, c.name as customer_name, c.phone as customer_phone,
-                  (i.total_amount - i.paid_amount) as remaining_amount
+          `SELECT i.*, c.name as customer_name, c.phone as customer_phone
            FROM invoices i
            LEFT JOIN customers c ON i.customer_id = c.id
            WHERE ${whereClause}`,
@@ -375,10 +430,14 @@ export async function mobileRoutes(server: FastifyInstance) {
 
         let whereConditions = [
           "p.client_id = ?",
-          "p.branch_id = ?",
           "p.is_deleted = 0",
         ];
-        let params: any[] = [clientId, branchId];
+        let params: any[] = [clientId];
+
+        if (branchId && branchId !== 'null') {
+          whereConditions.push("p.branch_id = ?");
+          params.push(branchId);
+        }
 
         const scope = await getCustomerScope(userId, clientId, branchId, role, 'p');
         if (scope.conditions.length > 0) {
@@ -398,9 +457,19 @@ export async function mobileRoutes(server: FastifyInstance) {
           whereConditions.push("p.payment_date <= ?");
           params.push(to_date);
         }
-        if (query.customer_id) {
+        if (query.customer_id && role !== 'customer') {
+          let resolvedCustomerId = query.customer_id;
+          if (query.customer_id.includes('-')) {
+            const [linkedUser] = await db.query<RowDataPacket[]>(
+              "SELECT linked_customer_id FROM users WHERE id = ? AND client_id = ?",
+              [query.customer_id, clientId]
+            );
+            if (linkedUser.length > 0 && linkedUser[0].linked_customer_id) {
+              resolvedCustomerId = linkedUser[0].linked_customer_id;
+            }
+          }
           whereConditions.push("p.customer_id = ?");
-          params.push(query.customer_id);
+          params.push(resolvedCustomerId);
         }
 
         const whereClause = whereConditions.join(" AND ");
@@ -455,10 +524,14 @@ export async function mobileRoutes(server: FastifyInstance) {
 
         let whereConditions = [
           "sr.client_id = ?",
-          "sr.branch_id = ?",
           "sr.is_deleted = 0",
         ];
-        let params: any[] = [clientId, branchId];
+        let params: any[] = [clientId];
+
+        if (branchId && branchId !== 'null') {
+          whereConditions.push("sr.branch_id = ?");
+          params.push(branchId);
+        }
 
         const scope = await getCustomerScope(userId, clientId, branchId, role, 'sr');
         if (scope.conditions.length > 0) {
@@ -478,9 +551,19 @@ export async function mobileRoutes(server: FastifyInstance) {
           whereConditions.push("sr.return_date <= ?");
           params.push(to_date);
         }
-        if (query.customer_id) {
+        if (query.customer_id && role !== 'customer') {
+          let resolvedCustomerId = query.customer_id;
+          if (query.customer_id.includes('-')) {
+            const [linkedUser] = await db.query<RowDataPacket[]>(
+              "SELECT linked_customer_id FROM users WHERE id = ? AND client_id = ?",
+              [query.customer_id, clientId]
+            );
+            if (linkedUser.length > 0 && linkedUser[0].linked_customer_id) {
+              resolvedCustomerId = linkedUser[0].linked_customer_id;
+            }
+          }
           whereConditions.push("sr.customer_id = ?");
-          params.push(query.customer_id);
+          params.push(resolvedCustomerId);
         }
 
         const whereClause = whereConditions.join(" AND ");
@@ -546,14 +629,17 @@ export async function mobileRoutes(server: FastifyInstance) {
           return reply.code(400).send({ error: "customer_id is required for sales reps" });
         }
 
-        // Build entries from invoices (debits) — only delivered
+        // Build entries from invoices (debits)
         let invoiceWhere = [
           "i.client_id = ?",
-          "i.branch_id = ?",
           "i.is_deleted = 0",
-          "i.delivery_status = 'delivered'",
         ];
-        let invoiceParams: any[] = [clientId, branchId];
+        let invoiceParams: any[] = [clientId];
+
+        if (branchId && branchId !== 'null') {
+          invoiceWhere.push("i.branch_id = ?");
+          invoiceParams.push(branchId);
+        }
 
         if (targetCustomerId) {
           invoiceWhere.push("i.customer_id = ?");
@@ -567,17 +653,17 @@ export async function mobileRoutes(server: FastifyInstance) {
           }
         }
 
-        if (from_date) { invoiceWhere.push("i.created_at >= ?"); invoiceParams.push(from_date); }
-        if (to_date) { invoiceWhere.push("i.created_at <= ?"); invoiceParams.push(to_date); }
+        if (from_date) { invoiceWhere.push("i.invoice_date >= ?"); invoiceParams.push(from_date); }
+        if (to_date) { invoiceWhere.push("i.invoice_date <= ?"); invoiceParams.push(to_date); }
 
         const [invoices] = await db.query<RowDataPacket[]>(
           `SELECT 
             i.id, 'invoice' as type, 
             CONCAT('فاتورة ', COALESCE(i.invoice_number, i.id)) as description,
-            i.total_amount as debit, 0 as credit,
+            i.total as debit, 0 as credit,
             i.invoice_number as reference_number,
             c.name as customer_name,
-            i.created_at as date
+            i.invoice_date as date
           FROM invoices i
           LEFT JOIN customers c ON i.customer_id = c.id
           WHERE ${invoiceWhere.join(" AND ")}`,
@@ -585,8 +671,13 @@ export async function mobileRoutes(server: FastifyInstance) {
         );
 
         // Build entries from payments (credits)
-        let payWhere = ["p.client_id = ?", "p.branch_id = ?", "p.is_deleted = 0"];
-        let payParams: any[] = [clientId, branchId];
+        let payWhere = ["p.client_id = ?", "p.is_deleted = 0"];
+        let payParams: any[] = [clientId];
+
+        if (branchId && branchId !== 'null') {
+          payWhere.push("p.branch_id = ?");
+          payParams.push(branchId);
+        }
 
         if (targetCustomerId) {
           payWhere.push("p.customer_id = ?");
@@ -617,8 +708,13 @@ export async function mobileRoutes(server: FastifyInstance) {
         );
 
         // Build entries from returns (credits)
-        let retWhere = ["sr.client_id = ?", "sr.branch_id = ?", "sr.is_deleted = 0"];
-        let retParams: any[] = [clientId, branchId];
+        let retWhere = ["sr.client_id = ?", "sr.is_deleted = 0"];
+        let retParams: any[] = [clientId];
+
+        if (branchId && branchId !== 'null') {
+          retWhere.push("sr.branch_id = ?");
+          retParams.push(branchId);
+        }
 
         if (targetCustomerId) {
           retWhere.push("sr.customer_id = ?");
@@ -701,11 +797,14 @@ export async function mobileRoutes(server: FastifyInstance) {
 
         let whereConditions = [
           "c.client_id = ?",
-          "c.branch_id = ?",
           "c.is_deleted = 0",
-          "c.is_active = 1",
         ];
-        let params: any[] = [clientId, branchId];
+        let params: any[] = [clientId];
+
+        if (branchId && branchId !== 'null') {
+          whereConditions.push("c.branch_id = ?");
+          params.push(branchId);
+        }
 
         // Role scoping
         if (role === 'customer') {
@@ -730,7 +829,7 @@ export async function mobileRoutes(server: FastifyInstance) {
         const total = countRows[0].total;
 
         const [customers] = await db.query<RowDataPacket[]>(
-          `SELECT c.id, c.name, c.phone, c.address, c.current_balance, c.credit_limit,
+          `SELECT c.id, c.name, c.phone, c.address, c.balance as current_balance, c.credit_limit,
                   c.bonus_balance, c.previous_statement
            FROM customers c
            WHERE ${whereClause}
@@ -948,7 +1047,7 @@ export async function mobileRoutes(server: FastifyInstance) {
 
         if (user.linked_customer_id) {
           const [customers] = await db.query<RowDataPacket[]>(
-            `SELECT id, name, phone, address, current_balance, credit_limit, bonus_balance
+            `SELECT id, name, phone, address, balance as current_balance, credit_limit, bonus_balance
              FROM customers WHERE id = ? AND client_id = ?`,
             [user.linked_customer_id, clientId]
           );

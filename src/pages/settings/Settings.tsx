@@ -362,15 +362,8 @@ const Settings = () => {
                   {loading ? "جاري الحفظ..." : "حفظ الإعدادات"}
                 </Button>
 
-                {/* Debug Mode Section - Only visible when VITE_DEBUG_SYNC=true */}
-                {/* {isDebugMode && (
-                  <div className="border-t pt-6 mt-6 space-y-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Bug className="h-5 w-5 text-orange-500" />
-                      <h3 className="font-bold text-orange-700 dark:text-orange-300">وضع المطور (Debug)</h3>
-                    </div>
-
-                    {/* Force Server Pull 
+                {/* Force Server Pull - Always visible */}
+                <div className="border-t pt-6 mt-6 space-y-4">
                     <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-4">
                       <div className="flex items-center gap-2 mb-3">
                         <Download className="h-5 w-5 text-red-600 dark:text-red-400" />
@@ -438,79 +431,7 @@ const Settings = () => {
                         </AlertDialogContent>
                       </AlertDialog>
                     </div>
-
-                    {/* Clear Server Data 
-                    <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-4">
-                      <div className="flex items-center gap-2 mb-3">
-                        <ServerOff className="h-5 w-5 text-red-600 dark:text-red-400" />
-                        <h4 className="font-bold text-red-800 dark:text-red-200">حذف كل البيانات من السيرفر</h4>
-                      </div>
-                      <p className="text-sm text-red-700 dark:text-red-300 mb-4">
-                        سيتم حذف جميع البيانات من السيرفر (فواتير، عملاء، منتجات، مدفوعات، وكل شيء آخر).
-                        البيانات المحلية لن تتأثر.
-                      </p>
-
-                      {clearServerResult && (
-                        <div className="bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg p-3 mb-4">
-                          <p className="text-sm text-green-700 dark:text-green-300">
-                            ✅ تم حذف <strong>{clearServerResult.total_deleted}</strong> سجل من{" "}
-                            <strong>{clearServerResult.deleted_tables.length}</strong> جدول
-                          </p>
-                        </div>
-                      )}
-
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button
-                            variant="destructive"
-                            disabled={isClearingServer}
-                            className="w-full"
-                          >
-                            {isClearingServer ? (
-                              <>
-                                <Loader2 className="h-4 w-4 ml-2 animate-spin" />
-                                جاري حذف البيانات...
-                              </>
-                            ) : (
-                              <>
-                                <Trash2 className="h-4 w-4 ml-2" />
-                                حذف كل البيانات من السيرفر
-                              </>
-                            )}
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent dir="rtl">
-                          <AlertDialogHeader>
-                            <AlertDialogTitle className="flex items-center gap-2">
-                              <AlertTriangle className="h-5 w-5 text-red-500" />
-                              ⚠️ تأكيد حذف كل البيانات من السيرفر
-                            </AlertDialogTitle>
-                            <AlertDialogDescription className="text-right">
-                              <strong className="text-red-600">تحذير شديد:</strong> سيتم حذف <strong>جميع</strong> البيانات من السيرفر بشكل نهائي:
-                              <br />
-                              الفواتير، العملاء، المنتجات، المدفوعات، المصروفات، المرتجعات، وكل شيء آخر.
-                              <br />
-                              <br />
-                              <strong>هذا الإجراء لا يمكن التراجع عنه!</strong>
-                              <br />
-                              <br />
-                              هل أنت متأكد تماماً؟
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter className="flex-row-reverse gap-2">
-                            <AlertDialogCancel>إلغاء</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={handleClearServerData}
-                              className="bg-red-600 hover:bg-red-700"
-                            >
-                              نعم، احذف كل شيء من السيرفر
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  </div>
-                )} */}
+                </div>
               </div>
             </Card>
           </TabsContent>

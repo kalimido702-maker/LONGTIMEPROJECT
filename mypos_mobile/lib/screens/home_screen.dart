@@ -29,11 +29,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final user = authProvider.user;
 
     if (user != null) {
-      if (user.isCustomer) {
-        await dataProvider.loadCustomerData(user.id);
-      } else {
-        await dataProvider.loadAllData();
-      }
+      // No need to pass customerId — the backend scopes data by role automatically
+      await dataProvider.loadAllData();
     }
   }
 
@@ -97,9 +94,11 @@ class _HomeScreenState extends State<HomeScreen> {
             : ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  // Balance Card
+                  // Balance Card — show customer.balance (actual balance)
                   _BalanceCard(
-                    remaining: dataProvider.totalRemaining,
+                    remaining: dataProvider.customerInfo != null
+                        ? double.tryParse(dataProvider.customerInfo!['current_balance']?.toString() ?? '0') ?? 0
+                        : dataProvider.totalRemaining,
                     formatter: formatter,
                   ),
                   const SizedBox(height: 16),
@@ -136,7 +135,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           icon: LucideIcons.creditCard,
                           iconColor: AppColors.success,
                           label: 'المدفوعات',
-                          value: formatter.format(dataProvider.totalPaid),
+                          value: formatter.format(dataProvider.totalPaymentAmount),
                           onTap: () => context.go('/payments'),
                         ),
                       ),
@@ -146,7 +145,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           icon: LucideIcons.rotateCcw,
                           iconColor: AppColors.warning,
                           label: 'المرتجعات',
-                          value: '${dataProvider.returns.length}',
+                          value: '${dataProvider.totalReturns}',
                           onTap: () => context.go('/returns'),
                         ),
                       ),
@@ -271,7 +270,7 @@ class _BalanceCard extends StatelessWidget {
           ),
           const SizedBox(height: 20),
           Text(
-            '${formatter.format(remaining)} ر.س',
+            '${formatter.format(remaining)} جنيه',
             style: const TextStyle(
               color: Colors.white,
               fontSize: 32,

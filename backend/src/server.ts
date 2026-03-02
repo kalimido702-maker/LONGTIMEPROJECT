@@ -16,6 +16,7 @@ import {
   initializeWebSocketServer,
   wsSyncServer,
 } from "./websocket/syncServer.js";
+import { notificationService } from "./services/NotificationService.js";
 
 // Import routes
 import authRoutes from "./routes/auth.js";
@@ -40,6 +41,7 @@ import updateRoutes from "./routes/updates.js";
 import { supervisorRoutes } from "./routes/supervisors.js";
 import { salesRepRoutes } from "./routes/salesReps.js";
 import { mobileRoutes } from "./routes/mobile.js";
+import { mobileAccountRoutes } from "./routes/mobile-accounts.js";
 
 const fastify = Fastify({
   logger: logger,
@@ -167,6 +169,11 @@ async function registerRoutes() {
     prefix: `${env.API_PREFIX}/mobile`,
   });
 
+  // Mobile account management routes
+  await fastify.register(mobileAccountRoutes, {
+    prefix: `${env.API_PREFIX}/mobile/accounts`,
+  });
+
   // Admin routes
   await fastify.register(adminRoutes, { prefix: `${env.API_PREFIX}/admin` });
   await fastify.register(adminClientsRoutes, { prefix: `${env.API_PREFIX}/admin/clients` });
@@ -229,6 +236,9 @@ async function start() {
 
     // Initialize WebSocket server
     await initializeWebSocketServer(fastify as any);
+
+    // Initialize Firebase for push notifications
+    notificationService.initialize();
 
     // Start listening
     const host = env.HOST || "0.0.0.0";

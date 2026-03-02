@@ -103,7 +103,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                   ],
                 ),
                 Text(
-                  '${formatter.format(totalReturns)} ر.س',
+                  '${formatter.format(totalReturns)} جنيه',
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -250,7 +250,7 @@ class _ReturnCard extends StatelessWidget {
             ),
           ),
           Text(
-            '${formatter.format(amount)} ر.س',
+            '${formatter.format(amount)} جنيه',
             style: const TextStyle(
               fontWeight: FontWeight.bold,
               fontSize: 16,

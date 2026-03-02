@@ -419,19 +419,27 @@ export class SyncService {
              LIMIT ?`;
             queryParams = [table_name, client_id, since, PER_TABLE_PULL_LIMIT];
           } else {
-            // Include records with NULL branch_id (imported data) alongside branch-specific records
-            const branchCondition = branch_id === null || branch_id === 'null' 
-              ? 'branch_id IS NULL' 
-              : '(branch_id = ? OR branch_id IS NULL)';
-            query = `SELECT * FROM ?? 
-             WHERE client_id = ? 
-             AND ${branchCondition}
-             AND server_updated_at >= ? 
-             ORDER BY server_updated_at ASC, id ASC 
-             LIMIT ?`;
-            queryParams = branch_id === null || branch_id === 'null'
-              ? [table_name, client_id, since, PER_TABLE_PULL_LIMIT]
-              : [table_name, client_id, branch_id, since, PER_TABLE_PULL_LIMIT];
+            // When branchId is null, pull ALL records for the client (no branch filtering)
+            // This handles the common case where license doesn't specify a branch
+            const branchIsNull = branch_id === null || branch_id === 'null';
+            if (branchIsNull) {
+              // No branch filtering - get all client records
+              query = `SELECT * FROM ?? 
+               WHERE client_id = ? 
+               AND server_updated_at >= ? 
+               ORDER BY server_updated_at ASC, id ASC 
+               LIMIT ?`;
+              queryParams = [table_name, client_id, since, PER_TABLE_PULL_LIMIT];
+            } else {
+              // Include records with NULL branch_id (imported data) alongside branch-specific records
+              query = `SELECT * FROM ?? 
+               WHERE client_id = ? 
+               AND (branch_id = ? OR branch_id IS NULL)
+               AND server_updated_at >= ? 
+               ORDER BY server_updated_at ASC, id ASC 
+               LIMIT ?`;
+              queryParams = [table_name, client_id, branch_id, since, PER_TABLE_PULL_LIMIT];
+            }
           }
 
           const [rows] = await connection.query<RowDataPacket[]>(query, queryParams);
@@ -816,11 +824,15 @@ export class SyncService {
         query = `SELECT * FROM ?? WHERE ?? = ? AND client_id = ?`;
         params = [normalizedTableName, primaryKeyColumn, lookupValue, client_id];
       } else {
-        // Handle null branch_id
+        // When branchId is null, get record for any branch in the same client
         const branchIsNull = branch_id === null || branch_id === 'null';
-        const branchCondition = branchIsNull ? 'branch_id IS NULL' : 'branch_id = ?';
-        query = `SELECT * FROM ?? WHERE ?? = ? AND client_id = ? AND ${branchCondition}`;
-        params = [normalizedTableName, primaryKeyColumn, lookupValue, client_id, ...(branchIsNull ? [] : [branch_id])];
+        if (branchIsNull) {
+          query = `SELECT * FROM ?? WHERE ?? = ? AND client_id = ?`;
+          params = [normalizedTableName, primaryKeyColumn, lookupValue, client_id];
+        } else {
+          query = `SELECT * FROM ?? WHERE ?? = ? AND client_id = ? AND (branch_id = ? OR branch_id IS NULL)`;
+          params = [normalizedTableName, primaryKeyColumn, lookupValue, client_id, branch_id];
+        }
       }
 
       const [rows] = await connection.query<RowDataPacket[]>(query, params);

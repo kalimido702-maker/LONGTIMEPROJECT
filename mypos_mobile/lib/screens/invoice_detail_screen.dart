@@ -132,7 +132,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
 
                 // Total
                 Text(
-                  '${formatter.format(invoice.total)} ر.س',
+                  '${formatter.format(invoice.total)} جنيه',
                   style: const TextStyle(
                     fontSize: 32,
                     fontWeight: FontWeight.bold,
@@ -166,27 +166,27 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                 ),
                 _DetailRow(
                   label: 'المبلغ المدفوع',
-                  value: '${formatter.format(invoice.paidAmount)} ر.س',
+                  value: '${formatter.format(invoice.paidAmount)} جنيه',
                   icon: LucideIcons.creditCard,
                   valueColor: AppColors.success,
                 ),
                 if (invoice.remainingAmount > 0)
                   _DetailRow(
                     label: 'المبلغ المتبقي',
-                    value: '${formatter.format(invoice.remainingAmount)} ر.س',
+                    value: '${formatter.format(invoice.remainingAmount)} جنيه',
                     icon: LucideIcons.alertCircle,
                     valueColor: AppColors.error,
                   ),
                 if (invoice.discount > 0)
                   _DetailRow(
                     label: 'الخصم',
-                    value: '${formatter.format(invoice.discount)} ر.س',
+                    value: '${formatter.format(invoice.discount)} جنيه',
                     icon: LucideIcons.tag,
                   ),
                 if (invoice.tax > 0)
                   _DetailRow(
                     label: 'الضريبة',
-                    value: '${formatter.format(invoice.tax)} ر.س',
+                    value: '${formatter.format(invoice.tax)} جنيه',
                     icon: LucideIcons.percent,
                   ),
                 if (invoice.notes != null && invoice.notes!.isNotEmpty)
@@ -311,7 +311,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                         ),
                         Text(
-                          '${formatter.format(invoice.total)} ر.س',
+                          '${formatter.format(invoice.total)} جنيه',
                           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.primary),
                         ),
                       ],

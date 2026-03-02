@@ -101,7 +101,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                   ],
                 ),
                 Text(
-                  '${formatter.format(totalPayments)} ر.س',
+                  '${formatter.format(totalPayments)} جنيه',
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -230,7 +230,7 @@ class _PaymentCard extends StatelessWidget {
             ),
           ),
           Text(
-            '${formatter.format(payment.amount)} ر.س',
+            '${formatter.format(payment.amount)} جنيه',
             style: const TextStyle(
               fontWeight: FontWeight.bold,
               fontSize: 16,

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/user.dart';
 import '../services/api_service.dart';
+import '../services/notification_service.dart';
 
 class AuthProvider extends ChangeNotifier {
   final ApiService _api = ApiService();
@@ -33,6 +34,10 @@ class AuthProvider extends ChangeNotifier {
         _user = User.fromJson(json.decode(userData));
         _isLoggedIn = true;
         notifyListeners();
+
+        // Register FCM token after auto-login
+        NotificationService().registerToken();
+
         return true;
       }
       return false;
@@ -71,6 +76,10 @@ class AuthProvider extends ChangeNotifier {
       _isLoggedIn = true;
       _isLoading = false;
       notifyListeners();
+
+      // Register FCM token after login
+      NotificationService().registerToken();
+
       return true;
     } catch (e) {
       _isLoading = false;
@@ -89,6 +98,9 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    // Unregister FCM token before logout
+    await NotificationService().unregisterToken();
+
     await _api.clearTokens();
     _user = null;
     _isLoggedIn = false;

@@ -7,12 +7,17 @@ import 'config/theme.dart';
 import 'config/router.dart';
 import 'providers/auth_provider.dart';
 import 'providers/data_provider.dart';
+import 'services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize Arabic locale
   await initializeDateFormatting('ar', null);
+
+  // Initialize Firebase & notifications
+  final notificationService = NotificationService();
+  await notificationService.initialize();
 
   // Set system UI overlays
   SystemChrome.setSystemUIOverlayStyle(

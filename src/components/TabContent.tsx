@@ -95,6 +95,7 @@ const BackupSettings = lazy(() => import('@/pages/settings/BackupSettings'));
 const RolesPermissions = lazy(() => import('@/pages/settings/RolesPermissions'));
 const Supervisors = lazy(() => import('@/pages/supervisors/Supervisors'));
 const SalesReps = lazy(() => import('@/pages/salesReps/SalesReps'));
+const MobileAccounts = lazy(() => import('@/pages/mobile-accounts/MobileAccounts'));
 
 // Map paths to components
 const pathToComponent: Record<string, React.ComponentType> = {
@@ -138,6 +139,7 @@ const pathToComponent: Record<string, React.ComponentType> = {
     '/roles-permissions': RolesPermissions,
     '/supervisors': Supervisors,
     '/sales-reps': SalesReps,
+    '/mobile-accounts': MobileAccounts,
 };
 
 // Loading fallback

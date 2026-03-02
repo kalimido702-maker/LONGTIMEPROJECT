@@ -93,6 +93,14 @@ upload_files() {
         --exclude '.env.*' \
         "${LOCAL_BACKEND_PATH}/" "${SERVER_USER}@${SERVER_IP}:${REMOTE_PATH}/"
     
+    # Upload firebase config files from data/ (if they exist)
+    if [ -f "${LOCAL_BACKEND_PATH}/data/firebase-service-account.json" ]; then
+        echo -e "${YELLOW}📤 Uploading Firebase config...${NC}"
+        rsync -avz --progress \
+            "${LOCAL_BACKEND_PATH}/data/firebase-service-account.json" \
+            "${SERVER_USER}@${SERVER_IP}:${REMOTE_PATH}/data/"
+    fi
+    
     echo -e "${GREEN}✅ Files uploaded successfully${NC}"
 }
 

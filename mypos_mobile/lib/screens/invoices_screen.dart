@@ -290,7 +290,7 @@ class _InvoiceCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(
-                        '${formatter.format(invoice.total)} ر.س',
+                        '${formatter.format(invoice.total)} جنيه',
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 15,
@@ -337,7 +337,7 @@ class _InvoiceCard extends StatelessWidget {
                       ),
                     if (invoice.remainingAmount > 0)
                       Text(
-                        'المتبقي: ${formatter.format(invoice.remainingAmount)} ر.س',
+                        'المتبقي: ${formatter.format(invoice.remainingAmount)} جنيه',
                         style: const TextStyle(
                           fontSize: 12,
                           color: AppColors.error,

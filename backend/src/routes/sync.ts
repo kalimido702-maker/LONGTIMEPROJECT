@@ -6,6 +6,7 @@ import {
 } from "../services/SyncService.js";
 import { logger } from "../config/logger.js";
 import { wsSyncServer } from "../websocket/syncServer.js";
+import { notificationService } from "../services/NotificationService.js";
 
 interface BatchPushBody {
   device_id: string;
@@ -155,6 +156,62 @@ export async function syncRoutes(server: FastifyInstance) {
             }
           }
           logger.info({ room, synced_count: result.synced_count }, "Broadcasted sync updates to room");
+        }
+
+        // ── Push Notifications for mobile customers ──────────────
+        // Fire-and-forget: don't block the sync response
+        if (result.synced_count > 0) {
+          setImmediate(async () => {
+            try {
+              for (const record of records) {
+                // Skip deleted records and conflicts
+                if (record.is_deleted) continue;
+                const hasConflict = result.conflicts?.some(
+                  (c: any) =>
+                    c.record_id === record.record_id &&
+                    c.table_name === record.table_name
+                );
+                if (hasConflict) continue;
+
+                const tableName = record.table_name;
+                const data = record.data || {};
+
+                if (
+                  tableName === "invoices" ||
+                  tableName === "Invoices"
+                ) {
+                  await notificationService.notifyNewInvoice(
+                    { id: record.record_id, ...data },
+                    clientId as string,
+                    branchId as string
+                  );
+                } else if (
+                  tableName === "payments" ||
+                  tableName === "Payments"
+                ) {
+                  await notificationService.notifyNewPayment(
+                    { id: record.record_id, ...data },
+                    clientId as string,
+                    branchId as string
+                  );
+                } else if (
+                  tableName === "salesReturns" ||
+                  tableName === "sales_returns"
+                ) {
+                  await notificationService.notifyNewReturn(
+                    { id: record.record_id, ...data },
+                    clientId as string,
+                    branchId as string
+                  );
+                }
+              }
+            } catch (notifError) {
+              logger.warn(
+                { error: notifError },
+                "Failed to send push notifications after sync"
+              );
+            }
+          });
         }
 
         return reply.code(200).send(result);
