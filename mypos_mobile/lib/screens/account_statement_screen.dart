@@ -3,9 +3,9 @@ import 'package:provider/provider.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 import '../config/theme.dart';
-import '../providers/auth_provider.dart';
 import '../providers/data_provider.dart';
 import '../models/account_entry.dart';
+import '../widgets/date_filter_widget.dart';
 
 class AccountStatementScreen extends StatefulWidget {
   const AccountStatementScreen({super.key});
@@ -15,21 +15,35 @@ class AccountStatementScreen extends StatefulWidget {
 }
 
 class _AccountStatementScreenState extends State<AccountStatementScreen> {
+  late DateTime _fromDate;
+  late DateTime _toDate;
+
   @override
   void initState() {
     super.initState();
+    final now = DateTime.now();
+    _fromDate = DateTime(now.year, 1, 1);
+    _toDate = DateTime(now.year, 12, 31);
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadStatement());
   }
 
   Future<void> _loadStatement() async {
-    final authProvider = context.read<AuthProvider>();
     final dataProvider = context.read<DataProvider>();
-    final user = authProvider.user;
+    final range = DateRange(from: _fromDate, to: _toDate);
 
     await dataProvider.loadAccountStatement(
-      // Backend resolves customer_id automatically for customer role
       customerId: null,
+      fromDate: range.fromParam,
+      toDate: range.toParam,
     );
+  }
+
+  void _onDateChanged(DateRange range) {
+    setState(() {
+      _fromDate = range.from;
+      _toDate = range.to;
+    });
+    _loadStatement();
   }
 
   @override
@@ -53,6 +67,20 @@ class _AccountStatementScreenState extends State<AccountStatementScreen> {
           ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
           : Column(
               children: [
+                // Date filter
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Row(
+                    children: [
+                      DateFilterWidget(
+                        fromDate: _fromDate,
+                        toDate: _toDate,
+                        onChanged: _onDateChanged,
+                      ),
+                    ],
+                  ),
+                ),
+
                 // Summary header
                 Container(
                   margin: const EdgeInsets.all(16),

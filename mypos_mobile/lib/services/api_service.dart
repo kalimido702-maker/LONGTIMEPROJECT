@@ -109,8 +109,14 @@ class ApiService {
   // ============================================================
 
   /// Dashboard: balance, invoice/payment/return stats
-  Future<Map<String, dynamic>> getDashboard() async {
-    final response = await _dio.get(ApiConfig.dashboard);
+  Future<Map<String, dynamic>> getDashboard({
+    String? fromDate,
+    String? toDate,
+  }) async {
+    final params = <String, dynamic>{};
+    if (fromDate != null) params['from_date'] = fromDate;
+    if (toDate != null) params['to_date'] = toDate;
+    final response = await _dio.get(ApiConfig.dashboard, queryParameters: params);
     return response.data;
   }
 

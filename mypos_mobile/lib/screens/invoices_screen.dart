@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../config/theme.dart';
 import '../providers/data_provider.dart';
 import '../models/invoice.dart';
+import '../widgets/date_filter_widget.dart';
 
 class InvoicesScreen extends StatefulWidget {
   const InvoicesScreen({super.key});
@@ -17,6 +18,35 @@ class InvoicesScreen extends StatefulWidget {
 class _InvoicesScreenState extends State<InvoicesScreen> {
   String _searchQuery = '';
   String _filterStatus = 'all'; // all, paid, unpaid
+  late DateTime _fromDate;
+  late DateTime _toDate;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _fromDate = DateTime(now.year, 1, 1);
+    _toDate = DateTime(now.year, 12, 31);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _reloadInvoices());
+  }
+
+  Future<void> _reloadInvoices() async {
+    final dataProvider = context.read<DataProvider>();
+    final range = DateRange(from: _fromDate, to: _toDate);
+    await dataProvider.loadInvoices(
+      refresh: true,
+      fromDate: range.fromParam,
+      toDate: range.toParam,
+    );
+  }
+
+  void _onDateChanged(DateRange range) {
+    setState(() {
+      _fromDate = range.from;
+      _toDate = range.to;
+    });
+    _reloadInvoices();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -76,30 +106,44 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
       ),
       body: Column(
         children: [
-          // Filter chips
+          // Filter chips + date filter
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _FilterChip(
-                  label: 'الكل',
-                  isSelected: _filterStatus == 'all',
-                  count: dataProvider.deliveredInvoices.length,
-                  onTap: () => setState(() => _filterStatus = 'all'),
-                ),
-                const SizedBox(width: 8),
-                _FilterChip(
-                  label: 'مدفوعة',
-                  isSelected: _filterStatus == 'paid',
-                  count: dataProvider.deliveredInvoices.where((i) => i.isPaid).length,
-                  onTap: () => setState(() => _filterStatus = 'paid'),
-                ),
-                const SizedBox(width: 8),
-                _FilterChip(
-                  label: 'غير مدفوعة',
-                  isSelected: _filterStatus == 'unpaid',
-                  count: dataProvider.deliveredInvoices.where((i) => !i.isPaid).length,
-                  onTap: () => setState(() => _filterStatus = 'unpaid'),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _FilterChip(
+                        label: 'الكل',
+                        isSelected: _filterStatus == 'all',
+                        count: dataProvider.deliveredInvoices.length,
+                        onTap: () => setState(() => _filterStatus = 'all'),
+                      ),
+                      const SizedBox(width: 8),
+                      _FilterChip(
+                        label: 'مدفوعة',
+                        isSelected: _filterStatus == 'paid',
+                        count: dataProvider.deliveredInvoices.where((i) => i.isPaid).length,
+                        onTap: () => setState(() => _filterStatus = 'paid'),
+                      ),
+                      const SizedBox(width: 8),
+                      _FilterChip(
+                        label: 'غير مدفوعة',
+                        isSelected: _filterStatus == 'unpaid',
+                        count: dataProvider.deliveredInvoices.where((i) => !i.isPaid).length,
+                        onTap: () => setState(() => _filterStatus = 'unpaid'),
+                      ),
+                      const SizedBox(width: 12),
+                      DateFilterWidget(
+                        fromDate: _fromDate,
+                        toDate: _toDate,
+                        onChanged: _onDateChanged,
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),

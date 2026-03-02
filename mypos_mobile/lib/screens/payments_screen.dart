@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../config/theme.dart';
 import '../providers/data_provider.dart';
 import '../models/payment.dart';
+import '../widgets/date_filter_widget.dart';
 
 class PaymentsScreen extends StatefulWidget {
   const PaymentsScreen({super.key});
@@ -15,6 +16,35 @@ class PaymentsScreen extends StatefulWidget {
 
 class _PaymentsScreenState extends State<PaymentsScreen> {
   String _searchQuery = '';
+  late DateTime _fromDate;
+  late DateTime _toDate;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _fromDate = DateTime(now.year, 1, 1);
+    _toDate = DateTime(now.year, 12, 31);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _reloadPayments());
+  }
+
+  Future<void> _reloadPayments() async {
+    final dataProvider = context.read<DataProvider>();
+    final range = DateRange(from: _fromDate, to: _toDate);
+    await dataProvider.loadPayments(
+      refresh: true,
+      fromDate: range.fromParam,
+      toDate: range.toParam,
+    );
+  }
+
+  void _onDateChanged(DateRange range) {
+    setState(() {
+      _fromDate = range.from;
+      _toDate = range.to;
+    });
+    _reloadPayments();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -111,6 +141,21 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
               ],
             ),
           ),
+
+          // Date filter
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                DateFilterWidget(
+                  fromDate: _fromDate,
+                  toDate: _toDate,
+                  onChanged: _onDateChanged,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
 
           // Payments list
           Expanded(

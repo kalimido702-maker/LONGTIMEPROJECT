@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../config/theme.dart';
 import '../providers/auth_provider.dart';
 import '../providers/data_provider.dart';
+import '../widgets/date_filter_widget.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,9 +16,15 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  late DateTime _fromDate;
+  late DateTime _toDate;
+
   @override
   void initState() {
     super.initState();
+    final now = DateTime.now();
+    _fromDate = DateTime(now.year, 1, 1);
+    _toDate = DateTime(now.year, 12, 31);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadData();
     });
@@ -29,9 +36,20 @@ class _HomeScreenState extends State<HomeScreen> {
     final user = authProvider.user;
 
     if (user != null) {
-      // No need to pass customerId — the backend scopes data by role automatically
-      await dataProvider.loadAllData();
+      final range = DateRange(from: _fromDate, to: _toDate);
+      await dataProvider.loadAllData(
+        fromDate: range.fromParam,
+        toDate: range.toParam,
+      );
     }
+  }
+
+  void _onDateChanged(DateRange range) {
+    setState(() {
+      _fromDate = range.from;
+      _toDate = range.to;
+    });
+    _loadData();
   }
 
   @override
@@ -47,7 +65,7 @@ class _HomeScreenState extends State<HomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'مرحباً ${user?.fullName ?? ''}',
+              '${user?.fullName ?? ''}',
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             Text(
@@ -100,6 +118,16 @@ class _HomeScreenState extends State<HomeScreen> {
                         ? double.tryParse(dataProvider.customerInfo!['current_balance']?.toString() ?? '0') ?? 0
                         : dataProvider.totalRemaining,
                     formatter: formatter,
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Date filter
+                  Center(
+                    child: DateFilterWidget(
+                      fromDate: _fromDate,
+                      toDate: _toDate,
+                      onChanged: _onDateChanged,
+                    ),
                   ),
                   const SizedBox(height: 16),
 

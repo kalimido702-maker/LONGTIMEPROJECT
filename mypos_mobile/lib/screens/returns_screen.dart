@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../config/theme.dart';
 import '../providers/data_provider.dart';
 import '../models/sales_return.dart';
+import '../widgets/date_filter_widget.dart';
 
 class ReturnsScreen extends StatefulWidget {
   const ReturnsScreen({super.key});
@@ -15,6 +16,35 @@ class ReturnsScreen extends StatefulWidget {
 
 class _ReturnsScreenState extends State<ReturnsScreen> {
   String _searchQuery = '';
+  late DateTime _fromDate;
+  late DateTime _toDate;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _fromDate = DateTime(now.year, 1, 1);
+    _toDate = DateTime(now.year, 12, 31);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _reloadReturns());
+  }
+
+  Future<void> _reloadReturns() async {
+    final dataProvider = context.read<DataProvider>();
+    final range = DateRange(from: _fromDate, to: _toDate);
+    await dataProvider.loadReturns(
+      refresh: true,
+      fromDate: range.fromParam,
+      toDate: range.toParam,
+    );
+  }
+
+  void _onDateChanged(DateRange range) {
+    setState(() {
+      _fromDate = range.from;
+      _toDate = range.to;
+    });
+    _reloadReturns();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -113,6 +143,21 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
               ],
             ),
           ),
+
+          // Date filter
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                DateFilterWidget(
+                  fromDate: _fromDate,
+                  toDate: _toDate,
+                  onChanged: _onDateChanged,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
 
           Expanded(
             child: dataProvider.isLoading

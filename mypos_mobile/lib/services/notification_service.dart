@@ -18,7 +18,7 @@ class NotificationService {
   factory NotificationService() => _instance;
   NotificationService._internal();
 
-  final FirebaseMessaging _messaging = FirebaseMessaging.instance;
+  late final FirebaseMessaging _messaging;
   static final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
 
@@ -31,6 +31,9 @@ class NotificationService {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+
+    // Initialize messaging after Firebase is ready
+    _messaging = FirebaseMessaging.instance;
 
     // Request permission
     final settings = await _messaging.requestPermission(
@@ -60,6 +63,7 @@ class NotificationService {
       onDidReceiveNotificationResponse: _onNotificationTapped,
     );
 
+
     // Create Android notification channel
     if (Platform.isAndroid) {
       const channel = AndroidNotificationChannel(
@@ -81,10 +85,10 @@ class NotificationService {
     FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
 
     // Handle notification taps when app was terminated
-    final initialMessage = await _messaging.getInitialMessage();
-    if (initialMessage != null) {
-      _handleNotificationNavigation(initialMessage.data);
-    }
+    // final initialMessage = await _messaging.getInitialMessage();
+    // if (initialMessage != null) {
+    //   _handleNotificationNavigation(initialMessage.data);
+    // }
 
     // Handle notification taps when app was in background
     FirebaseMessaging.onMessageOpenedApp.listen((message) {

@@ -15,9 +15,15 @@ void main() async {
   // Initialize Arabic locale
   await initializeDateFormatting('ar', null);
 
+  print('Starting MyPOS Mobile App...');
+
   // Initialize Firebase & notifications
-  final notificationService = NotificationService();
-  await notificationService.initialize();
+  try {
+    final notificationService = NotificationService();
+    await notificationService.initialize();
+  } catch (e) {
+    print('Error initializing Firebase: $e');
+  }
 
   // Set system UI overlays
   SystemChrome.setSystemUIOverlayStyle(

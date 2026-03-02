@@ -110,6 +110,9 @@ export async function mobileRoutes(server: FastifyInstance) {
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
         const { userId, clientId, branchId, role } = request.user!;
+        const query = request.query as any;
+        const from_date = query.from_date as string | undefined;
+        const to_date = query.to_date as string | undefined;
         const scope = await getCustomerScope(userId, clientId, branchId, role, 'i');
 
         let whereConditions = [
@@ -127,6 +130,16 @@ export async function mobileRoutes(server: FastifyInstance) {
         if (scope.conditions.length > 0) {
           whereConditions.push(...scope.conditions);
           params.push(...scope.params);
+        }
+
+        // Date filters for invoices
+        if (from_date) {
+          whereConditions.push("i.created_at >= ?");
+          params.push(from_date + ' 00:00:00');
+        }
+        if (to_date) {
+          whereConditions.push("i.created_at <= ?");
+          params.push(to_date + ' 23:59:59');
         }
 
         const whereClause = whereConditions.join(" AND ");
@@ -181,6 +194,16 @@ export async function mobileRoutes(server: FastifyInstance) {
           payParams.push(...payScope.params);
         }
 
+        // Date filters for payments
+        if (from_date) {
+          payWhereConditions.push("p.created_at >= ?");
+          payParams.push(from_date + ' 00:00:00');
+        }
+        if (to_date) {
+          payWhereConditions.push("p.created_at <= ?");
+          payParams.push(to_date + ' 23:59:59');
+        }
+
         const payWhereClause = payWhereConditions.join(" AND ");
         const [payStats] = await db.query<RowDataPacket[]>(
           `SELECT 
@@ -207,6 +230,16 @@ export async function mobileRoutes(server: FastifyInstance) {
         if (retScope.conditions.length > 0) {
           retWhereConditions.push(...retScope.conditions);
           retParams.push(...retScope.params);
+        }
+
+        // Date filters for returns
+        if (from_date) {
+          retWhereConditions.push("sr.created_at >= ?");
+          retParams.push(from_date + ' 00:00:00');
+        }
+        if (to_date) {
+          retWhereConditions.push("sr.created_at <= ?");
+          retParams.push(to_date + ' 23:59:59');
         }
 
         const retWhereClause = retWhereConditions.join(" AND ");

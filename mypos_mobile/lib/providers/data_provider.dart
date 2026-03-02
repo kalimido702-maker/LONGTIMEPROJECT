@@ -64,13 +64,13 @@ class DataProvider extends ChangeNotifier {
   // ============================================================
   // Dashboard
   // ============================================================
-  Future<void> loadDashboard() async {
+  Future<void> loadDashboard({String? fromDate, String? toDate}) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      final response = await _api.getDashboard();
+      final response = await _api.getDashboard(fromDate: fromDate, toDate: toDate);
       final data = response['data'] as Map<String, dynamic>? ?? {};
 
       // Invoice stats
@@ -348,20 +348,20 @@ class DataProvider extends ChangeNotifier {
   // ============================================================
   // Load all data at once (used on login / home screen)
   // ============================================================
-  Future<void> loadAllData({String? customerId}) async {
+  Future<void> loadAllData({String? customerId, String? fromDate, String? toDate}) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
       // Load dashboard stats
-      await loadDashboard();
+      await loadDashboard(fromDate: fromDate, toDate: toDate);
 
       // Load first page of each
       await Future.wait([
-        loadInvoices(refresh: true, customerId: customerId),
-        loadPayments(refresh: true, customerId: customerId),
-        loadReturns(refresh: true, customerId: customerId),
+        loadInvoices(refresh: true, customerId: customerId, fromDate: fromDate, toDate: toDate),
+        loadPayments(refresh: true, customerId: customerId, fromDate: fromDate, toDate: toDate),
+        loadReturns(refresh: true, customerId: customerId, fromDate: fromDate, toDate: toDate),
       ]);
 
       _isLoading = false;
