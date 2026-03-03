@@ -25,7 +25,7 @@ import {
     PopoverContent,
     PopoverTrigger,
 } from "@/components/ui/popover";
-import { MessageCircle, Send, FileText, User, AlertCircle, Loader2, Search, Check } from "lucide-react";
+import { MessageCircle, Send, FileText, User, AlertCircle, Loader2, Search, Check, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { db, Customer, Invoice } from "@/shared/lib/indexedDB";
 import { useToast } from "@/hooks/use-toast";
@@ -59,6 +59,7 @@ export const StatementWhatsAppDialog = ({
     const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
     const [customerSearchQuery, setCustomerSearchQuery] = useState("");
     const [contentType, setContentType] = useState<"balanceOnly" | "balanceAndStatement">("balanceOnly");
+    const [sendMethod, setSendMethod] = useState<"whatsapp" | "savePdf">("whatsapp");
     const [fromDate, setFromDate] = useState(new Date(new Date().getFullYear(), 0, 1).toLocaleDateString('en-CA'));
     const [toDate, setToDate] = useState(new Date().toLocaleDateString('en-CA'));
     const [calculatedBalance, setCalculatedBalance] = useState<number | null>(null);
@@ -191,8 +192,83 @@ ${dateStr} ${timeStr}`;
         return message;
     };
 
+    // Save as PDF locally
+    const handleSavePDF = async () => {
+        if (!selectedCustomer) {
+            toast({ title: "يرجى اختيار عميل", variant: "destructive" });
+            return;
+        }
+
+        setSending(true);
+
+        try {
+            if (contentType === "balanceOnly") {
+                // For balance only, generate a simple text-based PDF
+                const { generateStatementPDF } = await import("@/services/statementPdfService");
+                const from = new Date(fromDate);
+                const to = new Date(toDate);
+                const pdfBlob = await generateStatementPDF(selectedCustomer.id, from, to);
+
+                if (!pdfBlob) {
+                    throw new Error("فشل توليد ملف PDF");
+                }
+
+                const url = URL.createObjectURL(pdfBlob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = `رصيد ${selectedCustomer.name}.pdf`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            } else {
+                // Generate full statement PDF
+                toast({ title: "📊 جاري توليد كشف الحساب...", description: "يرجى الانتظار" });
+
+                const { generateStatementPDF } = await import("@/services/statementPdfService");
+                const from = new Date(fromDate);
+                const to = new Date(toDate);
+                const pdfBlob = await generateStatementPDF(selectedCustomer.id, from, to);
+
+                if (!pdfBlob) {
+                    throw new Error("فشل توليد ملف PDF");
+                }
+
+                const url = URL.createObjectURL(pdfBlob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = `كشف حساب ${selectedCustomer.name}.pdf`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            }
+
+            toast({
+                title: "✅ تم حفظ الملف بنجاح",
+                description: `تم حفظ ملف PDF على الجهاز`,
+            });
+
+            onOpenChange(false);
+        } catch (error: any) {
+            console.error("Failed to save PDF:", error);
+            toast({
+                title: "فشل حفظ الملف",
+                description: error.message || "حدث خطأ أثناء توليد الملف",
+                variant: "destructive"
+            });
+        }
+
+        setSending(false);
+    };
+
     // Send statement using WhatsApp service
     const handleSend = async () => {
+        // If save PDF mode, use separate handler
+        if (sendMethod === "savePdf") {
+            return handleSavePDF();
+        }
+
         if (!activeAccount) {
             toast({
                 title: "لا يوجد حساب واتساب متصل",
@@ -303,23 +379,6 @@ ${dateStr} ${timeStr}`;
                 </DialogHeader>
 
                 <div className="space-y-4 py-4">
-                    {/* WhatsApp Account Status */}
-                    {!activeAccount ? (
-                        <Alert variant="destructive">
-                            <AlertCircle className="h-4 w-4" />
-                            <AlertDescription>
-                                لا يوجد حساب واتساب متصل. يرجى ربط حساب من صفحة إدارة الواتساب أولاً.
-                            </AlertDescription>
-                        </Alert>
-                    ) : (
-                        <Alert className="bg-green-50 border-green-200">
-                            <MessageCircle className="h-4 w-4 text-green-600" />
-                            <AlertDescription className="text-green-800">
-                                متصل: {activeAccount.name} ({activeAccount.phone})
-                            </AlertDescription>
-                        </Alert>
-                    )}
-
                     {/* Customer Selection */}
                     <div className="space-y-2">
                         <Label>اختر العميل</Label>
@@ -384,6 +443,56 @@ ${dateStr} ${timeStr}`;
                             </PopoverContent>
                         </Popover>
                     </div>
+
+                    {/* Send Method */}
+                    <div className="space-y-2">
+                        <Label>طريقة الإرسال</Label>
+                        <RadioGroup
+                            value={sendMethod}
+                            onValueChange={(v) => setSendMethod(v as "whatsapp" | "savePdf")}
+                        >
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-muted/50">
+                                    <RadioGroupItem value="whatsapp" id="method-whatsapp" />
+                                    <Label htmlFor="method-whatsapp" className="cursor-pointer">
+                                        <div className="font-medium flex items-center gap-1">
+                                            <MessageCircle className="h-4 w-4 text-green-600" />
+                                            إرسال واتساب
+                                        </div>
+                                        <div className="text-xs text-muted-foreground">إرسال عبر الواتساب</div>
+                                    </Label>
+                                </div>
+                                <div className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-muted/50">
+                                    <RadioGroupItem value="savePdf" id="method-pdf" />
+                                    <Label htmlFor="method-pdf" className="cursor-pointer">
+                                        <div className="font-medium flex items-center gap-1">
+                                            <Download className="h-4 w-4 text-blue-600" />
+                                            حفظ PDF
+                                        </div>
+                                        <div className="text-xs text-muted-foreground">حفظ على الجهاز</div>
+                                    </Label>
+                                </div>
+                            </div>
+                        </RadioGroup>
+                    </div>
+
+                    {/* WhatsApp Account Status */}
+                    {sendMethod === "whatsapp" && !activeAccount && (
+                        <Alert variant="destructive">
+                            <AlertCircle className="h-4 w-4" />
+                            <AlertDescription>
+                                لا يوجد حساب واتساب متصل. يرجى ربط حساب من صفحة إدارة الواتساب أولاً.
+                            </AlertDescription>
+                        </Alert>
+                    )}
+                    {sendMethod === "whatsapp" && activeAccount && (
+                        <Alert className="bg-green-50 border-green-200">
+                            <MessageCircle className="h-4 w-4 text-green-600" />
+                            <AlertDescription className="text-green-800">
+                                متصل: {activeAccount.name} ({activeAccount.phone})
+                            </AlertDescription>
+                        </Alert>
+                    )}
 
                     {/* Content Type */}
                     <div className="space-y-2">
@@ -465,15 +574,17 @@ ${dateStr} ${timeStr}`;
                     </Button>
                     <Button
                         onClick={handleSend}
-                        disabled={!selectedCustomerId || loading || !activeAccount || sending}
-                        className="gap-2 bg-green-600 hover:bg-green-700"
+                        disabled={!selectedCustomerId || loading || (sendMethod === "whatsapp" && !activeAccount) || sending}
+                        className={cn("gap-2", sendMethod === "savePdf" ? "bg-blue-600 hover:bg-blue-700" : "bg-green-600 hover:bg-green-700")}
                     >
                         {sending ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : sendMethod === "savePdf" ? (
+                            <Download className="h-4 w-4" />
                         ) : (
                             <Send className="h-4 w-4" />
                         )}
-                        إرسال الكشف
+                        {sendMethod === "savePdf" ? "حفظ PDF" : "إرسال الكشف"}
                     </Button>
                 </DialogFooter>
             </DialogContent>

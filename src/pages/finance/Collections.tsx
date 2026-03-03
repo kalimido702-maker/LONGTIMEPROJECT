@@ -136,6 +136,7 @@ export default function Collections() {
     const [editAmount, setEditAmount] = useState("");
     const [editNotes, setEditNotes] = useState("");
     const [editPaymentMethodId, setEditPaymentMethodId] = useState("");
+    const [editDate, setEditDate] = useState("");
 
     useEffect(() => {
         loadData();
@@ -1164,6 +1165,10 @@ export default function Collections() {
         setEditAmount(collection.amount.toString());
         setEditNotes(collection.notes || "");
         setEditPaymentMethodId(collection.paymentMethodId);
+        // تحويل التاريخ إلى صيغة datetime-local
+        const d = new Date(collection.createdAt);
+        const localISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        setEditDate(localISO);
         setEditDialogOpen(true);
     };
 
@@ -1191,6 +1196,9 @@ export default function Collections() {
                 await db.update("customers", { ...customer, currentBalance: updatedBalance });
             }
 
+            // التاريخ الجديد
+            const newDate = editDate ? new Date(editDate).toISOString() : editingCollection.createdAt;
+
             // تحديث في localStorage
             const saved = localStorage.getItem('pos-collections');
             if (saved) {
@@ -1203,6 +1211,7 @@ export default function Collections() {
                         notes: editNotes || undefined,
                         paymentMethodId: editPaymentMethodId,
                         paymentMethodName: paymentMethod?.name || collections[idx].paymentMethodName,
+                        createdAt: newDate,
                     };
                     localStorage.setItem('pos-collections', JSON.stringify(collections));
                 }
@@ -1218,6 +1227,8 @@ export default function Collections() {
                         notes: editNotes || undefined,
                         paymentMethodId: editPaymentMethodId,
                         paymentMethodName: paymentMethod?.name || payment.paymentMethodName,
+                        createdAt: newDate,
+                        paymentDate: newDate,
                     });
                 }
             } catch (_e) { /* قد لا يكون موجود */ }
@@ -1799,9 +1810,15 @@ export default function Collections() {
                         <div className="space-y-4 py-2">
                             <div className="p-3 bg-muted rounded-lg">
                                 <p className="font-medium">{editingCollection.customerName}</p>
-                                <p className="text-sm text-muted-foreground">
-                                    التاريخ: {formatDate(editingCollection.createdAt)}
-                                </p>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>التاريخ</Label>
+                                <Input
+                                    type="datetime-local"
+                                    value={editDate}
+                                    onChange={(e) => setEditDate(e.target.value)}
+                                    className="h-11"
+                                />
                             </div>
                             <div className="space-y-2">
                                 <Label>المبلغ *</Label>
