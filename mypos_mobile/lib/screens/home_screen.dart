@@ -30,6 +30,13 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  bool get _isStaff {
+    final role = context.read<AuthProvider>().user?.role;
+    return role == 'sales_rep' || role == 'salesRep' || role == 'salesman' || role == 'supervisor' || role == 'admin';
+  }
+
+  String? get _userRole => context.read<AuthProvider>().user?.role;
+
   Future<void> _loadData() async {
     final authProvider = context.read<AuthProvider>();
     final dataProvider = context.read<DataProvider>();
@@ -41,6 +48,19 @@ class _HomeScreenState extends State<HomeScreen> {
         fromDate: range.fromParam,
         toDate: range.toParam,
       );
+      // For staff, also load customers
+      if (_isStaff) {
+        await dataProvider.loadCustomers();
+      }
+      // Supervisor: also load their sales reps
+      if (user.isSupervisor) {
+        await dataProvider.loadSalesReps();
+      }
+      // Admin: load supervisors + sales reps
+      if (user.isAdmin) {
+        await dataProvider.loadSupervisors();
+        await dataProvider.loadSalesReps();
+      }
     }
   }
 
@@ -58,6 +78,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final dataProvider = context.watch<DataProvider>();
     final user = authProvider.user;
     final formatter = NumberFormat('#,##0.00', 'ar');
+    final isStaff = user != null &&
+        (user.isSalesRep || user.isSupervisor || user.isAdmin);
 
     return Scaffold(
       appBar: AppBar(
@@ -111,120 +133,384 @@ class _HomeScreenState extends State<HomeScreen> {
             ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
             : ListView(
                 padding: const EdgeInsets.all(16),
+                children: isStaff
+                    ? _buildStaffHomeContent(dataProvider, formatter, user!.role)
+                    : _buildCustomerHomeContent(dataProvider, formatter),
+              ),
+      ),
+    );
+  }
+
+  // ===================== CUSTOMER HOME =====================
+  List<Widget> _buildCustomerHomeContent(DataProvider dataProvider, NumberFormat formatter) {
+    return [
+      // Balance Card
+      _BalanceCard(
+        remaining: dataProvider.customerInfo != null
+            ? double.tryParse(dataProvider.customerInfo!['current_balance']?.toString() ?? '0') ?? 0
+            : dataProvider.totalRemaining,
+        formatter: formatter,
+      ),
+      const SizedBox(height: 12),
+
+      // Date filter
+      Center(
+        child: DateFilterWidget(
+          fromDate: _fromDate,
+          toDate: _toDate,
+          onChanged: _onDateChanged,
+        ),
+      ),
+      const SizedBox(height: 16),
+
+      // Stats Grid
+      Row(
+        children: [
+          Expanded(
+            child: _StatCard(
+              icon: LucideIcons.fileText,
+              iconColor: AppColors.secondary,
+              label: 'الفواتير',
+              value: '${dataProvider.totalInvoices}',
+              onTap: () => context.go('/invoices'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _StatCard(
+              icon: LucideIcons.trendingUp,
+              iconColor: AppColors.primary,
+              label: 'إجمالي المبيعات',
+              value: formatter.format(dataProvider.totalDebt),
+              onTap: () => context.go('/invoices'),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 12),
+      Row(
+        children: [
+          Expanded(
+            child: _StatCard(
+              icon: LucideIcons.creditCard,
+              iconColor: AppColors.success,
+              label: 'المدفوعات',
+              value: formatter.format(dataProvider.totalPaymentAmount),
+              onTap: () => context.go('/payments'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _StatCard(
+              icon: LucideIcons.rotateCcw,
+              iconColor: AppColors.warning,
+              label: 'المرتجعات',
+              value: '${dataProvider.totalReturns}',
+              onTap: () => context.go('/returns'),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 24),
+
+      // Quick Actions
+      Text(
+        'الوصول السريع',
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+      ),
+      const SizedBox(height: 12),
+      _QuickActionTile(
+        icon: LucideIcons.fileText,
+        label: 'الفواتير المسلمة',
+        subtitle: 'عرض جميع الفواتير التي تم تسليمها',
+        color: AppColors.secondary,
+        onTap: () => context.go('/invoices'),
+      ),
+      const SizedBox(height: 8),
+      _QuickActionTile(
+        icon: LucideIcons.scrollText,
+        label: 'كشف الحساب',
+        subtitle: 'عرض كشف حساب مفصل',
+        color: AppColors.primary,
+        onTap: () => context.go('/statement'),
+      ),
+      const SizedBox(height: 8),
+      _QuickActionTile(
+        icon: LucideIcons.creditCard,
+        label: 'سندات القبض',
+        subtitle: 'عرض جميع المدفوعات',
+        color: AppColors.success,
+        onTap: () => context.go('/payments'),
+      ),
+      const SizedBox(height: 8),
+      _QuickActionTile(
+        icon: LucideIcons.rotateCcw,
+        label: 'المرتجعات',
+        subtitle: 'عرض فواتير المرتجعات',
+        color: AppColors.warning,
+        onTap: () => context.go('/returns'),
+      ),
+    ];
+  }
+
+  // ===================== STAFF HOME (sales_rep / supervisor / admin) =====================
+  List<Widget> _buildStaffHomeContent(DataProvider dataProvider, NumberFormat formatter, String? role) {
+    final customerCount = dataProvider.customers.length;
+    final isAdmin = role == 'admin';
+    final isSupervisor = role == 'supervisor';
+
+    return [
+      // ── Admin: supervisors + reps + customers summary ──
+      if (isAdmin) ...[
+        _buildSummaryRow(
+          items: [
+            _SummaryItem(
+              icon: LucideIcons.shield,
+              gradient: const [Color(0xFF6C5CE7), Color(0xFF8B7CF6)],
+              count: dataProvider.supervisors.length,
+              label: 'مشرف',
+              onTap: () => context.go('/supervisors'),
+            ),
+            _SummaryItem(
+              icon: LucideIcons.briefcase,
+              gradient: const [AppColors.secondary, Color(0xFF4A8FE7)],
+              count: dataProvider.salesReps.length,
+              label: 'مندوب',
+              onTap: () => context.go('/sales-reps'),
+            ),
+            _SummaryItem(
+              icon: LucideIcons.users,
+              gradient: const [AppColors.primary, AppColors.primaryLight],
+              count: customerCount,
+              label: 'عميل',
+              onTap: () => context.go('/customers'),
+            ),
+          ],
+        ),
+      ]
+      // ── Supervisor: reps + customers summary ──
+      else if (isSupervisor) ...[
+        _buildSummaryRow(
+          items: [
+            _SummaryItem(
+              icon: LucideIcons.briefcase,
+              gradient: const [AppColors.secondary, Color(0xFF4A8FE7)],
+              count: dataProvider.salesReps.length,
+              label: 'مندوب',
+              onTap: () => context.go('/sales-reps'),
+            ),
+            _SummaryItem(
+              icon: LucideIcons.users,
+              gradient: const [AppColors.primary, AppColors.primaryLight],
+              count: customerCount,
+              label: 'عميل',
+              onTap: () => context.go('/customers'),
+            ),
+          ],
+        ),
+      ]
+      // ── Sales Rep: customers only ──
+      else ...[
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [AppColors.primary, AppColors.primaryLight],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.primary.withOpacity(0.3),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  // Balance Card — show customer.balance (actual balance)
-                  _BalanceCard(
-                    remaining: dataProvider.customerInfo != null
-                        ? double.tryParse(dataProvider.customerInfo!['current_balance']?.toString() ?? '0') ?? 0
-                        : dataProvider.totalRemaining,
-                    formatter: formatter,
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Date filter
-                  Center(
-                    child: DateFilterWidget(
-                      fromDate: _fromDate,
-                      toDate: _toDate,
-                      onChanged: _onDateChanged,
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12),
                     ),
+                    child: const Icon(LucideIcons.users, color: Colors.white, size: 24),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(width: 12),
+                  Text('عدد العملاء', style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 15)),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Text(
+                '$customerCount عميل',
+                style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        ),
+      ],
+      const SizedBox(height: 12),
 
-                  // Stats Grid
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _StatCard(
-                          icon: LucideIcons.fileText,
-                          iconColor: AppColors.secondary,
-                          label: 'الفواتير',
-                          value: '${dataProvider.totalInvoices}',
-                          onTap: () => context.go('/invoices'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _StatCard(
-                          icon: LucideIcons.trendingUp,
-                          iconColor: AppColors.primary,
-                          label: 'إجمالي المبيعات',
-                          value: formatter.format(dataProvider.totalDebt),
-                          onTap: () => context.go('/invoices'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _StatCard(
-                          icon: LucideIcons.creditCard,
-                          iconColor: AppColors.success,
-                          label: 'المدفوعات',
-                          value: formatter.format(dataProvider.totalPaymentAmount),
-                          onTap: () => context.go('/payments'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _StatCard(
-                          icon: LucideIcons.rotateCcw,
-                          iconColor: AppColors.warning,
-                          label: 'المرتجعات',
-                          value: '${dataProvider.totalReturns}',
-                          onTap: () => context.go('/returns'),
-                        ),
-                      ),
-                    ],
-                  ),
+      // Date filter
+      Center(
+        child: DateFilterWidget(
+          fromDate: _fromDate,
+          toDate: _toDate,
+          onChanged: _onDateChanged,
+        ),
+      ),
+      const SizedBox(height: 16),
 
-                  const SizedBox(height: 24),
+      // Aggregate stats
+      Row(
+        children: [
+          Expanded(
+            child: _StatCard(
+              icon: LucideIcons.fileText,
+              iconColor: AppColors.secondary,
+              label: 'إجمالي الفواتير',
+              value: '${dataProvider.totalInvoices}',
+              onTap: () => context.go('/customers'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _StatCard(
+              icon: LucideIcons.trendingUp,
+              iconColor: AppColors.primary,
+              label: 'إجمالي المبيعات',
+              value: formatter.format(dataProvider.totalDebt),
+              onTap: () => context.go('/customers'),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 12),
+      Row(
+        children: [
+          Expanded(
+            child: _StatCard(
+              icon: LucideIcons.creditCard,
+              iconColor: AppColors.success,
+              label: 'المدفوعات',
+              value: formatter.format(dataProvider.totalPaymentAmount),
+              onTap: () => context.go('/customers'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _StatCard(
+              icon: LucideIcons.rotateCcw,
+              iconColor: AppColors.warning,
+              label: 'المرتجعات',
+              value: '${dataProvider.totalReturns}',
+              onTap: () => context.go('/customers'),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 24),
 
-                  // Quick Actions
-                  Text(
-                    'الوصول السريع',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  const SizedBox(height: 12),
+      // Quick Actions for staff
+      Text(
+        'الوصول السريع',
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+      ),
+      const SizedBox(height: 12),
 
-                  _QuickActionTile(
-                    icon: LucideIcons.fileText,
-                    label: 'الفواتير المسلمة',
-                    subtitle: 'عرض جميع الفواتير التي تم تسليمها',
-                    color: AppColors.secondary,
-                    onTap: () => context.go('/invoices'),
-                  ),
-                  const SizedBox(height: 8),
-                  _QuickActionTile(
-                    icon: LucideIcons.scrollText,
-                    label: 'كشف الحساب',
-                    subtitle: 'عرض كشف حساب مفصل',
-                    color: AppColors.primary,
-                    onTap: () => context.go('/statement'),
-                  ),
-                  const SizedBox(height: 8),
-                  _QuickActionTile(
-                    icon: LucideIcons.creditCard,
-                    label: 'سندات القبض',
-                    subtitle: 'عرض جميع المدفوعات',
-                    color: AppColors.success,
-                    onTap: () => context.go('/payments'),
-                  ),
-                  const SizedBox(height: 8),
-                  _QuickActionTile(
-                    icon: LucideIcons.rotateCcw,
-                    label: 'المرتجعات',
-                    subtitle: 'عرض فواتير المرتجعات',
-                    color: AppColors.warning,
-                    onTap: () => context.go('/returns'),
+      // Admin-specific quick actions
+      if (isAdmin) ...[
+        _QuickActionTile(
+          icon: LucideIcons.shield,
+          label: 'المشرفين',
+          subtitle: 'عرض قائمة المشرفين والمندوبين التابعين لهم',
+          color: const Color(0xFF6C5CE7),
+          onTap: () => context.go('/supervisors'),
+        ),
+        const SizedBox(height: 8),
+      ],
+
+      // Admin or Supervisor quick action for reps
+      if (isAdmin || isSupervisor) ...[
+        _QuickActionTile(
+          icon: LucideIcons.briefcase,
+          label: 'المندوبين',
+          subtitle: 'عرض قائمة مندوبي المبيعات وعملائهم',
+          color: AppColors.secondary,
+          onTap: () => context.go('/sales-reps'),
+        ),
+        const SizedBox(height: 8),
+      ],
+
+      _QuickActionTile(
+        icon: LucideIcons.users,
+        label: 'العملاء',
+        subtitle: 'عرض قائمة العملاء وبياناتهم',
+        color: AppColors.primary,
+        onTap: () => context.go('/customers'),
+      ),
+      const SizedBox(height: 8),
+      _QuickActionTile(
+        icon: LucideIcons.bell,
+        label: 'الإشعارات',
+        subtitle: 'عرض الإشعارات والتنبيهات',
+        color: AppColors.secondary,
+        onTap: () => context.go('/notifications'),
+      ),
+    ];
+  }
+
+  /// Build a row of compact summary cards.
+  Widget _buildSummaryRow({required List<_SummaryItem> items}) {
+    return Row(
+      children: items.asMap().entries.map((entry) {
+        final idx = entry.key;
+        final item = entry.value;
+        return Expanded(
+          child: GestureDetector(
+            onTap: item.onTap,
+            child: Container(
+              margin: EdgeInsets.only(left: idx < items.length - 1 ? 10 : 0),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: item.gradient,
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: item.gradient.first.withOpacity(0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
                   ),
                 ],
               ),
-      ),
+              child: Column(
+                children: [
+                  Icon(item.icon, color: Colors.white, size: 22),
+                  const SizedBox(height: 10),
+                  Text(
+                    '${item.count}',
+                    style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(item.label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                ],
+              ),
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -245,6 +531,16 @@ class _HomeScreenState extends State<HomeScreen> {
         return role ?? '';
     }
   }
+}
+
+/// Helper for the summary row in staff home.
+class _SummaryItem {
+  final IconData icon;
+  final List<Color> gradient;
+  final int count;
+  final String label;
+  final VoidCallback? onTap;
+  const _SummaryItem({required this.icon, required this.gradient, required this.count, required this.label, this.onTap});
 }
 
 class _BalanceCard extends StatelessWidget {

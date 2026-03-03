@@ -824,7 +824,7 @@ export async function mobileRoutes(server: FastifyInstance) {
     async (request, reply) => {
       try {
         const query = request.query as any;
-        const { page = 1, limit = 50, search } = query;
+        const { page = 1, limit = 50, search, sales_rep_id, customer_id } = query;
         const { userId, clientId, branchId, role } = request.user!;
         const offset = (page - 1) * limit;
 
@@ -834,18 +834,75 @@ export async function mobileRoutes(server: FastifyInstance) {
         ];
         let params: any[] = [clientId];
 
-        if (branchId && branchId !== 'null') {
-          whereConditions.push("c.branch_id = ?");
-          params.push(branchId);
+        // If fetching a specific customer by ID, add filter and skip role scoping
+        if (customer_id) {
+          whereConditions.push("c.id = ?");
+          params.push(customer_id);
+
+          const whereClause = whereConditions.join(" AND ");
+          const [customers] = await db.query<RowDataPacket[]>(
+            `SELECT c.id, c.name, c.phone, c.address, c.balance as current_balance, c.credit_limit,
+                    c.bonus_balance, c.previous_statement
+             FROM customers c
+             WHERE ${whereClause}
+             LIMIT 1`,
+            params
+          );
+          return reply.code(200).send({
+            data: customers,
+            pagination: { page: 1, limit: 1, total: customers.length, pages: 1 },
+          });
         }
+
+        // Note: Do NOT filter by branch_id here.
+        // Scoping is via role relationships (sales_rep_id, supervisor_id).
 
         // Role scoping
         if (role === 'customer') {
           // Customer shouldn't list other customers
           return reply.code(200).send({ data: [], pagination: { page: 1, limit, total: 0, pages: 0 } });
         } else if (role === 'sales_rep' || role === 'salesman' || role === 'salesRep') {
-          whereConditions.push("c.sales_rep_id = ?");
-          params.push(userId);
+          // Sales rep: find their linked_sales_rep_id, then get assigned customers
+          const [users] = await db.query<RowDataPacket[]>(
+            "SELECT linked_sales_rep_id FROM users WHERE id = ? AND client_id = ?",
+            [userId, clientId]
+          );
+          if (users.length > 0 && users[0].linked_sales_rep_id) {
+            whereConditions.push("c.sales_rep_id = ?");
+            params.push(users[0].linked_sales_rep_id);
+          } else {
+            whereConditions.push("1 = 0");
+          }
+        } else if (role === 'supervisor') {
+          // Supervisor: get customers of their sales reps (or filtered by a specific sales_rep_id)
+          if (sales_rep_id) {
+            whereConditions.push("c.sales_rep_id = ?");
+            params.push(sales_rep_id);
+          } else {
+            const [users] = await db.query<RowDataPacket[]>(
+              "SELECT linked_supervisor_id FROM users WHERE id = ? AND client_id = ?",
+              [userId, clientId]
+            );
+            if (users.length > 0 && users[0].linked_supervisor_id) {
+              whereConditions.push(`c.sales_rep_id IN (
+                SELECT sr.id FROM sales_reps sr
+                WHERE sr.supervisor_id = ? AND sr.client_id = ? AND sr.is_deleted = 0
+              )`);
+              params.push(users[0].linked_supervisor_id, clientId);
+            }
+          }
+        } else if (role === 'admin') {
+          // Admin: optionally filter by sales_rep_id or supervisor_id
+          if (sales_rep_id) {
+            whereConditions.push("c.sales_rep_id = ?");
+            params.push(sales_rep_id);
+          } else if (query.supervisor_id) {
+            whereConditions.push(`c.sales_rep_id IN (
+              SELECT sr.id FROM sales_reps sr
+              WHERE sr.supervisor_id = ? AND sr.client_id = ? AND sr.is_deleted = 0
+            )`);
+            params.push(query.supervisor_id, clientId);
+          }
         }
 
         if (search) {
@@ -878,6 +935,158 @@ export async function mobileRoutes(server: FastifyInstance) {
       } catch (error) {
         logger.error({ error }, "Failed to fetch mobile customers");
         return reply.code(500).send({ error: "Failed to fetch customers" });
+      }
+    }
+  );
+
+  // ============================================================
+  // GET /api/mobile/sales-reps
+  // For supervisor: list their sales reps
+  // For admin: list all sales reps (optionally filtered by supervisor_id)
+  // ============================================================
+  server.get<{ Querystring: MobileQueryString }>(
+    "/sales-reps",
+    { preHandler: [server.authenticate] },
+    async (request, reply) => {
+      try {
+        const query = request.query as any;
+        const { page = 1, limit = 50, search, supervisor_id } = query;
+        const { userId, clientId, branchId, role } = request.user!;
+        const offset = (page - 1) * limit;
+
+        let whereConditions = [
+          "sr.client_id = ?",
+          "sr.is_deleted = 0",
+        ];
+        let params: any[] = [clientId];
+
+        // Note: Do NOT filter by branch_id here.
+        // Supervisor→sales_rep relationship is via supervisor_id, not branch.
+        // Admin sees all. Branch scoping is not relevant for this endpoint.
+
+        if (role === 'customer' || role === 'sales_rep' || role === 'salesman' || role === 'salesRep') {
+          // Customers and sales reps can't list sales reps
+          return reply.code(200).send({ data: [], pagination: { page: 1, limit, total: 0, pages: 0 } });
+        } else if (role === 'supervisor') {
+          // Supervisor: only their own sales reps
+          const [users] = await db.query<RowDataPacket[]>(
+            "SELECT linked_supervisor_id FROM users WHERE id = ? AND client_id = ?",
+            [userId, clientId]
+          );
+          if (users.length > 0 && users[0].linked_supervisor_id) {
+            whereConditions.push("sr.supervisor_id = ?");
+            params.push(users[0].linked_supervisor_id);
+          } else {
+            whereConditions.push("1 = 0");
+          }
+        } else if (role === 'admin' && supervisor_id) {
+          // Admin filtering by a specific supervisor
+          whereConditions.push("sr.supervisor_id = ?");
+          params.push(supervisor_id);
+        }
+        // admin without supervisor_id filter: sees all sales reps
+
+        if (search) {
+          whereConditions.push("(sr.name LIKE ? OR sr.phone LIKE ?)");
+          params.push(`%${search}%`, `%${search}%`);
+        }
+
+        const whereClause = whereConditions.join(" AND ");
+
+        const [countRows] = await db.query<RowDataPacket[]>(
+          `SELECT COUNT(*) as total FROM sales_reps sr WHERE ${whereClause}`,
+          params
+        );
+        const total = countRows[0].total;
+
+        const [salesReps] = await db.query<RowDataPacket[]>(
+          `SELECT sr.id, sr.name, sr.phone, sr.email, sr.supervisor_id, sr.commission_rate, sr.is_active, sr.notes,
+                  s.name as supervisor_name,
+                  (SELECT COUNT(*) FROM customers c WHERE c.sales_rep_id = sr.id AND c.is_deleted = 0) as customer_count,
+                  COALESCE((SELECT SUM(c2.balance) FROM customers c2 WHERE c2.sales_rep_id = sr.id AND c2.is_deleted = 0), 0) as total_debt
+           FROM sales_reps sr
+           LEFT JOIN supervisors s ON sr.supervisor_id = s.id
+           WHERE ${whereClause}
+           ORDER BY sr.name ASC
+           LIMIT ? OFFSET ?`,
+          [...params, Number(limit), Number(offset)]
+        );
+
+        return reply.code(200).send({
+          data: salesReps,
+          pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / limit) },
+        });
+      } catch (error) {
+        logger.error({ error }, "Failed to fetch sales reps");
+        return reply.code(500).send({ error: "Failed to fetch sales reps" });
+      }
+    }
+  );
+
+  // ============================================================
+  // GET /api/mobile/supervisors
+  // For admin: list all supervisors
+  // ============================================================
+  server.get<{ Querystring: MobileQueryString }>(
+    "/supervisors",
+    { preHandler: [server.authenticate] },
+    async (request, reply) => {
+      try {
+        const query = request.query as any;
+        const { page = 1, limit = 50, search } = query;
+        const { userId, clientId, branchId, role } = request.user!;
+        const offset = (page - 1) * limit;
+
+        if (role !== 'admin') {
+          // Only admins can list supervisors
+          return reply.code(200).send({ data: [], pagination: { page: 1, limit, total: 0, pages: 0 } });
+        }
+
+        let whereConditions = [
+          "sup.client_id = ?",
+          "sup.is_deleted = 0",
+        ];
+        let params: any[] = [clientId];
+
+        // Note: Do NOT filter by branch_id here.
+        // Admin sees all supervisors in the client. Branch scoping is not relevant.
+
+        if (search) {
+          whereConditions.push("(sup.name LIKE ? OR sup.phone LIKE ?)");
+          params.push(`%${search}%`, `%${search}%`);
+        }
+
+        const whereClause = whereConditions.join(" AND ");
+
+        const [countRows] = await db.query<RowDataPacket[]>(
+          `SELECT COUNT(*) as total FROM supervisors sup WHERE ${whereClause}`,
+          params
+        );
+        const total = countRows[0].total;
+
+        const [supervisors] = await db.query<RowDataPacket[]>(
+          `SELECT sup.id, sup.name, sup.phone, sup.email, sup.is_active, sup.notes,
+                  (SELECT COUNT(*) FROM sales_reps sr WHERE sr.supervisor_id = sup.id AND sr.is_deleted = 0) as sales_rep_count,
+                  (SELECT COUNT(*) FROM customers c 
+                   JOIN sales_reps sr2 ON c.sales_rep_id = sr2.id 
+                   WHERE sr2.supervisor_id = sup.id AND c.is_deleted = 0) as customer_count,
+                  COALESCE((SELECT SUM(c3.balance) FROM customers c3 
+                   JOIN sales_reps sr3 ON c3.sales_rep_id = sr3.id 
+                   WHERE sr3.supervisor_id = sup.id AND c3.is_deleted = 0), 0) as total_debt
+           FROM supervisors sup
+           WHERE ${whereClause}
+           ORDER BY sup.name ASC
+           LIMIT ? OFFSET ?`,
+          [...params, Number(limit), Number(offset)]
+        );
+
+        return reply.code(200).send({
+          data: supervisors,
+          pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / limit) },
+        });
+      } catch (error) {
+        logger.error({ error }, "Failed to fetch supervisors");
+        return reply.code(500).send({ error: "Failed to fetch supervisors" });
       }
     }
   );

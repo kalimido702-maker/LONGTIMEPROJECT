@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../config/theme.dart';
 import '../providers/data_provider.dart';
 import '../models/invoice.dart';
+import '../services/invoice_pdf_service.dart';
 
 class InvoiceDetailScreen extends StatefulWidget {
   final String invoiceId;
@@ -17,6 +18,7 @@ class InvoiceDetailScreen extends StatefulWidget {
 class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   Invoice? _invoice;
   bool _isLoading = true;
+  bool _isSharing = false;
 
   @override
   void initState() {
@@ -45,6 +47,20 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     } else if (mounted) {
       setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _shareInvoice(Invoice invoice) async {
+    setState(() => _isSharing = true);
+    try {
+      await InvoicePdfService.shareInvoice(invoice);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('حدث خطأ أثناء إنشاء PDF: $e'), backgroundColor: AppColors.error),
+        );
+      }
+    }
+    if (mounted) setState(() => _isSharing = false);
   }
 
   @override
@@ -81,6 +97,15 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
           icon: const Icon(LucideIcons.arrowRight),
           onPressed: () => Navigator.of(context).pop(),
         ),
+        actions: [
+          IconButton(
+            onPressed: _isSharing ? null : () => _shareInvoice(invoice),
+            icon: _isSharing
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary))
+                : const Icon(LucideIcons.share2, size: 20),
+            tooltip: 'مشاركة الفاتورة PDF',
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -102,33 +127,33 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
             child: Column(
               children: [
                 // Status badge
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: (isPaid ? AppColors.success : AppColors.warning).withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        isPaid ? LucideIcons.checkCircle : LucideIcons.clock,
-                        size: 16,
-                        color: isPaid ? AppColors.success : AppColors.warning,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        isPaid ? 'مدفوعة بالكامل' : 'غير مدفوعة بالكامل',
-                        style: TextStyle(
-                          color: isPaid ? AppColors.success : AppColors.warning,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 20),
+                // Container(
+                //   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                //   decoration: BoxDecoration(
+                //     color: (isPaid ? AppColors.success : AppColors.warning).withOpacity(0.1),
+                //     borderRadius: BorderRadius.circular(20),
+                //   ),
+                //   child: Row(
+                //     mainAxisSize: MainAxisSize.min,
+                //     children: [
+                //       Icon(
+                //         isPaid ? LucideIcons.checkCircle : LucideIcons.clock,
+                //         size: 16,
+                //         color: isPaid ? AppColors.success : AppColors.warning,
+                //       ),
+                //       const SizedBox(width: 6),
+                //       Text(
+                //         isPaid ? 'مدفوعة بالكامل' : 'غير مدفوعة بالكامل',
+                //         style: TextStyle(
+                //           color: isPaid ? AppColors.success : AppColors.warning,
+                //           fontWeight: FontWeight.w600,
+                //           fontSize: 14,
+                //         ),
+                //       ),
+                //     ],
+                //   ),
+                // ),
+                // const SizedBox(height: 20),
 
                 // Total
                 Text(

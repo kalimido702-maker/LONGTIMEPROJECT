@@ -9,6 +9,12 @@ import '../screens/payments_screen.dart';
 import '../screens/returns_screen.dart';
 import '../screens/account_statement_screen.dart';
 import '../screens/notifications_screen.dart';
+import '../screens/customers_screen.dart';
+import '../screens/customer_detail_screen.dart';
+import '../screens/sales_reps_screen.dart';
+import '../screens/sales_rep_detail_screen.dart';
+import '../screens/supervisors_screen.dart';
+import '../screens/supervisor_detail_screen.dart';
 import '../screens/shell_screen.dart';
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -80,6 +86,57 @@ GoRouter createRouter(AuthProvider authProvider) {
             pageBuilder: (context, state) => const NoTransitionPage(
               child: NotificationsScreen(),
             ),
+          ),
+          // Customers list (for sales_rep / supervisor / admin)
+          GoRoute(
+            path: '/customers',
+            pageBuilder: (context, state) => const NoTransitionPage(
+              child: CustomersScreen(),
+            ),
+            routes: [
+              // Customer detail — full screen (no bottom nav)
+              GoRoute(
+                path: ':id',
+                parentNavigatorKey: _rootNavigatorKey,
+                builder: (context, state) => CustomerDetailScreen(
+                  customerId: state.pathParameters['id']!,
+                ),
+              ),
+            ],
+          ),
+          // Sales reps list (for supervisor / admin)
+          GoRoute(
+            path: '/sales-reps',
+            pageBuilder: (context, state) => const NoTransitionPage(
+              child: SalesRepsScreen(),
+            ),
+            routes: [
+              // Sales rep detail — full screen drill-down
+              GoRoute(
+                path: ':id',
+                parentNavigatorKey: _rootNavigatorKey,
+                builder: (context, state) => SalesRepDetailScreen(
+                  salesRepId: state.pathParameters['id']!,
+                ),
+              ),
+            ],
+          ),
+          // Supervisors list (for admin)
+          GoRoute(
+            path: '/supervisors',
+            pageBuilder: (context, state) => const NoTransitionPage(
+              child: SupervisorsScreen(),
+            ),
+            routes: [
+              // Supervisor detail — full screen drill-down
+              GoRoute(
+                path: ':id',
+                parentNavigatorKey: _rootNavigatorKey,
+                builder: (context, state) => SupervisorDetailScreen(
+                  supervisorId: state.pathParameters['id']!,
+                ),
+              ),
+            ],
           ),
         ],
       ),

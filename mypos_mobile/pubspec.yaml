@@ -37,6 +37,10 @@ dependencies:
   url_launcher: ^6.2.0
   # Google Fonts (Cairo)
   google_fonts: ^6.1.0
+  pdf: ^3.11.3
+  share_plus: ^12.0.1
+  path_provider: ^2.1.5
+  printing: ^5.14.2
 
 dev_dependencies:
   flutter_test:
@@ -72,3 +76,5 @@ flutter:
   assets:
     - assets/images/logo.png
     - assets/images/app_icon.png
+    - assets/fonts/Cairo-Regular.ttf
+    - assets/fonts/Cairo-Bold.ttf

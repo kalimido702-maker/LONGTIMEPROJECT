@@ -15,6 +15,8 @@ class ApiConfig {
   static const String returns = '/mobile/returns';
   static const String accountStatement = '/mobile/account-statement';
   static const String customers = '/mobile/customers';
+  static const String salesReps = '/mobile/sales-reps';
+  static const String supervisors = '/mobile/supervisors';
   static const String profile = '/mobile/profile';
   static const String notifications = '/mobile/notifications';
   static String notificationRead(String id) => '/mobile/notifications/$id/read';

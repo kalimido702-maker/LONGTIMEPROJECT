@@ -3,6 +3,8 @@ import '../models/invoice.dart';
 import '../models/payment.dart';
 import '../models/sales_return.dart';
 import '../models/customer.dart';
+import '../models/sales_rep.dart';
+import '../models/supervisor.dart';
 import '../models/account_entry.dart';
 import '../services/api_service.dart';
 
@@ -14,6 +16,8 @@ class DataProvider extends ChangeNotifier {
   List<Payment> _payments = [];
   List<SalesReturn> _returns = [];
   List<Customer> _customers = [];
+  List<SalesRep> _salesReps = [];
+  List<Supervisor> _supervisors = [];
   List<AccountEntry> _accountEntries = [];
   bool _isLoading = false;
   String? _error;
@@ -45,6 +49,8 @@ class DataProvider extends ChangeNotifier {
   List<Payment> get payments => _payments;
   List<SalesReturn> get returns => _returns;
   List<Customer> get customers => _customers;
+  List<SalesRep> get salesReps => _salesReps;
+  List<Supervisor> get supervisors => _supervisors;
   List<AccountEntry> get accountEntries => _accountEntries;
   bool get isLoading => _isLoading;
   String? get error => _error;
@@ -326,13 +332,13 @@ class DataProvider extends ChangeNotifier {
   // ============================================================
   // Customers
   // ============================================================
-  Future<void> loadCustomers({String? search}) async {
+  Future<void> loadCustomers({String? search, String? salesRepId, String? supervisorId}) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      final response = await _api.getCustomers(search: search, limit: 500);
+      final response = await _api.getCustomers(search: search, limit: 500, salesRepId: salesRepId, supervisorId: supervisorId);
       final data = response['data'] as List? ?? [];
       _customers = data.map((j) => Customer.fromJson(j as Map<String, dynamic>)).toList();
 
@@ -341,6 +347,50 @@ class DataProvider extends ChangeNotifier {
     } catch (e) {
       _isLoading = false;
       _error = 'حدث خطأ أثناء تحميل العملاء';
+      notifyListeners();
+    }
+  }
+
+  // ============================================================
+  // Sales Reps
+  // ============================================================
+  Future<void> loadSalesReps({String? search, String? supervisorId}) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final response = await _api.getSalesReps(search: search, limit: 500, supervisorId: supervisorId);
+      final data = response['data'] as List? ?? [];
+      _salesReps = data.map((j) => SalesRep.fromJson(j as Map<String, dynamic>)).toList();
+
+      _isLoading = false;
+      notifyListeners();
+    } catch (e) {
+      _isLoading = false;
+      _error = 'حدث خطأ أثناء تحميل المندوبين';
+      notifyListeners();
+    }
+  }
+
+  // ============================================================
+  // Supervisors
+  // ============================================================
+  Future<void> loadSupervisors({String? search}) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final response = await _api.getSupervisors(search: search, limit: 500);
+      final data = response['data'] as List? ?? [];
+      _supervisors = data.map((j) => Supervisor.fromJson(j as Map<String, dynamic>)).toList();
+
+      _isLoading = false;
+      notifyListeners();
+    } catch (e) {
+      _isLoading = false;
+      _error = 'حدث خطأ أثناء تحميل المشرفين';
       notifyListeners();
     }
   }

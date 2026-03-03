@@ -40,8 +40,15 @@ class Customer {
       previousStatement: _toDouble(json['previousStatement'] ?? json['previous_statement']),
       salesRepId: json['salesRepId'] ?? json['sales_rep_id'],
       notes: json['notes'],
-      isActive: json['isActive'] ?? json['is_active'] ?? true,
+      isActive: _toBool(json['isActive'] ?? json['is_active'] ?? true),
     );
+  }
+
+  static bool _toBool(dynamic val) {
+    if (val is bool) return val;
+    if (val is int) return val == 1;
+    if (val is String) return val == '1' || val.toLowerCase() == 'true';
+    return true;
   }
 
   static double _toDouble(dynamic val) {

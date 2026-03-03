@@ -214,6 +214,46 @@ class ApiService {
     int page = 1,
     int limit = 50,
     String? search,
+    String? salesRepId,
+    String? supervisorId,
+    String? customerId,
+  }) async {
+    final params = <String, dynamic>{
+      'page': page,
+      'limit': limit,
+    };
+    if (search != null) params['search'] = search;
+    if (salesRepId != null) params['sales_rep_id'] = salesRepId;
+    if (supervisorId != null) params['supervisor_id'] = supervisorId;
+    if (customerId != null) params['customer_id'] = customerId;
+
+    final response = await _dio.get(ApiConfig.customers, queryParameters: params);
+    return response.data;
+  }
+
+  /// Sales reps list (for supervisors/admins)
+  Future<Map<String, dynamic>> getSalesReps({
+    int page = 1,
+    int limit = 50,
+    String? search,
+    String? supervisorId,
+  }) async {
+    final params = <String, dynamic>{
+      'page': page,
+      'limit': limit,
+    };
+    if (search != null) params['search'] = search;
+    if (supervisorId != null) params['supervisor_id'] = supervisorId;
+
+    final response = await _dio.get(ApiConfig.salesReps, queryParameters: params);
+    return response.data;
+  }
+
+  /// Supervisors list (for admins)
+  Future<Map<String, dynamic>> getSupervisors({
+    int page = 1,
+    int limit = 50,
+    String? search,
   }) async {
     final params = <String, dynamic>{
       'page': page,
@@ -221,7 +261,7 @@ class ApiService {
     };
     if (search != null) params['search'] = search;
 
-    final response = await _dio.get(ApiConfig.customers, queryParameters: params);
+    final response = await _dio.get(ApiConfig.supervisors, queryParameters: params);
     return response.data;
   }
 
