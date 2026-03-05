@@ -64,7 +64,12 @@ class InvoicePdfService {
   static Future<Uint8List> generatePdf(Invoice invoice) async {
     await _ensureAssets();
 
-    final pdf = pw.Document();
+    final pdf = pw.Document(
+      theme: pw.ThemeData.withFont(
+        base: _cairoRegular,
+        bold: _cairoBold,
+      ),
+    );
     final isReturn = invoice.isReturn;
 
     // Parse date
@@ -454,12 +459,17 @@ class InvoicePdfService {
     final pdfBytes = await generatePdf(invoice);
 
     final dir = await getTemporaryDirectory();
-    final customerName = invoice.customerName ?? 'عميل';
+    // Use safe filename (no Arabic chars) to avoid PathNotFoundException on some devices
     final invNum = invoice.invoiceNumber ?? invoice.id.substring(0, 8);
-    final fileName = '$customerName - فاتورة $invNum.pdf';
-    final file = File('${dir.path}/$fileName');
+    final safeDir = Directory('${dir.path}/pdf');
+    if (!await safeDir.exists()) {
+      await safeDir.create(recursive: true);
+    }
+    final fileName = 'invoice_$invNum.pdf';
+    final file = File('${safeDir.path}/$fileName');
     await file.writeAsBytes(pdfBytes);
 
+    final customerName = invoice.customerName ?? '';
     await SharePlus.instance.share(
       ShareParams(
         files: [XFile(file.path)],
