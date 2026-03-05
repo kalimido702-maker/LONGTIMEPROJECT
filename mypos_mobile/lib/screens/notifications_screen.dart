@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:go_router/go_router.dart';
 import '../config/theme.dart';
 import '../providers/data_provider.dart';
 
@@ -42,6 +43,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             title: json['title'] ?? '',
             body: json['body'] ?? '',
             type: json['type'] ?? 'info',
+            referenceId: json['reference_id']?.toString() ?? '',
+            referenceType: json['reference_type']?.toString() ?? '',
             date: date,
             isRead: json['is_read'] == 1 || json['is_read'] == true,
           );
@@ -107,6 +110,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                               _unreadCount = _unreadCount > 0 ? _unreadCount - 1 : 0;
                             });
                           }
+                          _navigateToNotification(notification);
                         },
                         onDismiss: () {
                           setState(() {
@@ -121,6 +125,29 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   ),
                 ),
     );
+  }
+
+  void _navigateToNotification(_NotificationItem notification) {
+    final type = notification.type;
+    final refId = notification.referenceId;
+
+    switch (type) {
+      case 'invoice':
+        if (refId.isNotEmpty) {
+          context.push('/invoices/$refId');
+        } else {
+          context.go('/invoices');
+        }
+        break;
+      case 'payment':
+        context.go('/payments');
+        break;
+      case 'return':
+        context.go('/returns');
+        break;
+      default:
+        break;
+    }
   }
 
   Widget _buildEmptyState() {
@@ -255,7 +282,7 @@ class _NotificationCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      notification.body,
+                      notification.body.replaceAll("ر.س", "جنيه"), // Replace "ر.س" with "جنيه"
                       style: TextStyle(
                         fontSize: 13,
                         color: Colors.grey[600],
@@ -297,6 +324,8 @@ class _NotificationItem {
   final String title;
   final String body;
   final String type;
+  final String referenceId;
+  final String referenceType;
   final DateTime date;
   bool isRead;
 
@@ -305,6 +334,8 @@ class _NotificationItem {
     required this.title,
     required this.body,
     required this.type,
+    this.referenceId = '',
+    this.referenceType = '',
     required this.date,
     required this.isRead,
   });

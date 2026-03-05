@@ -80,32 +80,32 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 48),
 
                   // Server URL (collapsible)
-                  GestureDetector(
-                    onTap: () => setState(() => _showServerField = !_showServerField),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          LucideIcons.server,
-                          size: 16,
-                          color: AppColors.textSecondary,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          'إعدادات السيرفر',
-                          style: TextStyle(
-                            color: AppColors.textSecondary,
-                            fontSize: 13,
-                          ),
-                        ),
-                        Icon(
-                          _showServerField ? LucideIcons.chevronUp : LucideIcons.chevronDown,
-                          size: 16,
-                          color: AppColors.textSecondary,
-                        ),
-                      ],
-                    ),
-                  ),
+                  // GestureDetector(
+                  //   onTap: () => setState(() => _showServerField = !_showServerField),
+                  //   child: Row(
+                  //     mainAxisAlignment: MainAxisAlignment.center,
+                  //     children: [
+                  //       Icon(
+                  //         LucideIcons.server,
+                  //         size: 16,
+                  //         color: AppColors.textSecondary,
+                  //       ),
+                  //       const SizedBox(width: 6),
+                  //       Text(
+                  //         'إعدادات السيرفر',
+                  //         style: TextStyle(
+                  //           color: AppColors.textSecondary,
+                  //           fontSize: 13,
+                  //         ),
+                  //       ),
+                  //       Icon(
+                  //         _showServerField ? LucideIcons.chevronUp : LucideIcons.chevronDown,
+                  //         size: 16,
+                  //         color: AppColors.textSecondary,
+                  //       ),
+                  //     ],
+                  //   ),
+                  // ),
 
                   if (_showServerField) ...[
                     const SizedBox(height: 12),
