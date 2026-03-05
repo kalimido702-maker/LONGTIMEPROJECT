@@ -17,12 +17,12 @@ import '../screens/supervisors_screen.dart';
 import '../screens/supervisor_detail_screen.dart';
 import '../screens/shell_screen.dart';
 
-final _rootNavigatorKey = GlobalKey<NavigatorState>();
+final rootNavigatorKey = GlobalKey<NavigatorState>();
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
 
 GoRouter createRouter(AuthProvider authProvider) {
   return GoRouter(
-    navigatorKey: _rootNavigatorKey,
+    navigatorKey: rootNavigatorKey,
     initialLocation: '/home',
     refreshListenable: authProvider,
     redirect: (context, state) {
@@ -56,7 +56,7 @@ GoRouter createRouter(AuthProvider authProvider) {
             routes: [
               GoRoute(
                 path: ':id',
-                parentNavigatorKey: _rootNavigatorKey,
+                parentNavigatorKey: rootNavigatorKey,
                 builder: (context, state) => InvoiceDetailScreen(
                   invoiceId: state.pathParameters['id']!,
                 ),
@@ -97,7 +97,7 @@ GoRouter createRouter(AuthProvider authProvider) {
               // Customer detail — full screen (no bottom nav)
               GoRoute(
                 path: ':id',
-                parentNavigatorKey: _rootNavigatorKey,
+                parentNavigatorKey: rootNavigatorKey,
                 builder: (context, state) => CustomerDetailScreen(
                   customerId: state.pathParameters['id']!,
                 ),
@@ -114,7 +114,7 @@ GoRouter createRouter(AuthProvider authProvider) {
               // Sales rep detail — full screen drill-down
               GoRoute(
                 path: ':id',
-                parentNavigatorKey: _rootNavigatorKey,
+                parentNavigatorKey: rootNavigatorKey,
                 builder: (context, state) => SalesRepDetailScreen(
                   salesRepId: state.pathParameters['id']!,
                 ),
@@ -131,7 +131,7 @@ GoRouter createRouter(AuthProvider authProvider) {
               // Supervisor detail — full screen drill-down
               GoRoute(
                 path: ':id',
-                parentNavigatorKey: _rootNavigatorKey,
+                parentNavigatorKey: rootNavigatorKey,
                 builder: (context, state) => SupervisorDetailScreen(
                   supervisorId: state.pathParameters['id']!,
                 ),

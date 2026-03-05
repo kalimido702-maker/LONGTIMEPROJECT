@@ -178,13 +178,14 @@ class NotificationService {
       invoice.total || invoice.total_amount || invoice.totalAmount || 0;
     const invoiceNumber =
       invoice.invoice_number || invoice.invoiceNumber || invoice.id;
+    const customerName = invoice.customer_name || invoice.customerName || '';
 
     await this.sendNotification({
       clientId,
       branchId,
       customerId,
       title: "فاتورة جديدة",
-      body: `تم إصدار فاتورة رقم ${invoiceNumber} بقيمة ${Number(total).toFixed(2)} ر.س`,
+      body: `العميل ${customerName} - تم إصدار فاتورة رقم ${invoiceNumber} بقيمة ${Number(total).toFixed(2)} جنيه`,
       type: "invoice",
       referenceId: invoice.id,
       referenceType: "invoice",
@@ -208,13 +209,14 @@ class NotificationService {
     if (!customerId) return;
 
     const amount = payment.amount || 0;
+    const customerName = payment.customer_name || payment.customerName || '';
 
     await this.sendNotification({
       clientId,
       branchId,
       customerId,
       title: "تم استلام دفعة",
-      body: `تم تسجيل دفعة بقيمة ${Number(amount).toFixed(2)} ر.س`,
+      body: `العميل ${customerName} - تم استلام دفعة بقيمة ${Number(amount).toFixed(2)} جنيه`,
       type: "payment",
       referenceId: payment.id,
       referenceType: "payment",
@@ -239,13 +241,14 @@ class NotificationService {
 
     const total =
       salesReturn.total || salesReturn.total_amount || salesReturn.totalAmount || 0;
+    const customerName = salesReturn.customer_name || salesReturn.customerName || '';
 
     await this.sendNotification({
       clientId,
       branchId,
       customerId,
       title: "مرتجع مبيعات",
-      body: `تم تسجيل مرتجع بقيمة ${Number(total).toFixed(2)} ر.س`,
+      body: `العميل ${customerName} - تم تسجيل مرتجع بقيمة ${Number(total).toFixed(2)} جنيه`,
       type: "return",
       referenceId: salesReturn.id,
       referenceType: "sales_return",
@@ -263,6 +266,7 @@ class NotificationService {
 
   /**
    * Get FCM tokens for the target user/customer
+   * Also sends to the customer's sales rep and their supervisor
    * Priority: userId > customerId > all users in branch
    */
   private async getTargetTokens(
@@ -297,11 +301,92 @@ class NotificationService {
           );
           tokens = rows.map((r) => r.token);
         }
+
+        // Also notify the sales rep and supervisor assigned to this customer
+        const repSupervisorTokens = await this.getRepAndSupervisorTokens(
+          clientId,
+          customerId
+        );
+        tokens.push(...repSupervisorTokens);
       }
 
       return [...new Set(tokens)]; // Deduplicate
     } catch (error) {
       logger.error({ error }, "Failed to fetch FCM tokens");
+      return [];
+    }
+  }
+
+  /**
+   * Get FCM tokens for the sales rep and supervisor linked to a customer
+   * Customer → sales_rep_id → supervisor_id
+   * Then find users linked to those reps/supervisors via linked_sales_rep_id / linked_supervisor_id
+   */
+  private async getRepAndSupervisorTokens(
+    clientId: string,
+    customerId: string
+  ): Promise<string[]> {
+    try {
+      const tokens: string[] = [];
+
+      // 1. Get the customer's sales_rep_id
+      const [customerRows] = await db.query<RowDataPacket[]>(
+        "SELECT sales_rep_id FROM customers WHERE id = ? AND client_id = ?",
+        [customerId, clientId]
+      );
+
+      const salesRepId = customerRows[0]?.sales_rep_id;
+      if (!salesRepId) return tokens;
+
+      // 2. Get the sales rep's supervisor_id
+      const [repRows] = await db.query<RowDataPacket[]>(
+        "SELECT supervisor_id FROM sales_reps WHERE id = ? AND client_id = ?",
+        [salesRepId, clientId]
+      );
+      const supervisorId = repRows[0]?.supervisor_id;
+
+      // 3. Find user accounts linked to this sales rep
+      const [repUsers] = await db.query<RowDataPacket[]>(
+        "SELECT id FROM users WHERE linked_sales_rep_id = ? AND client_id = ? AND is_active = 1",
+        [salesRepId, clientId]
+      );
+
+      // 4. Find user accounts linked to the supervisor (if exists)
+      let supervisorUsers: RowDataPacket[] = [];
+      if (supervisorId) {
+        const [supRows] = await db.query<RowDataPacket[]>(
+          "SELECT id FROM users WHERE linked_supervisor_id = ? AND client_id = ? AND is_active = 1",
+          [supervisorId, clientId]
+        );
+        supervisorUsers = supRows;
+      }
+
+      // 5. Collect all user IDs and fetch their FCM tokens
+      const allUserIds = [
+        ...repUsers.map((u) => u.id),
+        ...supervisorUsers.map((u) => u.id),
+      ];
+
+      if (allUserIds.length > 0) {
+        const placeholders = allUserIds.map(() => "?").join(",");
+        const [tokenRows] = await db.query<RowDataPacket[]>(
+          `SELECT token FROM fcm_tokens WHERE user_id IN (${placeholders}) AND client_id = ? AND is_active = 1`,
+          [...allUserIds, clientId]
+        );
+        tokens.push(...tokenRows.map((r) => r.token));
+      }
+
+      logger.debug(
+        { customerId, salesRepId, supervisorId, tokenCount: tokens.length },
+        "Fetched sales rep & supervisor tokens for customer notification"
+      );
+
+      return tokens;
+    } catch (error) {
+      logger.error(
+        { error, customerId },
+        "Failed to fetch rep/supervisor FCM tokens"
+      );
       return [];
     }
   }

@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:go_router/go_router.dart';
 import '../firebase_options.dart';
+import '../config/router.dart';
 import 'api_service.dart';
 
 /// Background message handler — must be top-level function
@@ -85,10 +87,13 @@ class NotificationService {
     FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
 
     // Handle notification taps when app was terminated
-    // final initialMessage = await _messaging.getInitialMessage();
-    // if (initialMessage != null) {
-    //   _handleNotificationNavigation(initialMessage.data);
-    // }
+    final initialMessage = await _messaging.getInitialMessage();
+    if (initialMessage != null) {
+      // Delay to allow router to be ready
+      Future.delayed(const Duration(seconds: 2), () {
+        _handleNotificationNavigation(initialMessage.data);
+      });
+    }
 
     // Handle notification taps when app was in background
     FirebaseMessaging.onMessageOpenedApp.listen((message) {
@@ -180,8 +185,30 @@ class NotificationService {
 
   /// Navigate based on notification data
   static void _handleNotificationNavigation(Map<String, dynamic> data) {
-    // Navigation can be handled here based on notification type
-    // e.g., data['type'] == 'invoice' → navigate to invoice detail
-    // This can be connected to GoRouter later
+    final type = data['type'] as String? ?? '';
+    final referenceId = data['referenceId'] as String? ?? '';
+    // referenceType available in data['referenceType'] if needed
+
+    final context = rootNavigatorKey.currentContext;
+    if (context == null) return;
+
+    switch (type) {
+      case 'invoice':
+        if (referenceId.isNotEmpty) {
+          GoRouter.of(context).push('/invoices/$referenceId');
+        } else {
+          GoRouter.of(context).go('/invoices');
+        }
+        break;
+      case 'payment':
+        GoRouter.of(context).go('/payments');
+        break;
+      case 'return':
+        GoRouter.of(context).go('/returns');
+        break;
+      default:
+        GoRouter.of(context).go('/notifications');
+        break;
+    }
   }
 }
