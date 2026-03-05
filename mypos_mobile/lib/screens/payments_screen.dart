@@ -8,7 +8,8 @@ import '../models/payment.dart';
 import '../widgets/date_filter_widget.dart';
 
 class PaymentsScreen extends StatefulWidget {
-  const PaymentsScreen({super.key});
+  final String? filterId;
+  const PaymentsScreen({super.key, this.filterId});
 
   @override
   State<PaymentsScreen> createState() => _PaymentsScreenState();
@@ -53,6 +54,12 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
     final dateFormatter = DateFormat('yyyy/MM/dd', 'ar');
 
     var payments = dataProvider.payments;
+
+    // Apply notification filter (show only specific payment)
+    if (widget.filterId != null && widget.filterId!.isNotEmpty) {
+      payments = payments.where((p) => p.id == widget.filterId).toList();
+    }
+
     if (_searchQuery.isNotEmpty) {
       payments = payments.where((p) {
         final q = _searchQuery.toLowerCase();

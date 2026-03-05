@@ -9,7 +9,8 @@ import '../models/invoice.dart';
 import '../widgets/date_filter_widget.dart';
 
 class InvoicesScreen extends StatefulWidget {
-  const InvoicesScreen({super.key});
+  final String? filterId;
+  const InvoicesScreen({super.key, this.filterId});
 
   @override
   State<InvoicesScreen> createState() => _InvoicesScreenState();
@@ -56,6 +57,11 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
 
     // Only show delivered invoices (business rule)
     var invoices = dataProvider.deliveredInvoices;
+
+    // Apply notification filter (show only specific invoice)
+    if (widget.filterId != null && widget.filterId!.isNotEmpty) {
+      invoices = invoices.where((i) => i.id == widget.filterId).toList();
+    }
 
     // Apply search filter
     if (_searchQuery.isNotEmpty) {

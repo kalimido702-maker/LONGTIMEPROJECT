@@ -8,7 +8,8 @@ import '../models/sales_return.dart';
 import '../widgets/date_filter_widget.dart';
 
 class ReturnsScreen extends StatefulWidget {
-  const ReturnsScreen({super.key});
+  final String? filterId;
+  const ReturnsScreen({super.key, this.filterId});
 
   @override
   State<ReturnsScreen> createState() => _ReturnsScreenState();
@@ -53,6 +54,12 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
     final dateFormatter = DateFormat('yyyy/MM/dd', 'ar');
 
     var returns = dataProvider.returns;
+
+    // Apply notification filter (show only specific return)
+    if (widget.filterId != null && widget.filterId!.isNotEmpty) {
+      returns = returns.where((r) => r.id == widget.filterId).toList();
+    }
+
     if (_searchQuery.isNotEmpty) {
       returns = returns.where((r) {
         final q = _searchQuery.toLowerCase();

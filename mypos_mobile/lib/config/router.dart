@@ -50,9 +50,12 @@ GoRouter createRouter(AuthProvider authProvider) {
           ),
           GoRoute(
             path: '/invoices',
-            pageBuilder: (context, state) => const NoTransitionPage(
-              child: InvoicesScreen(),
-            ),
+            pageBuilder: (context, state) {
+              final filterId = state.uri.queryParameters['filterId'];
+              return NoTransitionPage(
+                child: InvoicesScreen(filterId: filterId),
+              );
+            },
             routes: [
               GoRoute(
                 path: ':id',
@@ -65,15 +68,21 @@ GoRouter createRouter(AuthProvider authProvider) {
           ),
           GoRoute(
             path: '/payments',
-            pageBuilder: (context, state) => const NoTransitionPage(
-              child: PaymentsScreen(),
-            ),
+            pageBuilder: (context, state) {
+              final filterId = state.uri.queryParameters['filterId'];
+              return NoTransitionPage(
+                child: PaymentsScreen(filterId: filterId),
+              );
+            },
           ),
           GoRoute(
             path: '/returns',
-            pageBuilder: (context, state) => const NoTransitionPage(
-              child: ReturnsScreen(),
-            ),
+            pageBuilder: (context, state) {
+              final filterId = state.uri.queryParameters['filterId'];
+              return NoTransitionPage(
+                child: ReturnsScreen(filterId: filterId),
+              );
+            },
           ),
           GoRoute(
             path: '/statement',

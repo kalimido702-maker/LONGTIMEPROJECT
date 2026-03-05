@@ -195,16 +195,24 @@ class NotificationService {
     switch (type) {
       case 'invoice':
         if (referenceId.isNotEmpty) {
-          GoRouter.of(context).push('/invoices/$referenceId');
+          GoRouter.of(context).go('/invoices?filterId=$referenceId');
         } else {
           GoRouter.of(context).go('/invoices');
         }
         break;
       case 'payment':
-        GoRouter.of(context).go('/payments');
+        if (referenceId.isNotEmpty) {
+          GoRouter.of(context).go('/payments?filterId=$referenceId');
+        } else {
+          GoRouter.of(context).go('/payments');
+        }
         break;
       case 'return':
-        GoRouter.of(context).go('/returns');
+        if (referenceId.isNotEmpty) {
+          GoRouter.of(context).go('/returns?filterId=$referenceId');
+        } else {
+          GoRouter.of(context).go('/returns');
+        }
         break;
       default:
         GoRouter.of(context).go('/notifications');

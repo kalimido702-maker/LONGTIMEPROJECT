@@ -134,16 +134,24 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     switch (type) {
       case 'invoice':
         if (refId.isNotEmpty) {
-          context.push('/invoices/$refId');
+          context.go('/invoices?filterId=$refId');
         } else {
           context.go('/invoices');
         }
         break;
       case 'payment':
-        context.go('/payments');
+        if (refId.isNotEmpty) {
+          context.go('/payments?filterId=$refId');
+        } else {
+          context.go('/payments');
+        }
         break;
       case 'return':
-        context.go('/returns');
+        if (refId.isNotEmpty) {
+          context.go('/returns?filterId=$refId');
+        } else {
+          context.go('/returns');
+        }
         break;
       default:
         break;
