@@ -148,7 +148,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
       );
       final data = res['data'] as List? ?? [];
       _invoices = data.map((j) => Invoice.fromJson(j as Map<String, dynamic>)).toList();
-      _totalInvoices = _invoices.fold(0.0, (sum, i) => sum + i.total);
+      // Use server-side totals (covers ALL records, not just paginated)
+      final totals = res['totals'] as Map<String, dynamic>?;
+      _totalInvoices = _toDouble(totals?['total_amount'] ?? _invoices.fold(0.0, (sum, i) => sum + i.total));
     } catch (_) {}
     if (mounted) setState(() => _loadingInvoices = false);
   }
@@ -165,7 +167,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
       );
       final data = res['data'] as List? ?? [];
       _payments = data.map((j) => Payment.fromJson(j as Map<String, dynamic>)).toList();
-      _totalPayments = _payments.fold(0.0, (sum, p) => sum + p.amount);
+      // Use server-side totals
+      final totals = res['totals'] as Map<String, dynamic>?;
+      _totalPayments = _toDouble(totals?['total_amount'] ?? _payments.fold(0.0, (sum, p) => sum + p.amount));
     } catch (_) {}
     if (mounted) setState(() => _loadingPayments = false);
   }
@@ -182,7 +186,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
       );
       final data = res['data'] as List? ?? [];
       _returns = data.map((j) => SalesReturn.fromJson(j as Map<String, dynamic>)).toList();
-      _totalReturns = _returns.fold(0.0, (sum, r) => sum + (r.total > 0 ? r.total : r.totalAmount));
+      // Use server-side totals
+      final totals = res['totals'] as Map<String, dynamic>?;
+      _totalReturns = _toDouble(totals?['total_amount'] ?? _returns.fold(0.0, (sum, r) => sum + (r.total > 0 ? r.total : r.totalAmount)));
     } catch (_) {}
     if (mounted) setState(() => _loadingReturns = false);
   }
