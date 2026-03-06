@@ -129,20 +129,6 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                         onTap: () => setState(() => _filterStatus = 'all'),
                       ),
                       const SizedBox(width: 8),
-                      _FilterChip(
-                        label: 'مدفوعة',
-                        isSelected: _filterStatus == 'paid',
-                        count: dataProvider.deliveredInvoices.where((i) => i.isPaid).length,
-                        onTap: () => setState(() => _filterStatus = 'paid'),
-                      ),
-                      const SizedBox(width: 8),
-                      _FilterChip(
-                        label: 'غير مدفوعة',
-                        isSelected: _filterStatus == 'unpaid',
-                        count: dataProvider.deliveredInvoices.where((i) => !i.isPaid).length,
-                        onTap: () => setState(() => _filterStatus = 'unpaid'),
-                      ),
-                      const SizedBox(width: 12),
                       DateFilterWidget(
                         fromDate: _fromDate,
                         toDate: _toDate,
@@ -284,7 +270,7 @@ class _InvoiceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isPaid = invoice.isPaid;
     final statusColor = isPaid ? AppColors.success : AppColors.warning;
-    final statusText = isPaid ? 'مدفوعة' : 'غير مدفوعة';
+    // final statusText = isPaid ? 'مدفوعة' : 'غير مدفوعة';
 
     DateTime? parsedDate;
     try {
@@ -347,22 +333,22 @@ class _InvoiceCard extends StatelessWidget {
                           color: AppColors.textPrimary,
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: statusColor.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          statusText,
-                          style: TextStyle(
-                            color: statusColor,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
+                      // const SizedBox(height: 4),
+                      // Container(
+                      //   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      //   decoration: BoxDecoration(
+                      //     color: statusColor.withOpacity(0.1),
+                      //     borderRadius: BorderRadius.circular(8),
+                      //   ),
+                      //   child: Text(
+                      //     statusText,
+                      //     style: TextStyle(
+                      //       color: statusColor,
+                      //       fontSize: 11,
+                      //       fontWeight: FontWeight.w600,
+                      //     ),
+                      //   ),
+                      // ),
                     ],
                   ),
                 ],

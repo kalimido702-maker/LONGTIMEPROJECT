@@ -132,14 +132,14 @@ export async function mobileRoutes(server: FastifyInstance) {
           params.push(...scope.params);
         }
 
-        // Date filters for invoices
+        // Date filters for invoices (use invoice_date, not created_at)
         if (from_date) {
-          whereConditions.push("i.created_at >= ?");
-          params.push(from_date + ' 00:00:00');
+          whereConditions.push("i.invoice_date >= ?");
+          params.push(from_date);
         }
         if (to_date) {
-          whereConditions.push("i.created_at <= ?");
-          params.push(to_date + ' 23:59:59');
+          whereConditions.push("i.invoice_date <= ?");
+          params.push(to_date);
         }
 
         const whereClause = whereConditions.join(" AND ");
@@ -156,9 +156,12 @@ export async function mobileRoutes(server: FastifyInstance) {
           params
         );
 
-        // Customer balance (if customer role)
+        // Customer balance / total customers balance
         let customerBalance = null;
+        let totalCustomersBalance = 0;
+
         if (role === 'customer') {
+          // Customer: get their own balance info
           const [users] = await db.query<RowDataPacket[]>(
             "SELECT linked_customer_id FROM users WHERE id = ?",
             [userId]
@@ -174,6 +177,48 @@ export async function mobileRoutes(server: FastifyInstance) {
               customerBalance = balanceRows[0];
             }
           }
+        } else if (role === 'sales_rep' || role === 'salesman' || role === 'salesRep') {
+          // Sales rep: get total balance of their assigned customers
+          const [users] = await db.query<RowDataPacket[]>(
+            "SELECT linked_sales_rep_id FROM users WHERE id = ? AND client_id = ?",
+            [userId, clientId]
+          );
+          const salesRepId = users[0]?.linked_sales_rep_id;
+          if (salesRepId) {
+            const [balRows] = await db.query<RowDataPacket[]>(
+              `SELECT COALESCE(SUM(balance), 0) as total_balance
+               FROM customers
+               WHERE sales_rep_id = ? AND client_id = ? AND is_deleted = 0`,
+              [salesRepId, clientId]
+            );
+            totalCustomersBalance = Number(balRows[0]?.total_balance || 0);
+          }
+        } else if (role === 'supervisor') {
+          // Supervisor: get total balance of all customers under their reps
+          const [users] = await db.query<RowDataPacket[]>(
+            "SELECT linked_supervisor_id FROM users WHERE id = ? AND client_id = ?",
+            [userId, clientId]
+          );
+          const supervisorId = users[0]?.linked_supervisor_id;
+          if (supervisorId) {
+            const [balRows] = await db.query<RowDataPacket[]>(
+              `SELECT COALESCE(SUM(c.balance), 0) as total_balance
+               FROM customers c
+               JOIN sales_reps sr ON c.sales_rep_id = sr.id
+               WHERE sr.supervisor_id = ? AND c.client_id = ? AND c.is_deleted = 0`,
+              [supervisorId, clientId]
+            );
+            totalCustomersBalance = Number(balRows[0]?.total_balance || 0);
+          }
+        } else {
+          // Admin: total balance of all customers
+          const [balRows] = await db.query<RowDataPacket[]>(
+            `SELECT COALESCE(SUM(balance), 0) as total_balance
+             FROM customers
+             WHERE client_id = ? AND is_deleted = 0`,
+            [clientId]
+          );
+          totalCustomersBalance = Number(balRows[0]?.total_balance || 0);
         }
 
         // Payment stats (same scope)
@@ -194,14 +239,14 @@ export async function mobileRoutes(server: FastifyInstance) {
           payParams.push(...payScope.params);
         }
 
-        // Date filters for payments
+        // Date filters for payments (use payment_date, not created_at)
         if (from_date) {
-          payWhereConditions.push("p.created_at >= ?");
-          payParams.push(from_date + ' 00:00:00');
+          payWhereConditions.push("COALESCE(p.payment_date, p.created_at) >= ?");
+          payParams.push(from_date);
         }
         if (to_date) {
-          payWhereConditions.push("p.created_at <= ?");
-          payParams.push(to_date + ' 23:59:59');
+          payWhereConditions.push("COALESCE(p.payment_date, p.created_at) <= ?");
+          payParams.push(to_date);
         }
 
         const payWhereClause = payWhereConditions.join(" AND ");
@@ -232,14 +277,14 @@ export async function mobileRoutes(server: FastifyInstance) {
           retParams.push(...retScope.params);
         }
 
-        // Date filters for returns
+        // Date filters for returns (use return_date, not created_at)
         if (from_date) {
-          retWhereConditions.push("sr.created_at >= ?");
-          retParams.push(from_date + ' 00:00:00');
+          retWhereConditions.push("COALESCE(sr.return_date, sr.created_at) >= ?");
+          retParams.push(from_date);
         }
         if (to_date) {
-          retWhereConditions.push("sr.created_at <= ?");
-          retParams.push(to_date + ' 23:59:59');
+          retWhereConditions.push("COALESCE(sr.return_date, sr.created_at) <= ?");
+          retParams.push(to_date);
         }
 
         const retWhereClause = retWhereConditions.join(" AND ");
@@ -258,6 +303,7 @@ export async function mobileRoutes(server: FastifyInstance) {
             payments: payStats[0],
             returns: retStats[0],
             customer: customerBalance,
+            totalCustomersBalance,
           },
         });
       } catch (error) {
@@ -1166,26 +1212,61 @@ export async function mobileRoutes(server: FastifyInstance) {
         const { userId, clientId, branchId, role } = request.user!;
         const offset = (page - 1) * limit;
 
-        let targetUserId = userId;
-        let targetCustomerId: string | null = null;
+        let whereConditions: string[] = ["n.client_id = ?"];
+        let params: any[] = [clientId];
 
         if (role === 'customer') {
+          // Customer: see notifications for their linked_customer_id or targeted to their user_id
           const [users] = await db.query<RowDataPacket[]>(
             "SELECT linked_customer_id FROM users WHERE id = ?",
             [userId]
           );
-          if (users.length > 0 && users[0].linked_customer_id) {
-            targetCustomerId = users[0].linked_customer_id;
+          const linkedCustomerId = users[0]?.linked_customer_id;
+          if (linkedCustomerId) {
+            whereConditions.push(`(n.user_id = ? OR n.customer_id = ?)`);
+            params.push(userId, linkedCustomerId);
+          } else {
+            whereConditions.push(`n.user_id = ?`);
+            params.push(userId);
           }
-        }
-
-        let whereConditions = [
-          "n.client_id = ?",
-          `(n.user_id = ? ${targetCustomerId ? 'OR n.customer_id = ?' : ''} OR n.user_id IS NULL)`,
-        ];
-        let params: any[] = [clientId, targetUserId];
-        if (targetCustomerId) {
-          params.push(targetCustomerId);
+        } else if (role === 'sales_rep' || role === 'salesman' || role === 'salesRep') {
+          // Sales rep: see notifications for their assigned customers
+          const [users] = await db.query<RowDataPacket[]>(
+            "SELECT linked_sales_rep_id FROM users WHERE id = ? AND client_id = ?",
+            [userId, clientId]
+          );
+          const salesRepId = users[0]?.linked_sales_rep_id;
+          if (salesRepId) {
+            whereConditions.push(`(n.user_id = ? OR n.customer_id IN (
+              SELECT id FROM customers WHERE sales_rep_id = ? AND client_id = ? AND is_deleted = 0
+            ))`);
+            params.push(userId, salesRepId, clientId);
+          } else {
+            whereConditions.push(`n.user_id = ?`);
+            params.push(userId);
+          }
+        } else if (role === 'supervisor') {
+          // Supervisor: see notifications for all customers under their sales reps
+          const [users] = await db.query<RowDataPacket[]>(
+            "SELECT linked_supervisor_id FROM users WHERE id = ? AND client_id = ?",
+            [userId, clientId]
+          );
+          const supervisorId = users[0]?.linked_supervisor_id;
+          if (supervisorId) {
+            whereConditions.push(`(n.user_id = ? OR n.customer_id IN (
+              SELECT c.id FROM customers c
+              JOIN sales_reps sr ON c.sales_rep_id = sr.id
+              WHERE sr.supervisor_id = ? AND c.client_id = ? AND c.is_deleted = 0
+            ))`);
+            params.push(userId, supervisorId, clientId);
+          } else {
+            // No linked supervisor — show all (admin-like fallback)
+            whereConditions.push(`(n.user_id = ? OR n.user_id IS NULL)`);
+            params.push(userId);
+          }
+        } else {
+          // admin / super_admin: see all notifications for this client
+          // No additional filtering needed (already filtered by client_id)
         }
 
         const whereClause = whereConditions.join(" AND ");

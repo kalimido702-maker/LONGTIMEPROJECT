@@ -31,6 +31,7 @@ class DataProvider extends ChangeNotifier {
   double _totalPaymentAmount = 0;
   int _totalReturns = 0;
   double _totalReturnAmount = 0;
+  double _totalCustomersBalance = 0;
 
   // Customer info (for customer role)
   Map<String, dynamic>? _customerInfo;
@@ -62,6 +63,7 @@ class DataProvider extends ChangeNotifier {
   double get totalPaymentAmount => _totalPaymentAmount;
   int get totalReturns => _totalReturns;
   double get totalReturnAmount => _totalReturnAmount;
+  double get totalCustomersBalance => _totalCustomersBalance;
   Map<String, dynamic>? get customerInfo => _customerInfo;
   bool get hasMoreInvoices => _hasMoreInvoices;
   bool get hasMorePayments => _hasMorePayments;
@@ -98,6 +100,9 @@ class DataProvider extends ChangeNotifier {
 
       // Customer info (for customer role)
       _customerInfo = data['customer'] as Map<String, dynamic>?;
+
+      // Total customers balance (for staff roles: sales_rep, supervisor, admin)
+      _totalCustomersBalance = _toDouble(data['totalCustomersBalance']);
 
       _isLoading = false;
       notifyListeners();

@@ -177,7 +177,7 @@ class NotificationService {
   static void _onNotificationTapped(NotificationResponse response) {
     if (response.payload != null) {
       try {
-        final data = json.decode(response.payload!);
+        final data = Map<String, dynamic>.from(json.decode(response.payload!));
         _handleNotificationNavigation(data);
       } catch (_) {}
     }

@@ -359,6 +359,13 @@ class _HomeScreenState extends State<HomeScreen> {
       ],
       const SizedBox(height: 12),
 
+      // Total customers debt card
+      _TotalDebtCard(
+        totalBalance: dataProvider.totalCustomersBalance,
+        formatter: formatter,
+      ),
+      const SizedBox(height: 12),
+
       // Date filter
       Center(
         child: DateFilterWidget(
@@ -742,6 +749,63 @@ class _QuickActionTile extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _TotalDebtCard extends StatelessWidget {
+  final double totalBalance;
+  final NumberFormat formatter;
+
+  const _TotalDebtCard({
+    required this.totalBalance,
+    required this.formatter,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFE74C3C), Color(0xFFC0392B)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFE74C3C).withOpacity(0.3),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(LucideIcons.alertTriangle, color: Colors.white, size: 24),
+              ),
+              const SizedBox(width: 12),
+              Text('إجمالي المديونيات', style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 15)),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Text(
+            '${formatter.format(totalBalance)} جنيه',
+            style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold),
+          ),
+        ],
       ),
     );
   }
