@@ -3,6 +3,16 @@ import App from "./App.tsx";
 import "./index.css";
 import { db } from "./shared/lib/indexedDB";
 import { SyncProvider } from "./components/sync";
+import { getLoggingService } from "./infrastructure/logging";
+
+// تهيئة نظام التسجيل (Logging) أولاً - قبل أي شيء آخر
+const logger = getLoggingService();
+logger.init().then(() => {
+  console.log("✅ Logging service initialized");
+}).catch((err) => {
+  // Use original console since interception might not be set up yet
+  logger.getOriginalConsole().error("❌ Failed to init logging:", err);
+});
 
 // تهيئة قاعدة البيانات قبل بدء التطبيق
 db.init()

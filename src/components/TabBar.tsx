@@ -105,6 +105,7 @@ const menuGroups = [
             { path: '/roles-permissions', permission: 'settings', name: 'الأدوار والصلاحيات' },
             { path: '/print-settings', permission: 'settings', name: 'إعدادات الطباعة' },
             { path: '/mobile-accounts', permission: 'settings', name: 'حسابات الموبايل' },
+            { path: '/logs', permission: 'settings', name: 'سجلات النظام' },
         ],
     },
 ];

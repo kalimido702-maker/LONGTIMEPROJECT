@@ -56,6 +56,7 @@ import { toast } from "sonner";
 import { printInvoiceReceipt, type InvoiceReceiptData, type InvoiceItem } from "@/lib/printing";
 import { ExcelExportButton } from "@/components/common/ExcelExportButton";
 import { TABLE_SETTINGS } from "@/lib/constants";
+import { getLocalDateString } from "@/lib/utils";
 
 export default function Invoices() {
     const { getSetting } = useSettingsContext();
@@ -71,8 +72,8 @@ export default function Invoices() {
 
     // Filters
     const [searchQuery, setSearchQuery] = useState("");
-    const [dateFrom, setDateFrom] = useState(new Date().toISOString().split('T')[0]);
-    const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0]);
+    const [dateFrom, setDateFrom] = useState(getLocalDateString());
+    const [dateTo, setDateTo] = useState(getLocalDateString());
     const [paymentTypeFilter, setPaymentTypeFilter] = useState<string>("all");
     const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>("all");
 
@@ -1206,7 +1207,7 @@ export default function Invoices() {
                                                     size="icon"
                                                     className="h-6 w-6"
                                                     onClick={() => {
-                                                        setEditInvoiceDate(new Date(selectedInvoice.createdAt).toISOString().split('T')[0]);
+                                                        setEditInvoiceDate(getLocalDateString(new Date(selectedInvoice.createdAt)));
                                                         setIsEditingDate(true);
                                                     }}
                                                 >

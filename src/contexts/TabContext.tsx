@@ -35,6 +35,7 @@ import {
     Gift,
     BarChart3,
     Smartphone,
+    ScrollText,
 } from 'lucide-react';
 
 export interface Tab {
@@ -103,6 +104,7 @@ export const pathToTabInfo: Record<string, { title: string; iconName: string }> 
     '/whatsapp-groups': { title: 'مجموعات WhatsApp', iconName: 'Users' },
     '/restaurant': { title: 'المطعم', iconName: 'ShoppingCart' },
     '/mobile-accounts': { title: 'حسابات الموبايل', iconName: 'Smartphone' },
+    '/logs': { title: 'سجلات النظام', iconName: 'ScrollText' },
 };
 
 // Icon component mapping
@@ -132,6 +134,7 @@ export const iconComponents: Record<string, React.ComponentType<{ className?: st
     Gift,
     BarChart3,
     Smartphone,
+    ScrollText,
 };
 
 const STORAGE_KEY = 'pos-tabs';

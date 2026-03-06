@@ -160,6 +160,9 @@ export class SmartSyncManager extends EventEmitter {
     private pendingNotifications: Map<string, SyncEvent> = new Map();
     private notificationFlushTimer: any = null;
     private readonly NOTIFICATION_BATCH_DELAY = 2000; // 2 seconds
+    // When true, applyServerRecord bypasses the pending-local-changes guard
+    // Used by forceFullSync / forceServerOverwrite
+    private isForceMode: boolean = false;
 
     constructor(
         httpClient: FastifyClient,
@@ -233,8 +236,8 @@ export class SmartSyncManager extends EventEmitter {
                     return;
                 }
                 console.log('[SmartSync] App came to foreground, syncing...');
-                // Pull changes from server when app becomes visible
-                this.pullChanges();
+                // Push local changes first, then pull server updates
+                this.performFullSync();
             }
         });
 
@@ -248,15 +251,16 @@ export class SmartSyncManager extends EventEmitter {
                     return;
                 }
                 console.log('[SmartSync] Window focused, checking for updates...');
-                // Pull changes when window gains focus
-                this.pullChanges();
+                // Push local changes first, then pull server updates
+                this.performFullSync();
             }
         });
 
         // WebSocket events
         this.wsClient.on('connected', () => {
             if (this.config.pullOnConnect) {
-                this.pullChanges();
+                // Push local changes first, then pull server updates
+                this.performFullSync();
             }
         });
 
@@ -426,13 +430,15 @@ export class SmartSyncManager extends EventEmitter {
             this.saveLastSyncTime(0);
             console.log('[SmartSync] ⏰ Reset sync timestamp to 0');
 
-            // 4. Pull everything fresh from server
+            // 4. Pull everything fresh from server (force mode: bypass pending-changes protection)
             console.log('[SmartSync] ⬇️ Pulling all data from server...');
             this.emit('syncProgress', {
                 phase: 'pulling',
                 message: 'جاري تحميل جميع البيانات من السيرفر...',
             } as SyncProgressEvent);
+            this.isForceMode = true;
             const pullResult = await this.pullChanges(true);
+            this.isForceMode = false;
             result.pulled = pullResult.pulled;
             result.conflicts = pullResult.conflicts;
             result.errors.push(...pullResult.errors);
@@ -589,9 +595,11 @@ export class SmartSyncManager extends EventEmitter {
             }
         }
 
-        // 3. Perform Pull
+        // 3. Perform Pull (force mode: bypass pending-changes protection since we explicitly want all data)
         console.log('[SmartSync] Pulling all data from server...');
+        this.isForceMode = true;
         const pullResult = await this.pullChanges(true);
+        this.isForceMode = false;
 
         // 3.5 Post-process products (resolve categories, prices, units)
         try { await this.postProcessProducts(); } catch { /* ignore */ }
@@ -645,17 +653,19 @@ export class SmartSyncManager extends EventEmitter {
         };
 
         try {
-            // Step 1: Pull changes from server first
-            const pullResult = await this.pullChanges();
-            result.pulled = pullResult.pulled;
-            result.conflicts += pullResult.conflicts;
-            result.errors.push(...pullResult.errors);
-
-            // Step 2: Push local changes to server
+            // Step 1: Push local changes to server FIRST
+            // This ensures pending edits reach the server before we pull,
+            // preventing server data from overwriting unsaved local changes
             const pushResult = await this.pushChanges();
             result.pushed = pushResult.pushed;
             result.conflicts += pushResult.conflicts;
             result.errors.push(...pushResult.errors);
+
+            // Step 2: Pull changes from server
+            const pullResult = await this.pullChanges();
+            result.pulled = pullResult.pulled;
+            result.conflicts += pullResult.conflicts;
+            result.errors.push(...pullResult.errors);
 
             this.saveLastSyncTime();
             this.setStatus('idle');
@@ -1149,9 +1159,30 @@ export class SmartSyncManager extends EventEmitter {
     }
 
     /**
-     * Determine if server record is newer than local
+     * Determine if server record should overwrite local record.
+     * Protects records with pending local changes from being overwritten.
      */
     private shouldApplyServerUpdate(local: any, server: any): boolean {
+        // In normal (non-force) mode: never overwrite records with pending local changes
+        if (!this.isForceMode) {
+            // Check is_synced flag (set to false by SyncableRepository.update/add)
+            if (local.is_synced === false) {
+                console.log(`[SmartSync] ⏳ Skipping server update - record has pending local changes (is_synced=false)`);
+                return false;
+            }
+
+            // Also check timestamp: if local was modified after last sync, it has pending changes
+            // This catches edits where is_synced wasn't properly set (e.g., legacy records)
+            if (local.last_synced_at && local.local_updated_at) {
+                const localModifiedAt = new Date(local.local_updated_at).getTime();
+                const lastSyncedAt = new Date(local.last_synced_at).getTime();
+                if (localModifiedAt > lastSyncedAt) {
+                    console.log(`[SmartSync] ⏳ Skipping server update - local changes newer than last sync (modified=${local.local_updated_at}, synced=${local.last_synced_at})`);
+                    return false;
+                }
+            }
+        }
+
         const localTime = new Date(local.local_updated_at || local.updatedAt || 0).getTime();
         const serverTime = new Date(server.server_updated_at || server.updated_at || 0).getTime();
 
@@ -1576,17 +1607,33 @@ export class SmartSyncManager extends EventEmitter {
 
             result.pushed = response.synced_count || 0;
 
-            // Mark successfully synced records
+            // Build sets of records that SHOULD NOT be marked as synced:
+            // - Records that had errors (server rejected them)
+            // - Records that had conflicts (need separate handling by resolveConflict)
             const db = getDatabaseService();
-            const errorSet = new Set(
-                (response.errors || []).map(e => `${e.table_name}:${e.record_id}`)
-            );
+            const skipSet = new Set<string>();
 
+            // Add error records to skip set
+            if (response.errors) {
+                for (const err of response.errors) {
+                    skipSet.add(`${err.table_name}:${err.record_id}`);
+                    result.errors.push(`${err.table_name}:${err.record_id} - ${err.error}`);
+                }
+            }
+
+            // Add conflicted records to skip set (resolveConflict will handle their sync state)
+            if (response.conflicts) {
+                for (const conflict of response.conflicts) {
+                    skipSet.add(`${conflict.table_name}:${conflict.record_id}`);
+                }
+            }
+
+            // Mark only SUCCESSFULLY synced records (not errors, not conflicts)
             for (const { table, record } of records) {
                 // Settings table uses 'key' as primary key
                 const recordKey = table === 'settings' ? (record.key || record.id) : record.id;
-                const errorKey = `${table}:${recordKey}`;
-                if (!errorSet.has(errorKey)) {
+                const skipKey = `${table}:${recordKey}`;
+                if (!skipSet.has(skipKey)) {
                     // Mark as synced
                     try {
                         const storeName = getStoreName(table);
@@ -1598,14 +1645,9 @@ export class SmartSyncManager extends EventEmitter {
                 }
             }
 
-            // Handle errors
-            if (response.errors) {
-                for (const err of response.errors) {
-                    result.errors.push(`${err.table_name}:${err.record_id} - ${err.error}`);
-                }
-            }
-
-            // Handle conflicts
+            // Handle conflicts AFTER marking synced records
+            // resolveConflict decides whether to mark as synced (server wins)
+            // or leave as unsynced (local wins → re-pushed in next cycle)
             if (response.conflicts) {
                 result.conflicts = response.conflicts.length;
                 for (const conflict of response.conflicts) {
@@ -1771,14 +1813,23 @@ export class SmartSyncManager extends EventEmitter {
         const storeName = getStoreName(table_name);
 
         try {
+            const repo = db.getRepository(storeName);
             if (serverTime >= localTime) {
-                // Server wins - mark local record as synced (don't re-push)
-                const repo = db.getRepository(storeName);
+                // Server wins - mark local record as synced so it doesn't get re-pushed.
+                // The next pull will overwrite local data with the server version.
                 await repo.markAsSynced(record_id);
                 console.log(`[SmartSync] Conflict resolved: Server wins, marked ${table_name}/${record_id} as synced`);
             } else {
-                // Local wins - will be pushed in next sync cycle
-                console.log(`[SmartSync] Conflict resolved: Local wins (will push)`);
+                // Local wins - ensure record stays UNSYNCED so it gets re-pushed in the next cycle.
+                // pushBatch already skipped marking it as synced (via skipSet),
+                // but be explicit: use batchUpdateFromServer to set is_synced=false
+                // WITHOUT triggering the sync queue (we don't want a circular re-queue).
+                const existing = await repo.getById(record_id);
+                if (existing && (existing as any).is_synced !== false) {
+                    const updated = { ...existing, is_synced: false, last_synced_at: null } as any;
+                    await repo.batchUpdateFromServer([updated]);
+                }
+                console.log(`[SmartSync] Conflict resolved: Local wins, ${table_name}/${record_id} will be re-pushed`);
             }
         } catch (e) {
             console.warn(`[SmartSync] Could not resolve conflict for ${table_name}/${record_id}:`, e);
@@ -1792,9 +1843,9 @@ export class SmartSyncManager extends EventEmitter {
         this.isOnline = true;
         this.setStatus('idle');
 
-        // Pull changes (with mutex guard) instead of full sync to avoid loops
+        // Push first (save local edits), then pull (get server updates)
         if (!this.isSyncing) {
-            this.pullChanges();
+            this.performFullSync();
         }
 
         this.emit('online');

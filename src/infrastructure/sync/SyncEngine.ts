@@ -6,6 +6,26 @@ import {
   ConnectionState,
 } from "../http/WebSocketClient";
 import { SyncQueue, getSyncQueue, SyncQueueItem } from "./SyncQueue";
+import { getDatabaseService } from "../database/DatabaseService";
+
+// Mapping from snake_case table names to camelCase IndexedDB store names
+const TABLE_TO_STORE: Record<string, string> = {
+    'product_categories': 'productCategories',
+    'product_units': 'productUnits',
+    'price_types': 'priceTypes',
+    'invoice_items': 'invoiceItems',
+    'sales_returns': 'salesReturns',
+    'purchase_items': 'purchaseItems',
+    'purchase_returns': 'purchaseReturns',
+    'expense_categories': 'expenseCategories',
+    'expense_items': 'expenseItems',
+    'deposit_sources': 'depositSources',
+    'payment_methods': 'paymentMethods',
+    'audit_logs': 'auditLogs',
+    'sales_reps': 'salesReps',
+    'supervisor_bonuses': 'supervisorBonuses',
+    'customer_bonuses': 'customerBonuses',
+};
 
 export enum SyncStatus {
   IDLE = "idle",
@@ -277,6 +297,19 @@ export class SyncEngine extends EventEmitter {
           await this.syncQueue.updateStatus(item.id, "completed");
           this.stats.totalSynced++;
           this.emit("itemSynced", item);
+
+          // Also mark the IndexedDB record as synced so SmartSyncManager
+          // won't re-push it (avoiding unnecessary conflicts)
+          try {
+            const storeName = TABLE_TO_STORE[item.table] || item.table;
+            const db = getDatabaseService();
+            const repo = db.getRepository(storeName);
+            await repo.markAsSynced(item.recordId);
+          } catch (markErr) {
+            // Non-fatal: SmartSyncManager will handle it later
+            console.warn(`[SyncEngine] Could not mark ${item.table}:${item.recordId} as synced:`, markErr);
+          }
+
           console.log(`Synced: ${item.table} - ${item.operation} - ${item.recordId}`);
         }
       }

@@ -85,7 +85,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
+import { cn, getLocalDateString } from "@/lib/utils";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -163,7 +163,7 @@ const POSv2 = () => {
   const [invoiceNotes, setInvoiceNotes] = useState<string>("");
 
   // Invoice date (admin-only override)
-  const [invoiceDate, setInvoiceDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [invoiceDate, setInvoiceDate] = useState<string>(getLocalDateString());
   const isAdmin = user?.role === "admin" || user?.roleId === "admin";
 
   // Delivery status - default is "not_delivered"
@@ -417,7 +417,7 @@ const POSv2 = () => {
 
       // Keep original date if needed
       if (invoice.createdAt) {
-        setInvoiceDate(new Date(invoice.createdAt).toISOString().split('T')[0]);
+        setInvoiceDate(getLocalDateString(new Date(invoice.createdAt)));
       }
 
       toast({ title: "تم تحميل الفاتورة للتعديل" });
@@ -863,7 +863,7 @@ const POSv2 = () => {
     }
 
     // Reset date to today
-    setInvoiceDate(new Date().toISOString().split('T')[0]);
+    setInvoiceDate(getLocalDateString());
   };
 
   // Calculations

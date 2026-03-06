@@ -47,7 +47,7 @@ import { db, Customer, Invoice } from "@/shared/lib/indexedDB";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { cn, getLocalDateString } from "@/lib/utils";
 import { useCustomerBalances } from "@/hooks/useCustomerBalances";
 import { usePagination } from "@/hooks/usePagination";
 import { DataPagination } from "@/components/ui/DataPagination";
@@ -91,13 +91,13 @@ export default function Bonus() {
     const [isLoading, setIsLoading] = useState(false);
     const [editingBonus, setEditingBonus] = useState<BonusRecord | null>(null);
     const [bonusType, setBonusType] = useState<'bonus' | 'discount'>('bonus');
-    const [bonusDate, setBonusDate] = useState<string>(new Date().toISOString().split('T')[0]);
+    const [bonusDate, setBonusDate] = useState<string>(getLocalDateString());
     const { getBalance, refresh: refreshBalances } = useCustomerBalances([customers]);
 
     // الفترة الزمنية
     const currentYear = new Date().getFullYear();
     const [periodStart, setPeriodStart] = useState<string>(`${currentYear - 1}-01-01`);
-    const [periodEnd, setPeriodEnd] = useState<string>(new Date().toISOString().split("T")[0]);
+    const [periodEnd, setPeriodEnd] = useState<string>(getLocalDateString());
 
     // مدفوعات العميل خلال الفترة
     const [customerPayments, setCustomerPayments] = useState<number>(0);
@@ -311,7 +311,7 @@ export default function Bonus() {
             setCustomerSearchQuery("");
             setCustomerPayments(0);
             setBonusType('bonus');
-            setBonusDate(new Date().toISOString().split('T')[0]);
+            setBonusDate(getLocalDateString());
 
             // إعادة تحميل البيانات
             await loadData();
@@ -334,7 +334,7 @@ export default function Bonus() {
         setPeriodStart(bonus.periodStart);
         setPeriodEnd(bonus.periodEnd);
         setCustomerPayments(bonus.totalPayments);
-        setBonusDate(bonus.createdAt ? new Date(bonus.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+        setBonusDate(bonus.createdAt ? getLocalDateString(new Date(bonus.createdAt)) : getLocalDateString());
     };
 
     // حذف البونص

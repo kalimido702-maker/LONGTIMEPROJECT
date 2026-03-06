@@ -69,7 +69,7 @@ import { db, Customer, PaymentMethod, SalesRep, Supervisor, Invoice } from "@/sh
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { cn, getLocalDateString } from "@/lib/utils";
 import { exportToExcel } from "@/lib/reportExport";
 import { useCustomerBalances } from "@/hooks/useCustomerBalances";
 import { usePagination } from "@/hooks/usePagination";
@@ -120,8 +120,8 @@ export default function Collections() {
     const [isLoading, setIsLoading] = useState(false);
 
     // Advanced filters
-    const [filterDateFrom, setFilterDateFrom] = useState<string>(new Date().toISOString().split('T')[0]);
-    const [filterDateTo, setFilterDateTo] = useState<string>(new Date().toISOString().split('T')[0]);
+    const [filterDateFrom, setFilterDateFrom] = useState<string>(getLocalDateString());
+    const [filterDateTo, setFilterDateTo] = useState<string>(getLocalDateString());
     const [filterPaymentMethodId, setFilterPaymentMethodId] = useState<string>("all");
     const [filterSupervisorId, setFilterSupervisorId] = useState<string>("all");
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);

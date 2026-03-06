@@ -7,7 +7,7 @@
 import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import { TabBar } from '@/components/TabBar';
 import { TabContent } from '@/components/TabContent';
-import { TabProvider } from '@/contexts/TabContext';
+import { TabProvider, useTabs } from '@/contexts/TabContext';
 import UpdateProgressBar from '@/components/UpdateProgressBar';
 import { SyncProgressBar } from '@/components/sync/SyncProgressBar';
 import {
@@ -154,6 +154,29 @@ function DataControlCenterWrapper() {
     );
 }
 
+/**
+ * LogViewer Shortcut - Ctrl+Shift+L opens the log viewer tab
+ */
+function LogViewerShortcut() {
+    const { addTab } = useTabs();
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            const isModifier = e.ctrlKey || e.metaKey;
+            if (isModifier && e.shiftKey && (e.key === 'L' || e.key === 'l' || e.code === 'KeyL')) {
+                e.preventDefault();
+                e.stopPropagation();
+                addTab('/logs');
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown, true);
+        return () => window.removeEventListener('keydown', handleKeyDown, true);
+    }, [addTab]);
+
+    return null;
+}
+
 export function TabLayout() {
     return (
         <TabProvider>
@@ -172,6 +195,9 @@ export function TabLayout() {
 
                 {/* Data Control Center - accessible via Ctrl+Shift+D */}
                 <DataControlCenterWrapper />
+
+                {/* Log Viewer Shortcut - Ctrl+Shift+L */}
+                <LogViewerShortcut />
             </div>
         </TabProvider>
     );
