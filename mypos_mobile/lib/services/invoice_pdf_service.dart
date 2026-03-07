@@ -308,7 +308,7 @@ class InvoicePdfService {
             _headerCell('الوحدة', headerStyle),
             _headerCell('الفئة', headerStyle),
             _headerCell('الإجمالي', headerStyle),
-          ],
+          ].reversed.toList(),
         ),
         // Item rows
         ...items.asMap().entries.map((entry) {
@@ -322,7 +322,7 @@ class InvoicePdfService {
               _dataCell(item.unitName ?? 'قطعة', cellStyle),
               _dataCell(_formatNum(item.price), cellStyle),
               _dataCell(_formatNum(item.total), cellBoldStyle),
-            ],
+            ].reversed.toList(),
           );
         }),
       ],
@@ -465,11 +465,11 @@ class InvoicePdfService {
     if (!await safeDir.exists()) {
       await safeDir.create(recursive: true);
     }
-    final fileName = 'invoice_$invNum.pdf';
+    final customerName = invoice.customerName ?? '';
+    final fileName = 'فاتورة $invNum - $customerName.pdf';
     final file = File('${safeDir.path}/$fileName');
     await file.writeAsBytes(pdfBytes);
 
-    final customerName = invoice.customerName ?? '';
     await SharePlus.instance.share(
       ShareParams(
         files: [XFile(file.path)],
