@@ -161,17 +161,24 @@ export async function mobileRoutes(server: FastifyInstance) {
         let totalCustomersBalance = 0;
 
         if (role === 'customer') {
-          // Customer: get their own balance info
+          // Customer: get their own balance info (dynamically computed)
           const [users] = await db.query<RowDataPacket[]>(
             "SELECT linked_customer_id FROM users WHERE id = ?",
             [userId]
           );
           if (users.length > 0 && users[0].linked_customer_id) {
+            const custId = users[0].linked_customer_id;
             const [balanceRows] = await db.query<RowDataPacket[]>(
-              `SELECT balance as current_balance, credit_limit, bonus_balance, name, phone
-              FROM customers 
-              WHERE id = ? AND client_id = ? AND is_deleted = 0`,
-              [users[0].linked_customer_id, clientId]
+              `SELECT 
+                (
+                  COALESCE((SELECT SUM(i.total) FROM invoices i WHERE i.customer_id = c.id AND i.client_id = c.client_id AND i.is_deleted = 0), 0)
+                  - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.customer_id = c.id AND p.client_id = c.client_id AND p.is_deleted = 0), 0)
+                  - COALESCE((SELECT SUM(sr.total) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.client_id = c.client_id AND sr.is_deleted = 0), 0)
+                ) as current_balance,
+                c.credit_limit, c.bonus_balance, c.name, c.phone
+              FROM customers c
+              WHERE c.id = ? AND c.client_id = ? AND c.is_deleted = 0`,
+              [custId, clientId]
             );
             if (balanceRows.length > 0) {
               customerBalance = balanceRows[0];
@@ -186,10 +193,12 @@ export async function mobileRoutes(server: FastifyInstance) {
           const salesRepId = users[0]?.linked_sales_rep_id;
           if (salesRepId) {
             const [balRows] = await db.query<RowDataPacket[]>(
-              `SELECT COALESCE(SUM(balance), 0) as total_balance
-               FROM customers
-               WHERE sales_rep_id = ? AND client_id = ? AND is_deleted = 0`,
-              [salesRepId, clientId]
+              `SELECT 
+                COALESCE((SELECT SUM(i.total) FROM invoices i JOIN customers c ON i.customer_id = c.id WHERE c.sales_rep_id = ? AND i.client_id = ? AND i.is_deleted = 0 AND c.is_deleted = 0), 0)
+                - COALESCE((SELECT SUM(p.amount) FROM payments p JOIN customers c ON p.customer_id = c.id WHERE c.sales_rep_id = ? AND p.client_id = ? AND p.is_deleted = 0 AND c.is_deleted = 0), 0)
+                - COALESCE((SELECT SUM(sr.total) FROM sales_returns sr JOIN customers c ON sr.customer_id = c.id WHERE c.sales_rep_id = ? AND sr.client_id = ? AND sr.is_deleted = 0 AND c.is_deleted = 0), 0)
+              as total_balance`,
+              [salesRepId, clientId, salesRepId, clientId, salesRepId, clientId]
             );
             totalCustomersBalance = Number(balRows[0]?.total_balance || 0);
           }
@@ -202,21 +211,24 @@ export async function mobileRoutes(server: FastifyInstance) {
           const supervisorId = users[0]?.linked_supervisor_id;
           if (supervisorId) {
             const [balRows] = await db.query<RowDataPacket[]>(
-              `SELECT COALESCE(SUM(c.balance), 0) as total_balance
-               FROM customers c
-               JOIN sales_reps sr ON c.sales_rep_id = sr.id
-               WHERE sr.supervisor_id = ? AND c.client_id = ? AND c.is_deleted = 0`,
-              [supervisorId, clientId]
+              `SELECT 
+                COALESCE((SELECT SUM(i.total) FROM invoices i JOIN customers c ON i.customer_id = c.id JOIN sales_reps sr ON c.sales_rep_id = sr.id WHERE sr.supervisor_id = ? AND i.client_id = ? AND i.is_deleted = 0 AND c.is_deleted = 0), 0)
+                - COALESCE((SELECT SUM(p.amount) FROM payments p JOIN customers c ON p.customer_id = c.id JOIN sales_reps sr ON c.sales_rep_id = sr.id WHERE sr.supervisor_id = ? AND p.client_id = ? AND p.is_deleted = 0 AND c.is_deleted = 0), 0)
+                - COALESCE((SELECT SUM(sr2.total) FROM sales_returns sr2 JOIN customers c ON sr2.customer_id = c.id JOIN sales_reps sr ON c.sales_rep_id = sr.id WHERE sr.supervisor_id = ? AND sr2.client_id = ? AND sr2.is_deleted = 0 AND c.is_deleted = 0), 0)
+              as total_balance`,
+              [supervisorId, clientId, supervisorId, clientId, supervisorId, clientId]
             );
             totalCustomersBalance = Number(balRows[0]?.total_balance || 0);
           }
         } else {
-          // Admin: total balance of all customers
+          // Admin: total balance of all customers (dynamic calculation)
           const [balRows] = await db.query<RowDataPacket[]>(
-            `SELECT COALESCE(SUM(balance), 0) as total_balance
-             FROM customers
-             WHERE client_id = ? AND is_deleted = 0`,
-            [clientId]
+            `SELECT 
+              COALESCE((SELECT SUM(total) FROM invoices WHERE client_id = ? AND is_deleted = 0), 0)
+              - COALESCE((SELECT SUM(amount) FROM payments WHERE client_id = ? AND is_deleted = 0), 0)
+              - COALESCE((SELECT SUM(total) FROM sales_returns WHERE client_id = ? AND is_deleted = 0), 0)
+            as total_balance`,
+            [clientId, clientId, clientId]
           );
           totalCustomersBalance = Number(balRows[0]?.total_balance || 0);
         }
@@ -906,8 +918,13 @@ export async function mobileRoutes(server: FastifyInstance) {
 
           const whereClause = whereConditions.join(" AND ");
           const [customers] = await db.query<RowDataPacket[]>(
-            `SELECT c.id, c.name, c.phone, c.address, c.balance as current_balance, c.credit_limit,
-                    c.bonus_balance, c.previous_statement
+            `SELECT c.id, c.name, c.phone, c.address,
+                    (
+                      COALESCE((SELECT SUM(i.total) FROM invoices i WHERE i.customer_id = c.id AND i.client_id = c.client_id AND i.is_deleted = 0), 0)
+                      - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.customer_id = c.id AND p.client_id = c.client_id AND p.is_deleted = 0), 0)
+                      - COALESCE((SELECT SUM(sr.total) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.client_id = c.client_id AND sr.is_deleted = 0), 0)
+                    ) as current_balance,
+                    c.credit_limit, c.bonus_balance, c.previous_statement
              FROM customers c
              WHERE ${whereClause}
              LIMIT 1`,
@@ -984,8 +1001,13 @@ export async function mobileRoutes(server: FastifyInstance) {
         const total = countRows[0].total;
 
         const [customers] = await db.query<RowDataPacket[]>(
-          `SELECT c.id, c.name, c.phone, c.address, c.balance as current_balance, c.credit_limit,
-                  c.bonus_balance, c.previous_statement
+          `SELECT c.id, c.name, c.phone, c.address,
+                  (
+                    COALESCE((SELECT SUM(i.total) FROM invoices i WHERE i.customer_id = c.id AND i.client_id = c.client_id AND i.is_deleted = 0), 0)
+                    - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.customer_id = c.id AND p.client_id = c.client_id AND p.is_deleted = 0), 0)
+                    - COALESCE((SELECT SUM(sr.total) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.client_id = c.client_id AND sr.is_deleted = 0), 0)
+                  ) as current_balance,
+                  c.credit_limit, c.bonus_balance, c.previous_statement
            FROM customers c
            WHERE ${whereClause}
            ORDER BY c.name ASC

@@ -380,12 +380,30 @@ const SETTINGS_MAPPING: TableMapping = {
 };
 
 // Payment Methods - MySQL: name, name_en, type, active, sort_order
+// Helper: Map client payment method type to MySQL ENUM values
+// MySQL ENUM: 'cash', 'card', 'transfer', 'wallet', 'other'
+// Client types: 'cash', 'wallet', 'visa', 'bank_transfer', 'credit', 'other'
+function mapPaymentMethodType(val: string): string {
+    if (!val) return 'cash';
+    const mapping: Record<string, string> = {
+        'cash': 'cash',
+        'wallet': 'wallet',
+        'visa': 'card',
+        'card': 'card',
+        'bank_transfer': 'transfer',
+        'transfer': 'transfer',
+        'credit': 'other',
+        'other': 'other',
+    };
+    return mapping[val.toLowerCase()] || 'other';
+}
+
 const PAYMENT_METHODS_MAPPING: TableMapping = {
     fields: [
         { clientField: 'id', serverField: 'id' },
         { clientField: 'name', serverField: 'name' },
         { clientField: 'nameEn', serverField: 'name_en' },
-        { clientField: 'type', serverField: 'type', defaultValue: 'cash' },
+        { clientField: 'type', serverField: 'type', defaultValue: 'cash', transform: mapPaymentMethodType },
         { clientField: 'active', serverField: 'active', defaultValue: 1 },
         { clientField: 'sortOrder', serverField: 'sort_order', defaultValue: 0 },
         { clientField: 'createdBy', serverField: 'created_by' },
@@ -793,6 +811,50 @@ const TABLE_MAPPINGS: Record<string, TableMapping> = {
             { clientField: 'quantity', serverField: 'quantity', defaultValue: 0 },
             { clientField: 'minQuantity', serverField: 'min_quantity', defaultValue: 0 },
             { clientField: 'maxQuantity', serverField: 'max_quantity', defaultValue: 0 },
+            { clientField: 'createdAt', serverField: 'created_at', transform: toMySQLDateTime },
+            { clientField: 'updatedAt', serverField: 'updated_at', transform: toMySQLDateTime },
+        ],
+        clientOnlyFields: ['local_updated_at'],
+    },
+    // Supervisor Bonuses - MySQL: supervisor_id, supervisor_name, period_start, period_end, total_team_sales, bonus_percentage, bonus_amount, manual_bonus_amount, total_deposits, user_id, user_name, notes, sales_reps (JSON), invoice_ids (JSON), by_category_sales (JSON)
+    supervisor_bonuses: {
+        fields: [
+            { clientField: 'id', serverField: 'id' },
+            { clientField: 'supervisorId', serverField: 'supervisor_id', transform: validateId },
+            { clientField: 'supervisorName', serverField: 'supervisor_name' },
+            { clientField: 'periodStart', serverField: 'period_start' },
+            { clientField: 'periodEnd', serverField: 'period_end' },
+            { clientField: 'totalTeamSales', serverField: 'total_team_sales', defaultValue: 0 },
+            { clientField: 'bonusPercentage', serverField: 'bonus_percentage', defaultValue: 0 },
+            { clientField: 'bonusAmount', serverField: 'bonus_amount', defaultValue: 0 },
+            { clientField: 'manualBonusAmount', serverField: 'manual_bonus_amount' },
+            { clientField: 'totalDeposits', serverField: 'total_deposits' },
+            { clientField: 'userId', serverField: 'user_id', transform: validateId },
+            { clientField: 'userName', serverField: 'user_name' },
+            { clientField: 'notes', serverField: 'notes' },
+            { clientField: 'salesReps', serverField: 'sales_reps', transform: toJsonString, reverseTransform: fromJsonString },
+            { clientField: 'invoiceIds', serverField: 'invoice_ids', transform: toJsonString, reverseTransform: fromJsonString },
+            { clientField: 'byCategorySales', serverField: 'by_category_sales', transform: toJsonString, reverseTransform: fromJsonString },
+            { clientField: 'createdAt', serverField: 'created_at', transform: toMySQLDateTime },
+            { clientField: 'updatedAt', serverField: 'updated_at', transform: toMySQLDateTime },
+        ],
+        clientOnlyFields: ['local_updated_at'],
+    },
+    // Customer Bonuses - MySQL: type, customer_id, customer_name, period_start, period_end, total_payments, bonus_percentage, bonus_amount, user_id, user_name, notes
+    customer_bonuses: {
+        fields: [
+            { clientField: 'id', serverField: 'id' },
+            { clientField: 'type', serverField: 'type', defaultValue: 'bonus' },
+            { clientField: 'customerId', serverField: 'customer_id', transform: validateId },
+            { clientField: 'customerName', serverField: 'customer_name' },
+            { clientField: 'periodStart', serverField: 'period_start' },
+            { clientField: 'periodEnd', serverField: 'period_end' },
+            { clientField: 'totalPayments', serverField: 'total_payments', defaultValue: 0 },
+            { clientField: 'bonusPercentage', serverField: 'bonus_percentage', defaultValue: 0 },
+            { clientField: 'bonusAmount', serverField: 'bonus_amount', defaultValue: 0 },
+            { clientField: 'userId', serverField: 'user_id', transform: validateId },
+            { clientField: 'userName', serverField: 'user_name' },
+            { clientField: 'notes', serverField: 'notes' },
             { clientField: 'createdAt', serverField: 'created_at', transform: toMySQLDateTime },
             { clientField: 'updatedAt', serverField: 'updated_at', transform: toMySQLDateTime },
         ],

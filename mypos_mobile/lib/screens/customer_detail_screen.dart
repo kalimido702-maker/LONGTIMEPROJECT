@@ -53,6 +53,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
   double _totalPayments = 0;
   double _totalReturns = 0;
   double _statementBalance = 0;
+  double? _trueBalance; // Dynamic balance from account statement (always accurate)
 
   @override
   void initState() {
@@ -91,6 +92,16 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
       }
     } catch (_) {}
     if (mounted) setState(() => _loadingCustomer = false);
+
+    // Also load true balance from full account statement (no date filter)
+    try {
+      final stRes = await _api.getAccountStatement(
+        customerId: widget.customerId,
+      );
+      final stData = stRes['data'] as Map<String, dynamic>? ?? {};
+      final stTotals = stData['totals'] as Map<String, dynamic>? ?? {};
+      if (mounted) setState(() => _trueBalance = _toDouble(stTotals['balance']));
+    } catch (_) {}
   }
 
   Future<void> _shareInvoicePdf(String invoiceId) async {
@@ -297,7 +308,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
     }
     if (_customer == null) return const SizedBox.shrink();
 
-    final balance = _customer!.currentBalance;
+    // Use dynamic balance (from account statement) if available, otherwise use stored balance
+    final balance = _trueBalance ?? _customer!.currentBalance;
     final balanceColor = balance > 0 ? AppColors.error : AppColors.success;
 
     return Container(
