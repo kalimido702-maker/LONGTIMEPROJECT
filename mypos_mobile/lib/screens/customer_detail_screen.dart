@@ -53,7 +53,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
   double _totalPayments = 0;
   double _totalReturns = 0;
   double _statementBalance = 0;
-  double? _trueBalance; // Dynamic balance from account statement (always accurate)
+  double?
+  _trueBalance; // Dynamic balance from account statement (always accurate)
 
   @override
   void initState() {
@@ -100,7 +101,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
       );
       final stData = stRes['data'] as Map<String, dynamic>? ?? {};
       final stTotals = stData['totals'] as Map<String, dynamic>? ?? {};
-      if (mounted) setState(() => _trueBalance = _toDouble(stTotals['balance']));
+      if (mounted)
+        setState(() => _trueBalance = _toDouble(stTotals['balance']));
     } catch (_) {}
   }
 
@@ -115,7 +117,10 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('حدث خطأ: $e'), backgroundColor: AppColors.error),
+          SnackBar(
+            content: Text('حدث خطأ: $e'),
+            backgroundColor: AppColors.error,
+          ),
         );
       }
     }
@@ -158,10 +163,15 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
         limit: 500,
       );
       final data = res['data'] as List? ?? [];
-      _invoices = data.map((j) => Invoice.fromJson(j as Map<String, dynamic>)).toList();
+      _invoices = data
+          .map((j) => Invoice.fromJson(j as Map<String, dynamic>))
+          .toList();
       // Use server-side totals (covers ALL records, not just paginated)
       final totals = res['totals'] as Map<String, dynamic>?;
-      _totalInvoices = _toDouble(totals?['total_amount'] ?? _invoices.fold(0.0, (sum, i) => sum + i.total));
+      _totalInvoices = _toDouble(
+        totals?['total_amount'] ??
+            _invoices.fold(0.0, (sum, i) => sum + i.total),
+      );
     } catch (_) {}
     if (mounted) setState(() => _loadingInvoices = false);
   }
@@ -177,10 +187,15 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
         limit: 500,
       );
       final data = res['data'] as List? ?? [];
-      _payments = data.map((j) => Payment.fromJson(j as Map<String, dynamic>)).toList();
+      _payments = data
+          .map((j) => Payment.fromJson(j as Map<String, dynamic>))
+          .toList();
       // Use server-side totals
       final totals = res['totals'] as Map<String, dynamic>?;
-      _totalPayments = _toDouble(totals?['total_amount'] ?? _payments.fold(0.0, (sum, p) => sum + p.amount));
+      _totalPayments = _toDouble(
+        totals?['total_amount'] ??
+            _payments.fold(0.0, (sum, p) => sum + p.amount),
+      );
     } catch (_) {}
     if (mounted) setState(() => _loadingPayments = false);
   }
@@ -196,10 +211,18 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
         limit: 500,
       );
       final data = res['data'] as List? ?? [];
-      _returns = data.map((j) => SalesReturn.fromJson(j as Map<String, dynamic>)).toList();
+      _returns = data
+          .map((j) => SalesReturn.fromJson(j as Map<String, dynamic>))
+          .toList();
       // Use server-side totals
       final totals = res['totals'] as Map<String, dynamic>?;
-      _totalReturns = _toDouble(totals?['total_amount'] ?? _returns.fold(0.0, (sum, r) => sum + (r.total > 0 ? r.total : r.totalAmount)));
+      _totalReturns = _toDouble(
+        totals?['total_amount'] ??
+            _returns.fold(
+              0.0,
+              (sum, r) => sum + (r.total > 0 ? r.total : r.totalAmount),
+            ),
+      );
     } catch (_) {}
     if (mounted) setState(() => _loadingReturns = false);
   }
@@ -215,7 +238,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
       );
       final data = res['data'] as Map<String, dynamic>? ?? {};
       final entries = data['entries'] as List? ?? [];
-      _entries = entries.map((e) => AccountEntry.fromJson(e as Map<String, dynamic>)).toList();
+      _entries = entries
+          .map((e) => AccountEntry.fromJson(e as Map<String, dynamic>))
+          .toList();
       final totals = data['totals'] as Map<String, dynamic>? ?? {};
       _statementBalance = _toDouble(totals['balance']);
     } catch (_) {}
@@ -236,7 +261,10 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('تفاصيل العميل' + " ${_customer?.name ?? ''}", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(
+              'تفاصيل العميل' + " ${_customer?.name ?? ''}",
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         bottom: TabBar(
@@ -303,7 +331,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
     if (_loadingCustomer) {
       return const Padding(
         padding: EdgeInsets.all(12),
-        child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary)),
+        child: Center(
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: AppColors.primary,
+          ),
+        ),
       );
     }
     if (_customer == null) return const SizedBox.shrink();
@@ -362,11 +395,18 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                     padding: const EdgeInsets.only(top: 4),
                     child: Row(
                       children: [
-                        const Icon(LucideIcons.phone, size: 13, color: Colors.white60),
+                        const Icon(
+                          LucideIcons.phone,
+                          size: 13,
+                          color: Colors.white60,
+                        ),
                         const SizedBox(width: 4),
                         Text(
                           _customer!.phone!,
-                          style: const TextStyle(fontSize: 12, color: Colors.white70),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.white70,
+                          ),
                         ),
                       ],
                     ),
@@ -393,7 +433,11 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  balance > 0 ? 'عليه' : balance < 0 ? 'ليه' : 'صفر',
+                  balance > 0
+                      ? 'عليه'
+                      : balance < 0
+                      ? 'ليه'
+                      : 'صفر',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 11,
@@ -411,7 +455,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
   // ===================== INVOICES TAB =====================
   Widget _buildInvoicesTab(NumberFormat formatter, DateFormat dateFormatter) {
     if (_loadingInvoices) {
-      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.primary),
+      );
     }
     if (_invoices.isEmpty) {
       return _buildEmptyTab(LucideIcons.fileText, 'لا توجد فواتير');
@@ -443,10 +489,16 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
     );
   }
 
-  Widget _buildInvoiceCard(Invoice inv, NumberFormat formatter, DateFormat dateFormatter) {
+  Widget _buildInvoiceCard(
+    Invoice inv,
+    NumberFormat formatter,
+    DateFormat dateFormatter,
+  ) {
     // No payment status display
     DateTime? parsedDate;
-    try { parsedDate = DateTime.parse(inv.createdAt ?? ''); } catch (_) {}
+    try {
+      parsedDate = DateTime.parse(inv.createdAt ?? '');
+    } catch (_) {}
     final isSharing = _sharingInvoiceId == inv.id;
 
     return Material(
@@ -467,18 +519,28 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                       color: AppColors.secondary.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(LucideIcons.receipt, size: 18, color: AppColors.secondary),
+                    child: const Icon(
+                      LucideIcons.receipt,
+                      size: 18,
+                      color: AppColors.secondary,
+                    ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       'فاتورة ${inv.invoiceNumber ?? '#${inv.id.substring(0, 8)}'}',
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
                     ),
                   ),
                   Text(
                     '${formatter.format(inv.total)} جنيه',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
                   ),
                   const SizedBox(width: 6),
                   // Share button
@@ -488,10 +550,23 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                     child: IconButton(
                       padding: EdgeInsets.zero,
                       iconSize: 18,
-                      onPressed: isSharing ? null : () => _shareInvoicePdf(inv.id),
+                      onPressed: isSharing
+                          ? null
+                          : () => _shareInvoicePdf(inv.id),
                       icon: isSharing
-                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary))
-                          : Icon(LucideIcons.share2, size: 16, color: Colors.grey[500]),
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.primary,
+                              ),
+                            )
+                          : Icon(
+                              LucideIcons.share2,
+                              size: 16,
+                              color: Colors.grey[500],
+                            ),
                       tooltip: 'مشاركة PDF',
                     ),
                   ),
@@ -505,15 +580,29 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                     if (parsedDate != null)
                       Row(
                         children: [
-                          Icon(LucideIcons.calendar, size: 12, color: Colors.grey[400]),
+                          Icon(
+                            LucideIcons.calendar,
+                            size: 12,
+                            color: Colors.grey[400],
+                          ),
                           const SizedBox(width: 4),
-                          Text(dateFormatter.format(parsedDate), style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                          Text(
+                            dateFormatter.format(parsedDate),
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[500],
+                            ),
+                          ),
                         ],
                       ),
                     if (inv.remainingAmount > 0)
                       Text(
                         'المتبقي: ${formatter.format(inv.remainingAmount)} جنيه',
-                        style: const TextStyle(fontSize: 11, color: AppColors.error, fontWeight: FontWeight.w500),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppColors.error,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                   ],
                 ),
@@ -528,7 +617,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
   // ===================== PAYMENTS TAB =====================
   Widget _buildPaymentsTab(NumberFormat formatter, DateFormat dateFormatter) {
     if (_loadingPayments) {
-      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.primary),
+      );
     }
     if (_payments.isEmpty) {
       return _buildEmptyTab(LucideIcons.creditCard, 'لا توجد مدفوعات');
@@ -552,7 +643,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
               itemBuilder: (context, index) {
                 final p = _payments[index];
                 DateTime? parsedDate;
-                try { parsedDate = DateTime.parse(p.createdAt ?? ''); } catch (_) {}
+                try {
+                  parsedDate = DateTime.parse(p.createdAt ?? '');
+                } catch (_) {}
                 return Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
@@ -567,7 +660,11 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                           color: AppColors.success.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: const Icon(LucideIcons.arrowDownCircle, size: 18, color: AppColors.success),
+                        child: const Icon(
+                          LucideIcons.arrowDownCircle,
+                          size: 18,
+                          color: AppColors.success,
+                        ),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -576,28 +673,53 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                           children: [
                             Text(
                               'سند قبض',
-                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                              ),
                             ),
                             if (parsedDate != null) ...[
                               const SizedBox(height: 4),
                               Row(
                                 children: [
-                                  Icon(LucideIcons.calendar, size: 12, color: Colors.grey[400]),
+                                  Icon(
+                                    LucideIcons.calendar,
+                                    size: 12,
+                                    color: Colors.grey[400],
+                                  ),
                                   const SizedBox(width: 4),
-                                  Text(dateFormatter.format(parsedDate), style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                                  Text(
+                                    dateFormatter.format(parsedDate),
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey[500],
+                                    ),
+                                  ),
                                 ],
                               ),
                             ],
                             if (p.notes != null && p.notes!.isNotEmpty) ...[
                               const SizedBox(height: 2),
-                              Text(p.notes!, style: TextStyle(fontSize: 11, color: Colors.grey[400]), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              Text(
+                                p.notes!,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey[400],
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ],
                           ],
                         ),
                       ),
                       Text(
                         '${formatter.format(p.amount)} جنيه',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.success),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          color: AppColors.success,
+                        ),
                       ),
                     ],
                   ),
@@ -613,7 +735,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
   // ===================== RETURNS TAB =====================
   Widget _buildReturnsTab(NumberFormat formatter, DateFormat dateFormatter) {
     if (_loadingReturns) {
-      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.primary),
+      );
     }
     if (_returns.isEmpty) {
       return _buildEmptyTab(LucideIcons.rotateCcw, 'لا توجد مرتجعات');
@@ -637,7 +761,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
               itemBuilder: (context, index) {
                 final r = _returns[index];
                 DateTime? parsedDate;
-                try { parsedDate = DateTime.parse(r.createdAt ?? ''); } catch (_) {}
+                try {
+                  parsedDate = DateTime.parse(r.createdAt ?? '');
+                } catch (_) {}
                 final amount = r.total > 0 ? r.total : r.totalAmount;
                 return Container(
                   padding: const EdgeInsets.all(14),
@@ -653,7 +779,11 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                           color: AppColors.warning.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: const Icon(LucideIcons.rotateCcw, size: 18, color: AppColors.warning),
+                        child: const Icon(
+                          LucideIcons.rotateCcw,
+                          size: 18,
+                          color: AppColors.warning,
+                        ),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -661,29 +791,56 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              r.returnNumber != null ? 'مرتجع ${r.returnNumber}' : 'مرتجع #${r.id.substring(0, 8)}',
-                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                              r.returnNumber != null
+                                  ? 'مرتجع ${r.returnNumber}'
+                                  : 'مرتجع #${r.id.substring(0, 8)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                              ),
                             ),
                             if (parsedDate != null) ...[
                               const SizedBox(height: 4),
                               Row(
                                 children: [
-                                  Icon(LucideIcons.calendar, size: 12, color: Colors.grey[400]),
+                                  Icon(
+                                    LucideIcons.calendar,
+                                    size: 12,
+                                    color: Colors.grey[400],
+                                  ),
                                   const SizedBox(width: 4),
-                                  Text(dateFormatter.format(parsedDate), style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                                  Text(
+                                    dateFormatter.format(parsedDate),
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey[500],
+                                    ),
+                                  ),
                                 ],
                               ),
                             ],
                             if (r.reason != null && r.reason!.isNotEmpty) ...[
                               const SizedBox(height: 2),
-                              Text(r.reason!, style: TextStyle(fontSize: 11, color: Colors.grey[400]), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              Text(
+                                r.reason!,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey[400],
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ],
                           ],
                         ),
                       ),
                       Text(
                         '${formatter.format(amount)} جنيه',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.warning),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          color: AppColors.warning,
+                        ),
                       ),
                     ],
                   ),
@@ -699,7 +856,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
   // ===================== STATEMENT TAB =====================
   Widget _buildStatementTab(NumberFormat formatter, DateFormat dateFormatter) {
     if (_loadingStatement) {
-      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.primary),
+      );
     }
     if (_entries.isEmpty) {
       return _buildEmptyTab(LucideIcons.scrollText, 'لا توجد حركات');
@@ -712,63 +871,63 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
     return Column(
       children: [
         // Summary
-        Container(
-          margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  children: [
-                    const Icon(LucideIcons.arrowUpCircle, size: 18, color: AppColors.error),
-                    const SizedBox(height: 4),
-                    const Text('عليه', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-                    Text(
-                      formatter.format(totalDebit),
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.error),
-                    ),
-                  ],
-                ),
-              ),
-              Container(width: 1, height: 40, color: Colors.grey[200]),
-              Expanded(
-                child: Column(
-                  children: [
-                    const Icon(LucideIcons.arrowDownCircle, size: 18, color: AppColors.success),
-                    const SizedBox(height: 4),
-                    const Text('ليه', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-                    Text(
-                      formatter.format(totalCredit),
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.success),
-                    ),
-                  ],
-                ),
-              ),
-              Container(width: 1, height: 40, color: Colors.grey[200]),
-              Expanded(
-                child: Column(
-                  children: [
-                    const Icon(LucideIcons.wallet, size: 18, color: AppColors.primary),
-                    const SizedBox(height: 4),
-                    const Text('الرصيد', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-                    Text(
-                      formatter.format(lastBalance),
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: lastBalance > 0 ? AppColors.error : AppColors.success,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+        // Container(
+        //   margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+        //   padding: const EdgeInsets.all(14),
+        //   decoration: BoxDecoration(
+        //     color: Colors.white,
+        //     borderRadius: BorderRadius.circular(14),
+        //   ),
+        //   child: Row(
+        //     children: [
+        //       Expanded(
+        //         child: Column(
+        //           children: [
+        //             const Icon(LucideIcons.arrowUpCircle, size: 18, color: AppColors.error),
+        //             const SizedBox(height: 4),
+        //             const Text('عليه', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+        //             Text(
+        //               formatter.format(totalDebit),
+        //               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.error),
+        //             ),
+        //           ],
+        //         ),
+        //       ),
+        //       Container(width: 1, height: 40, color: Colors.grey[200]),
+        //       Expanded(
+        //         child: Column(
+        //           children: [
+        //             const Icon(LucideIcons.arrowDownCircle, size: 18, color: AppColors.success),
+        //             const SizedBox(height: 4),
+        //             const Text('ليه', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+        //             Text(
+        //               formatter.format(totalCredit),
+        //               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.success),
+        //             ),
+        //           ],
+        //         ),
+        //       ),
+        //       Container(width: 1, height: 40, color: Colors.grey[200]),
+        //       Expanded(
+        //         child: Column(
+        //           children: [
+        //             const Icon(LucideIcons.wallet, size: 18, color: AppColors.primary),
+        //             const SizedBox(height: 4),
+        //             const Text('الرصيد', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+        //             Text(
+        //               formatter.format(lastBalance),
+        //               style: TextStyle(
+        //                 fontWeight: FontWeight.bold,
+        //                 fontSize: 13,
+        //                 color: lastBalance > 0 ? AppColors.error : AppColors.success,
+        //               ),
+        //             ),
+        //           ],
+        //         ),
+        //       ),
+        //     ],
+        //   ),
+        // ),
 
         // Table header
         Container(
@@ -776,10 +935,42 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
           color: AppColors.primary.withOpacity(0.05),
           child: const Row(
             children: [
-              Expanded(flex: 2, child: Text('البيان', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
-              Expanded(child: Text('عليه', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppColors.error), textAlign: TextAlign.center)),
-              Expanded(child: Text('ليه', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppColors.success), textAlign: TextAlign.center)),
-              Expanded(child: Text('الرصيد', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12), textAlign: TextAlign.end)),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  'البيان',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  'عليه',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                    color: AppColors.error,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  'ليه',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                    color: AppColors.success,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  'الرصيد',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                  textAlign: TextAlign.end,
+                ),
+              ),
             ],
           ),
         ),
@@ -791,11 +982,14 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
             child: ListView.separated(
               padding: EdgeInsets.zero,
               itemCount: _entries.length,
-              separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey[100]),
+              separatorBuilder: (_, __) =>
+                  Divider(height: 1, color: Colors.grey[100]),
               itemBuilder: (context, index) {
                 final entry = _entries[index];
                 DateTime? parsedDate;
-                try { parsedDate = DateTime.parse(entry.date); } catch (_) {}
+                try {
+                  parsedDate = DateTime.parse(entry.date);
+                } catch (_) {}
 
                 IconData typeIcon;
                 Color typeColor;
@@ -818,7 +1012,10 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                 }
 
                 return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
                   color: Colors.white,
                   child: Row(
                     children: [
@@ -832,9 +1029,23 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(entry.description, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                  Text(
+                                    entry.description,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                   if (parsedDate != null)
-                                    Text(dateFormatter.format(parsedDate), style: TextStyle(fontSize: 10, color: Colors.grey[400])),
+                                    Text(
+                                      dateFormatter.format(parsedDate),
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.grey[400],
+                                      ),
+                                    ),
                                 ],
                               ),
                             ),
@@ -844,21 +1055,45 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
                       Expanded(
                         child: Text(
                           entry.debit > 0 ? formatter.format(entry.debit) : '-',
-                          style: TextStyle(fontSize: 12, color: entry.debit > 0 ? AppColors.error : Colors.grey[300], fontWeight: entry.debit > 0 ? FontWeight.w600 : FontWeight.normal),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: entry.debit > 0
+                                ? AppColors.error
+                                : Colors.grey[300],
+                            fontWeight: entry.debit > 0
+                                ? FontWeight.w600
+                                : FontWeight.normal,
+                          ),
                           textAlign: TextAlign.center,
                         ),
                       ),
                       Expanded(
                         child: Text(
-                          entry.credit > 0 ? formatter.format(entry.credit) : '-',
-                          style: TextStyle(fontSize: 12, color: entry.credit > 0 ? AppColors.success : Colors.grey[300], fontWeight: entry.credit > 0 ? FontWeight.w600 : FontWeight.normal),
+                          entry.credit > 0
+                              ? formatter.format(entry.credit)
+                              : '-',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: entry.credit > 0
+                                ? AppColors.success
+                                : Colors.grey[300],
+                            fontWeight: entry.credit > 0
+                                ? FontWeight.w600
+                                : FontWeight.normal,
+                          ),
                           textAlign: TextAlign.center,
                         ),
                       ),
                       Expanded(
                         child: Text(
                           formatter.format(entry.balance),
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: entry.balance > 0 ? AppColors.error : AppColors.success),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: entry.balance > 0
+                                ? AppColors.error
+                                : AppColors.success,
+                          ),
                           textAlign: TextAlign.end,
                         ),
                       ),
@@ -895,12 +1130,23 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
             children: [
               Icon(icon, size: 18, color: iconColor),
               const SizedBox(width: 8),
-              Text(label, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: iconColor)),
+              Text(
+                label,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  color: iconColor,
+                ),
+              ),
             ],
           ),
           Text(
             '$total جنيه',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: iconColor),
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 15,
+              color: iconColor,
+            ),
           ),
         ],
       ),
@@ -914,7 +1160,14 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
         children: [
           Icon(icon, size: 56, color: Colors.grey[300]),
           const SizedBox(height: 12),
-          Text(message, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.grey[500])),
+          Text(
+            message,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey[500],
+            ),
+          ),
         ],
       ),
     );

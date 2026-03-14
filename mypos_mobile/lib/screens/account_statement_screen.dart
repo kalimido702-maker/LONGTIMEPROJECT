@@ -94,6 +94,8 @@ class _AccountStatementScreenState extends State<AccountStatementScreen> {
                   child: const Row(
                     children: [
                       Expanded(flex: 2, child: Text('البيان', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                      Expanded(child: Text('مدين', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.error), textAlign: TextAlign.center)),
+                      Expanded(child: Text('دائن', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.success), textAlign: TextAlign.center)),
                       Expanded(child: Text('الرصيد', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13), textAlign: TextAlign.end)),
                     ],
                   ),
@@ -217,6 +219,28 @@ class _EntryRow extends StatelessWidget {
                       ),
                     ),
                   ],
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  entry.debit > 0 ? formatter.format(entry.debit) : '-',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: entry.debit > 0 ? AppColors.error : Colors.grey[300],
+                    fontWeight: entry.debit > 0 ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  entry.credit > 0 ? formatter.format(entry.credit) : '-',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: entry.credit > 0 ? AppColors.success : Colors.grey[300],
+                    fontWeight: entry.credit > 0 ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
               ),
               Expanded(
