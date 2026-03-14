@@ -41,12 +41,14 @@ import {
     RefreshCw,
     Loader2,
     MessageCircle,
+    Eye,
 } from "lucide-react";
 import { db } from "@/shared/lib/indexedDB";
 import { useToast } from "@/hooks/use-toast";
 import { whatsappService } from "@/services/whatsapp/whatsappService";
 import { usePagination } from "@/hooks/usePagination";
 import { DataPagination } from "@/components/ui/DataPagination";
+import { SalesRepActivityDialog } from "@/components/dialogs/SalesRepActivityDialog";
 
 interface Supervisor {
     id: string;
@@ -92,6 +94,10 @@ const SalesReps = () => {
     // WhatsApp Groups State
     const [whatsappGroups, setWhatsappGroups] = useState<{ id: string; name: string }[]>([]);
     const [isFetchingGroups, setIsFetchingGroups] = useState(false);
+
+    // Activity Dialog State
+    const [activityDialogOpen, setActivityDialogOpen] = useState(false);
+    const [selectedRepForActivity, setSelectedRepForActivity] = useState<SalesRep | null>(null);
 
     useEffect(() => {
         loadData();
@@ -344,7 +350,13 @@ const SalesReps = () => {
                                     pagination.paginatedItems.map((rep) => (
                                         <TableRow key={rep.id}>
                                             <TableCell className="font-medium">
-                                                <div className="flex items-center gap-2">
+                                                <div
+                                                    className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                                                    onClick={() => {
+                                                        setSelectedRepForActivity(rep);
+                                                        setActivityDialogOpen(true);
+                                                    }}
+                                                >
                                                     <UserCheck className="h-4 w-4 text-muted-foreground" />
                                                     {rep.name}
                                                 </div>
@@ -373,6 +385,17 @@ const SalesReps = () => {
                                             </TableCell>
                                             <TableCell>
                                                 <div className="flex items-center gap-2">
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        onClick={() => {
+                                                            setSelectedRepForActivity(rep);
+                                                            setActivityDialogOpen(true);
+                                                        }}
+                                                        title="سجل المندوب"
+                                                    >
+                                                        <Eye className="h-4 w-4" />
+                                                    </Button>
                                                     <Button
                                                         size="sm"
                                                         variant="outline"
@@ -569,6 +592,13 @@ const SalesReps = () => {
                     </form>
                 </DialogContent>
             </Dialog>
+
+            {/* Activity Dialog */}
+            <SalesRepActivityDialog
+                open={activityDialogOpen}
+                onOpenChange={setActivityDialogOpen}
+                salesRep={selectedRepForActivity}
+            />
         </div>
     );
 };

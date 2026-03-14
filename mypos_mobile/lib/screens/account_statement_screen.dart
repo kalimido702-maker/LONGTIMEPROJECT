@@ -5,7 +5,6 @@ import 'package:intl/intl.dart';
 import '../config/theme.dart';
 import '../providers/data_provider.dart';
 import '../models/account_entry.dart';
-import '../widgets/date_filter_widget.dart';
 
 class AccountStatementScreen extends StatefulWidget {
   const AccountStatementScreen({super.key});
@@ -15,35 +14,18 @@ class AccountStatementScreen extends StatefulWidget {
 }
 
 class _AccountStatementScreenState extends State<AccountStatementScreen> {
-  late DateTime _fromDate;
-  late DateTime _toDate;
-
   @override
   void initState() {
     super.initState();
-    final now = DateTime.now();
-    _fromDate = DateTime(now.year, 1, 1);
-    _toDate = DateTime(now.year, 12, 31);
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadStatement());
   }
 
   Future<void> _loadStatement() async {
     final dataProvider = context.read<DataProvider>();
-    final range = DateRange(from: _fromDate, to: _toDate);
 
     await dataProvider.loadAccountStatement(
       customerId: null,
-      fromDate: range.fromParam,
-      toDate: range.toParam,
     );
-  }
-
-  void _onDateChanged(DateRange range) {
-    setState(() {
-      _fromDate = range.from;
-      _toDate = range.to;
-    });
-    _loadStatement();
   }
 
   @override
@@ -55,8 +37,6 @@ class _AccountStatementScreenState extends State<AccountStatementScreen> {
     final entries = dataProvider.accountEntries;
 
     // Calculate totals
-    final totalDebit = entries.fold<double>(0, (sum, e) => sum + e.debit);
-    final totalCredit = entries.fold<double>(0, (sum, e) => sum + e.credit);
     final balance = entries.isNotEmpty ? entries.first.balance : 0.0;
 
     return Scaffold(
@@ -67,20 +47,6 @@ class _AccountStatementScreenState extends State<AccountStatementScreen> {
           ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
           : Column(
               children: [
-                // Date filter
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                  child: Row(
-                    children: [
-                      DateFilterWidget(
-                        fromDate: _fromDate,
-                        toDate: _toDate,
-                        onChanged: _onDateChanged,
-                      ),
-                    ],
-                  ),
-                ),
-
                 // Summary header
                 Container(
                   margin: const EdgeInsets.all(16),
@@ -98,34 +64,6 @@ class _AccountStatementScreenState extends State<AccountStatementScreen> {
                   ),
                   child: Column(
                     children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _SummaryItem(
-                              label: 'إجمالي المدين',
-                              value: formatter.format(totalDebit),
-                              color: AppColors.error,
-                              icon: LucideIcons.arrowUpCircle,
-                            ),
-                          ),
-                          Container(
-                            width: 1,
-                            height: 50,
-                            color: Colors.grey[200],
-                          ),
-                          Expanded(
-                            child: _SummaryItem(
-                              label: 'إجمالي الدائن',
-                              value: formatter.format(totalCredit),
-                              color: AppColors.success,
-                              icon: LucideIcons.arrowDownCircle,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      const Divider(height: 1),
-                      const SizedBox(height: 16),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -156,8 +94,6 @@ class _AccountStatementScreenState extends State<AccountStatementScreen> {
                   child: const Row(
                     children: [
                       Expanded(flex: 2, child: Text('البيان', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      Expanded(child: Text('مدين', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.error), textAlign: TextAlign.center)),
-                      Expanded(child: Text('دائن', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.success), textAlign: TextAlign.center)),
                       Expanded(child: Text('الرصيد', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13), textAlign: TextAlign.end)),
                     ],
                   ),
@@ -203,43 +139,6 @@ class _AccountStatementScreenState extends State<AccountStatementScreen> {
   }
 }
 
-class _SummaryItem extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-  final IconData icon;
-
-  const _SummaryItem({
-    required this.label,
-    required this.value,
-    required this.color,
-    required this.icon,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Icon(icon, size: 22, color: color),
-        const SizedBox(height: 6),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '$value جنيه',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: color,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _EntryRow extends StatelessWidget {
   final AccountEntry entry;
   final NumberFormat formatter;
@@ -272,6 +171,14 @@ class _EntryRow extends StatelessWidget {
       case 'return':
         typeIcon = LucideIcons.rotateCcw;
         typeColor = AppColors.warning;
+        break;
+      case 'bonus':
+        typeIcon = LucideIcons.gift;
+        typeColor = AppColors.success;
+        break;
+      case 'opening_balance':
+        typeIcon = LucideIcons.wallet;
+        typeColor = AppColors.primary;
         break;
       default:
         typeIcon = LucideIcons.circle;
@@ -310,28 +217,6 @@ class _EntryRow extends StatelessWidget {
                       ),
                     ),
                   ],
-                ),
-              ),
-              Expanded(
-                child: Text(
-                  entry.debit > 0 ? formatter.format(entry.debit) : '-',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: entry.debit > 0 ? AppColors.error : Colors.grey[300],
-                    fontWeight: entry.debit > 0 ? FontWeight.w600 : FontWeight.normal,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              Expanded(
-                child: Text(
-                  entry.credit > 0 ? formatter.format(entry.credit) : '-',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: entry.credit > 0 ? AppColors.success : Colors.grey[300],
-                    fontWeight: entry.credit > 0 ? FontWeight.w600 : FontWeight.normal,
-                  ),
-                  textAlign: TextAlign.center,
                 ),
               ),
               Expanded(

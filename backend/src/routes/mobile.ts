@@ -516,7 +516,7 @@ export async function mobileRoutes(server: FastifyInstance) {
 
         if (items.length === 0) {
           const [itemRows] = await db.query<RowDataPacket[]>(
-            `SELECT ii.*, p.name as product_name, p.barcode
+            `SELECT ii.*, p.name as product_name, p.barcode, p.units_per_carton
              FROM invoice_items ii
              LEFT JOIN products p ON ii.product_id = p.id
              WHERE ii.invoice_id = ? AND ii.client_id = ?`,
@@ -525,8 +525,90 @@ export async function mobileRoutes(server: FastifyInstance) {
           items = itemRows;
         }
 
+        // Enrich items_json items with units_per_carton from products
+        if (invoice.items_json && items.length > 0) {
+          const productIds = items
+            .map((it: any) => it.productId || it.product_id)
+            .filter(Boolean);
+          if (productIds.length > 0) {
+            const placeholders = productIds.map(() => '?').join(',');
+            const [products] = await db.query<RowDataPacket[]>(
+              `SELECT id, units_per_carton FROM products WHERE id IN (${placeholders}) AND client_id = ?`,
+              [...productIds, clientId]
+            );
+            const upcMap = new Map(products.map((p: any) => [p.id, p.units_per_carton]));
+            items = items.map((it: any) => ({
+              ...it,
+              units_per_carton: it.units_per_carton ?? it.unitsPerCarton ?? upcMap.get(it.productId || it.product_id) ?? null,
+            }));
+          }
+        }
+
+        // Calculate previousBalance & currentBalance for the customer
+        let previousBalance: number | undefined;
+        let currentBalance: number | undefined;
+
+        if (invoice.customer_id) {
+          try {
+            // Get customer's opening balance
+            const [custRows] = await db.query<RowDataPacket[]>(
+              `SELECT COALESCE(previous_statement, 0) as previous_statement FROM customers WHERE id = ? AND client_id = ?`,
+              [invoice.customer_id, clientId]
+            );
+            const openingBalance = custRows.length > 0 ? Number(custRows[0].previous_statement) : 0;
+
+            // Get all movements for this customer sorted by date
+            // invoices = all debits, sales_returns/payments/customer_bonuses = credits
+            const [movements] = await db.query<RowDataPacket[]>(
+              `SELECT id, total as amount, 'debit' as direction, created_at FROM invoices
+               WHERE customer_id = ? AND client_id = ? AND is_deleted = 0
+               UNION ALL
+               SELECT id, amount, 'credit' as direction, created_at FROM payments
+               WHERE customer_id = ? AND client_id = ? AND is_deleted = 0
+               UNION ALL
+               SELECT id, total as amount, 'credit' as direction, created_at FROM sales_returns
+               WHERE customer_id = ? AND client_id = ? AND is_deleted = 0
+               UNION ALL
+               SELECT id, bonus_amount as amount, 'credit' as direction, created_at FROM customer_bonuses
+               WHERE customer_id = ? AND client_id = ? AND is_deleted = 0
+               ORDER BY created_at ASC, id ASC`,
+              [
+                invoice.customer_id, clientId,
+                invoice.customer_id, clientId,
+                invoice.customer_id, clientId,
+                invoice.customer_id, clientId,
+              ]
+            );
+
+            let runningBalance = openingBalance;
+            let foundInvoice = false;
+
+            for (const mov of movements) {
+              if (String(mov.id) === String(id) && mov.direction === 'debit') {
+                previousBalance = runningBalance;
+                runningBalance += Number(mov.amount);
+                currentBalance = runningBalance;
+                foundInvoice = true;
+                continue;
+              }
+              if (mov.direction === 'debit') {
+                runningBalance += Number(mov.amount);
+              } else {
+                runningBalance -= Number(mov.amount);
+              }
+            }
+
+            if (!foundInvoice) {
+              previousBalance = runningBalance;
+              currentBalance = runningBalance + Number(invoice.total || 0);
+            }
+          } catch (balanceError) {
+            logger.warn({ error: balanceError }, "Failed to calculate invoice balance");
+          }
+        }
+
         return reply.code(200).send({
-          data: { ...invoice, items },
+          data: { ...invoice, items, previousBalance, currentBalance },
         });
       } catch (error) {
         logger.error({ error }, "Failed to fetch mobile invoice");
@@ -766,6 +848,19 @@ export async function mobileRoutes(server: FastifyInstance) {
           return reply.code(400).send({ error: "customer_id is required for sales reps" });
         }
 
+        // Fetch opening balance (previous_statement) for the target customer
+        let openingBalance = 0;
+        if (targetCustomerId) {
+          const [custRows] = await db.query<RowDataPacket[]>(
+            `SELECT COALESCE(previous_statement, 0) as previous_statement 
+             FROM customers WHERE id = ? AND client_id = ? AND is_deleted = 0`,
+            [targetCustomerId, clientId]
+          );
+          if (custRows.length > 0) {
+            openingBalance = Number(custRows[0].previous_statement || 0);
+          }
+        }
+
         // Build entries from invoices (debits)
         let invoiceWhere = [
           "i.client_id = ?",
@@ -881,25 +976,68 @@ export async function mobileRoutes(server: FastifyInstance) {
           retParams
         );
 
+        // Build entries from customer bonuses (credits) — matches dashboard formula
+        let bonusEntries: RowDataPacket[] = [];
+        if (targetCustomerId) {
+          let bonusWhere = ["cb.client_id = ?", "cb.is_deleted = 0", "cb.customer_id = ?"];
+          let bonusParams: any[] = [clientId, targetCustomerId];
+
+          if (from_date) { bonusWhere.push("cb.created_at >= ?"); bonusParams.push(from_date); }
+          if (to_date) { bonusWhere.push("cb.created_at <= ?"); bonusParams.push(to_date); }
+
+          const [bonuses] = await db.query<RowDataPacket[]>(
+            `SELECT 
+              cb.id, 'bonus' as type,
+              CONCAT('بونص ', COALESCE(cb.id, '')) as description,
+              0 as debit, cb.bonus_amount as credit,
+              cb.id as reference_number,
+              c.name as customer_name,
+              cb.created_at as date
+            FROM customer_bonuses cb
+            LEFT JOIN customers c ON cb.customer_id = c.id
+            WHERE ${bonusWhere.join(" AND ")}`,
+            bonusParams
+          );
+          bonusEntries = bonuses;
+        }
+
         // Combine and sort by date
-        const allEntries = [...invoices, ...payments, ...returns]
+        const allEntries = [...invoices, ...payments, ...returns, ...bonusEntries]
           .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-        // Calculate running balance
-        let runningBalance = 0;
-        const entries = allEntries.map((entry) => {
+        // Calculate running balance starting from opening balance (previous_statement)
+        let runningBalance = openingBalance;
+        const entries: any[] = [];
+
+        // Add opening balance entry if there's a previous_statement
+        if (openingBalance !== 0 && targetCustomerId) {
+          entries.push({
+            id: 'opening_balance',
+            type: 'opening_balance',
+            description: 'رصيد افتتاحي',
+            debit: openingBalance > 0 ? openingBalance : 0,
+            credit: openingBalance < 0 ? Math.abs(openingBalance) : 0,
+            balance: openingBalance,
+            reference_number: null,
+            customer_name: null,
+            date: from_date || '1970-01-01',
+          });
+        }
+
+        for (const entry of allEntries) {
           runningBalance += Number(entry.debit || 0) - Number(entry.credit || 0);
-          return {
+          entries.push({
             ...entry,
             debit: Number(entry.debit || 0),
             credit: Number(entry.credit || 0),
             balance: runningBalance,
-          };
-        });
+          });
+        }
 
-        // Totals
-        const totalDebit = entries.reduce((sum, e) => sum + e.debit, 0);
-        const totalCredit = entries.reduce((sum, e) => sum + e.credit, 0);
+        // Totals (excluding opening balance entry from debit/credit sums)
+        const movementEntries = entries.filter(e => e.type !== 'opening_balance');
+        const totalDebit = movementEntries.reduce((sum, e) => sum + e.debit, 0);
+        const totalCredit = movementEntries.reduce((sum, e) => sum + e.credit, 0);
 
         return reply.code(200).send({
           data: {

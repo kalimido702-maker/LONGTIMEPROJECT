@@ -7,6 +7,7 @@ class InvoiceItem {
   final double discount;
   final double total;
   final String? unitName;
+  final int? unitsPerCarton;
 
   InvoiceItem({
     required this.id,
@@ -17,6 +18,7 @@ class InvoiceItem {
     this.discount = 0,
     this.total = 0,
     this.unitName,
+    this.unitsPerCarton,
   });
 
   factory InvoiceItem.fromJson(Map<String, dynamic> json) {
@@ -32,7 +34,14 @@ class InvoiceItem {
       discount: disc,
       total: _toDouble(json['total']) > 0 ? _toDouble(json['total']) : (qty * prc) - disc,
       unitName: json['unitName'] ?? json['unit_name'] ?? json['selectedUnitName'],
+      unitsPerCarton: _toInt(json['unitsPerCarton'] ?? json['units_per_carton']),
     );
+  }
+
+  static int? _toInt(dynamic val) {
+    if (val == null) return null;
+    if (val is int) return val;
+    return int.tryParse(val.toString());
   }
 
   static double _toDouble(dynamic val) {
@@ -65,6 +74,8 @@ class Invoice {
   final List<InvoiceItem> items;
   final String? createdAt;
   final String type; // 'sale' or 'return'
+  final double? previousBalance;
+  final double? currentBalance;
 
   Invoice({
     required this.id,
@@ -88,6 +99,8 @@ class Invoice {
     this.items = const [],
     this.createdAt,
     this.type = 'sale',
+    this.previousBalance,
+    this.currentBalance,
   });
 
   factory Invoice.fromJson(Map<String, dynamic> json) {
@@ -130,6 +143,8 @@ class Invoice {
       items: itemsList,
       createdAt: json['createdAt'] ?? json['created_at'],
       type: json['type'] ?? (json['invoiceType'] ?? json['invoice_type'] ?? 'sale'),
+      previousBalance: _toNullableDouble(json['previousBalance'] ?? json['previous_balance']),
+      currentBalance: _toNullableDouble(json['currentBalance'] ?? json['current_balance']),
     );
   }
 
@@ -143,5 +158,12 @@ class Invoice {
     if (val is double) return val;
     if (val is int) return val.toDouble();
     return double.tryParse(val.toString()) ?? 0;
+  }
+
+  static double? _toNullableDouble(dynamic val) {
+    if (val == null) return null;
+    if (val is double) return val;
+    if (val is int) return val.toDouble();
+    return double.tryParse(val.toString());
   }
 }

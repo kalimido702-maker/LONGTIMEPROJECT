@@ -838,7 +838,7 @@ const TABLE_MAPPINGS: Record<string, TableMapping> = {
             { clientField: 'createdAt', serverField: 'created_at', transform: toMySQLDateTime },
             { clientField: 'updatedAt', serverField: 'updated_at', transform: toMySQLDateTime },
         ],
-        clientOnlyFields: ['local_updated_at'],
+        clientOnlyFields: ['local_updated_at', 'is_synced', 'last_synced_at'],
     },
     // Customer Bonuses - MySQL: type, customer_id, customer_name, period_start, period_end, total_payments, bonus_percentage, bonus_amount, user_id, user_name, notes
     customer_bonuses: {
@@ -858,7 +858,7 @@ const TABLE_MAPPINGS: Record<string, TableMapping> = {
             { clientField: 'createdAt', serverField: 'created_at', transform: toMySQLDateTime },
             { clientField: 'updatedAt', serverField: 'updated_at', transform: toMySQLDateTime },
         ],
-        clientOnlyFields: ['local_updated_at'],
+        clientOnlyFields: ['local_updated_at', 'is_synced', 'last_synced_at'],
     },
 };
 
@@ -875,12 +875,15 @@ export class FieldMapper {
         branchId: string | number | null
     ): Record<string, any> {
         const mapping = TABLE_MAPPINGS[tableName];
+        // Fields that are client-only runtime fields and should NEVER be sent to the server
+        const GLOBAL_CLIENT_ONLY_FIELDS = ['local_updated_at', 'is_synced', 'last_synced_at', 'isSynced', 'lastSyncedAt'];
+
         if (!mapping) {
             // No mapping defined - pass through with basic camelCase to snake_case conversion
             console.warn(`No field mapping defined for table: ${tableName}`);
             const serverData: Record<string, any> = { client_id: clientId, branch_id: branchId };
             for (const [key, value] of Object.entries(clientData)) {
-                if (key === 'local_updated_at') continue;
+                if (GLOBAL_CLIENT_ONLY_FIELDS.includes(key)) continue;
                 // Convert camelCase to snake_case
                 const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
                 // Handle datetime
@@ -938,6 +941,11 @@ export class FieldMapper {
             for (const field of mapping.clientOnlyFields) {
                 delete serverData[field];
             }
+        }
+
+        // Always strip global client-only runtime fields as a safety net
+        for (const field of GLOBAL_CLIENT_ONLY_FIELDS) {
+            delete serverData[field];
         }
 
         return serverData;

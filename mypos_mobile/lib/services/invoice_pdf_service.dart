@@ -1,51 +1,74 @@
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:printing/printing.dart';
 import 'package:pdf/pdf.dart';
-// ignore_for_file: deprecated_member_use
+import 'package:pdf/widgets.dart' as pw;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+
 import '../models/invoice.dart';
 
-/// Generates invoice PDF using the exact same HTML template as the desktop app.
-/// Uses [Printing.convertHtml] for native HTML→PDF rendering with full
-/// Arabic/RTL support via the Cairo Google Font.
+/// Generates invoice PDF using the `pdf` package widget system with embedded
+/// Cairo Arabic fonts.  Layout matches the desktop HTML template.
 class InvoicePdfService {
-  static String? _logoBase64;
+  static pw.Font? _cairoRegular;
+  static pw.Font? _cairoBold;
+  static pw.MemoryImage? _logoImage;
 
-  /// Load logo as base64 data URI (cached)
-  static Future<String> _getLogoBase64() async {
-    if (_logoBase64 != null) return _logoBase64!;
+  static const _teal = PdfColor.fromInt(0xFF2d8a9e);
+  static const _black = PdfColors.black;
+  static const _white = PdfColors.white;
+  static const _greyLight = PdfColor.fromInt(0xFFAAAAAA);
+
+  // ── Load assets (cached) ──────────────────────────────────────────────
+
+  static Future<void> _loadAssets() async {
+    if (_cairoRegular != null) return;
+    final regularData = await rootBundle.load('assets/fonts/Cairo-Regular.ttf');
+    final boldData = await rootBundle.load('assets/fonts/Cairo-Bold.ttf');
+    _cairoRegular = pw.Font.ttf(regularData);
+    _cairoBold = pw.Font.ttf(boldData);
     try {
-      final data = await rootBundle.load('assets/images/logo.png');
-      final bytes = data.buffer.asUint8List();
-      _logoBase64 = 'data:image/png;base64,${base64Encode(bytes)}';
+      final logoData = await rootBundle.load('assets/images/logo.png');
+      _logoImage = pw.MemoryImage(logoData.buffer.asUint8List());
     } catch (_) {
-      _logoBase64 = '';
+      _logoImage = null;
     }
-    return _logoBase64!;
   }
 
-  /// Format number with commas, no unnecessary decimals
+  // ── Helpers ───────────────────────────────────────────────────────────
+
+  static pw.TextStyle _ts({
+    double size = 12,
+    bool bold = false,
+    PdfColor color = PdfColors.black,
+  }) =>
+      pw.TextStyle(
+        font: bold ? _cairoBold : _cairoRegular,
+        fontBold: _cairoBold,
+        fontNormal: _cairoRegular,
+        fontSize: size,
+        fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+        color: color,
+      );
+
   static String _fmt(double n, {int maxDec = 2}) {
     final hasDecimals = n % 1 != 0;
-    if (!hasDecimals) {
-      return n.toStringAsFixed(0).replaceAllMapped(
-            RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
-            (m) => '${m[1]},',
-          );
-    }
-    return n.toStringAsFixed(maxDec).replaceAllMapped(
-          RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
-          (m) => '${m[1]},',
-        );
+    final str =
+        hasDecimals ? n.toStringAsFixed(maxDec) : n.toStringAsFixed(0);
+    return str.replaceAllMapped(
+      RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+      (m) => '${m[1]},',
+    );
   }
 
-  /// Build the exact same HTML template used by the desktop Electron app
-  static Future<String> generateInvoiceHTML(Invoice invoice) async {
-    final logoBase64 = await _getLogoBase64();
+  // ── Build PDF ─────────────────────────────────────────────────────────
+
+  static Future<Uint8List> generatePdf(Invoice invoice) async {
+    await _loadAssets();
+
+    final pdf = pw.Document();
     final isReturn = invoice.isReturn;
 
     // Parse date
@@ -60,462 +83,333 @@ class InvoicePdfService {
 
     final invoiceNum = invoice.invoiceNumber ?? invoice.id.substring(0, 8);
 
-    // Build item rows
-    final itemsRows = StringBuffer();
-    for (var i = 0; i < invoice.items.length; i++) {
-      final item = invoice.items[i];
-      itemsRows.writeln('''
-        <tr>
-            <td class="col-index">${i + 1}</td>
-            <td class="col-name">${_escapeHtml(item.name)}</td>
-            <td class="col-qty">${_fmt(item.quantity, maxDec: 0)}</td>
-            <td class="col-unit">${_escapeHtml(item.unitName ?? 'قطعة')}</td>
-            <td class="col-price">${_fmt(item.price)}</td>
-            <td class="col-total">${_fmt(item.total)}</td>
-        </tr>
-      ''');
-    }
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        textDirection: pw.TextDirection.rtl,
+        margin: const pw.EdgeInsets.fromLTRB(34, 28, 34, 28),
+        build: (ctx) => [
+          // ── HEADER ──────────────────────────────────────────────
+          _buildHeader(invoice, invoiceNum, dateStr, isReturn),
+          pw.SizedBox(height: 12),
 
-    // Build totals rows
-    final totalsHtml = StringBuffer();
+          // ── ITEMS TABLE ─────────────────────────────────────────
+          _buildItemsTable(invoice),
+          pw.SizedBox(height: 12),
+
+          // ── FOOTER (totals + website) ───────────────────────────
+          _buildFooter(invoice),
+
+          // ── NOTES ───────────────────────────────────────────────
+          if (invoice.notes != null && invoice.notes!.isNotEmpty) ...[
+            pw.SizedBox(height: 10),
+            _buildNotes(invoice.notes!),
+          ],
+        ],
+      ),
+    );
+
+    return pdf.save();
+  }
+
+  // ── HEADER ──────────────────────────────────────────────────────────
+
+  static pw.Widget _buildHeader(
+      Invoice invoice, String invoiceNum, String dateStr, bool isReturn) {
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        // Right side (in RTL): Company name + invoice type + customer
+        pw.Expanded(
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                'لونج تايم للصناعات الكهربائية',
+                style: _ts(size: 20, bold: true),
+                textDirection: pw.TextDirection.rtl,
+              ),
+              pw.SizedBox(height: 4),
+              // Invoice type bar
+              pw.Container(
+                width: double.infinity,
+                padding:
+                    const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+                color: _teal,
+                child: pw.Text(
+                  isReturn ? 'مرتجع من:' : 'فاتورة إلى:',
+                  style: _ts(size: 11, bold: true, color: _white),
+                  textDirection: pw.TextDirection.rtl,
+                ),
+              ),
+              pw.SizedBox(height: 6),
+              pw.Text(
+                'السادة / ${invoice.customerName ?? ''}',
+                style: _ts(size: 15, bold: true),
+                textDirection: pw.TextDirection.rtl,
+              ),
+            ],
+          ),
+        ),
+
+        pw.SizedBox(width: 20),
+
+        // Left side (in RTL): Logo + Meta table
+        pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          children: [
+            if (_logoImage != null)
+              pw.Image(_logoImage!, width: 110, height: 60,
+                  fit: pw.BoxFit.contain),
+            if (_logoImage != null) pw.SizedBox(height: 8),
+            // Meta table: invoice number + date
+            _buildMetaTable(invoiceNum, dateStr),
+          ],
+        ),
+      ],
+    );
+  }
+
+  static pw.Widget _buildMetaTable(String invoiceNum, String dateStr) {
+    return pw.Table(
+      border: null,
+      columnWidths: {
+        0: const pw.FixedColumnWidth(80),
+        1: const pw.FixedColumnWidth(80),
+      },
+      children: [
+        // Header row
+        pw.TableRow(
+          decoration: const pw.BoxDecoration(color: _teal),
+          children: [
+            pw.Padding(
+              padding: const pw.EdgeInsets.all(4),
+              child: pw.Text('رقم الفاتورة',
+                  style: _ts(size: 9, bold: true, color: _white),
+                  textAlign: pw.TextAlign.center,
+                  textDirection: pw.TextDirection.rtl),
+            ),
+            pw.Padding(
+              padding: const pw.EdgeInsets.all(4),
+              child: pw.Text('التاريخ',
+                  style: _ts(size: 9, bold: true, color: _white),
+                  textAlign: pw.TextAlign.center,
+                  textDirection: pw.TextDirection.rtl),
+            ),
+          ],
+        ),
+        // Data row
+        pw.TableRow(
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(
+              bottom: pw.BorderSide(color: _teal, width: 3),
+            ),
+          ),
+          children: [
+            pw.Padding(
+              padding: const pw.EdgeInsets.all(4),
+              child: pw.Text(invoiceNum,
+                  style: _ts(size: 11, bold: true),
+                  textAlign: pw.TextAlign.center,
+                  textDirection: pw.TextDirection.rtl),
+            ),
+            pw.Padding(
+              padding: const pw.EdgeInsets.all(4),
+              child: pw.Text(dateStr,
+                  style: _ts(size: 11, bold: true),
+                  textAlign: pw.TextAlign.center,
+                  textDirection: pw.TextDirection.rtl),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ── ITEMS TABLE ────────────────────────────────────────────────────────
+
+  static pw.Widget _buildItemsTable(Invoice invoice) {
+    // Check if any item has unitsPerCarton
+    final hasCarton = invoice.items.any((it) => it.unitsPerCarton != null && it.unitsPerCarton! > 0);
+
+    // Main table: RTL order (right-most column first)
+    final headers = ['الإجمالي', 'الفئة', 'الوحدة', 'الكمية', 'اسم الصنف', 'م'];
+    final colWidths = <int, pw.TableColumnWidth>{
+      0: const pw.FlexColumnWidth(1.8),  // الإجمالي
+      1: const pw.FlexColumnWidth(1.8),  // الفئة
+      2: const pw.FlexColumnWidth(1.4),  // الوحدة
+      3: const pw.FlexColumnWidth(1.2),  // الكمية
+      4: const pw.FlexColumnWidth(4.5),  // اسم الصنف
+      5: const pw.FlexColumnWidth(0.7),  // م
+    };
+
+    final mainTable = pw.TableHelper.fromTextArray(
+      border: pw.TableBorder(
+        left: const pw.BorderSide(color: _teal, width: 1.5),
+        right: const pw.BorderSide(color: _teal, width: 1.5),
+        top: const pw.BorderSide(color: _teal, width: 1.5),
+        bottom: const pw.BorderSide(color: _teal, width: 1.5),
+        horizontalInside: const pw.BorderSide(color: _greyLight, width: 0.5),
+        verticalInside: const pw.BorderSide(color: _greyLight, width: 0.5),
+      ),
+      columnWidths: colWidths,
+      headerDirection: pw.TextDirection.rtl,
+      tableDirection: pw.TextDirection.rtl,
+      headerAlignment: pw.Alignment.center,
+      cellAlignment: pw.Alignment.center,
+      headerStyle: _ts(size: 11, bold: true, color: _white),
+      cellStyle: _ts(size: 11, bold: false),
+      headerDecoration: const pw.BoxDecoration(color: _teal),
+      cellHeight: 28,
+      headerHeight: 28,
+      headers: headers,
+      data: List.generate(invoice.items.length, (i) {
+        final item = invoice.items[i];
+        return [
+          _fmt(item.total),
+          _fmt(item.price),
+          item.unitName ?? 'قطعة',
+          _fmt(item.quantity, maxDec: 0),
+          item.name,
+          '${i + 1}',
+        ];
+      }),
+    );
+
+    if (!hasCarton) return mainTable;
+
+    // Carton column as a separate table on the far left with a gap
+    final cartonTable = pw.TableHelper.fromTextArray(
+      border: pw.TableBorder(
+        left: const pw.BorderSide(color: _teal, width: 1.5),
+        right: const pw.BorderSide(color: _teal, width: 1.5),
+        top: const pw.BorderSide(color: _teal, width: 1.5),
+        bottom: const pw.BorderSide(color: _teal, width: 1.5),
+        horizontalInside: const pw.BorderSide(color: _greyLight, width: 0.5),
+      ),
+      columnWidths: {0: const pw.FlexColumnWidth(1)},
+      headerDirection: pw.TextDirection.rtl,
+      tableDirection: pw.TextDirection.rtl,
+      headerAlignment: pw.Alignment.center,
+      cellAlignment: pw.Alignment.center,
+      headerStyle: _ts(size: 7, bold: true, color: _white),
+      cellStyle: _ts(size: 11, bold: false),
+      headerDecoration: const pw.BoxDecoration(color: _teal),
+      cellHeight: 28,
+      headerHeight: 32,
+      headers: ['العدد في ك'],
+      data: List.generate(invoice.items.length, (i) {
+        final item = invoice.items[i];
+        return [
+          item.unitsPerCarton != null && item.unitsPerCarton! > 0
+              ? _fmt(item.unitsPerCarton!.toDouble(), maxDec: 0)
+              : '',
+        ];
+      }),
+    );
+
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        // Main table fills the rest
+        pw.Expanded(child: mainTable),
+        pw.SizedBox(width: 8), // spacer gap
+        // Carton column on the far right
+        pw.SizedBox(width: 55, child: cartonTable),
+      ],
+    );
+  }
+
+  // ── FOOTER ─────────────────────────────────────────────────────────────
+
+  static pw.Widget _buildFooter(Invoice invoice) {
+    final totalRows = <pw.Widget>[];
     final hasDiscount = invoice.discount > 0;
 
     if (hasDiscount) {
       final subtotal = invoice.subtotal > 0
           ? invoice.subtotal
           : invoice.total + invoice.discount;
-      totalsHtml.writeln('''
-        <div class="total-row">
-            <span>الإجمالي</span>
-            <span class="amount">${_fmt(subtotal)}</span>
-        </div>
-        <div class="total-row">
-            <span>الخصم</span>
-            <span class="amount">${_fmt(invoice.discount)}</span>
-        </div>
-        <div class="total-row">
-            <span>الإجمالي بعد الخصم</span>
-            <span class="amount">${_fmt(invoice.total)}</span>
-        </div>
-      ''');
+      totalRows.add(_totalRow('الإجمالي', _fmt(subtotal)));
+      totalRows.add(_totalRow('الخصم', _fmt(invoice.discount)));
+      totalRows.add(_totalRow('الإجمالي بعد الخصم', _fmt(invoice.total)));
     } else {
-      totalsHtml.writeln('''
-        <div class="total-row">
-            <span>الإجمالي</span>
-            <span class="amount">${_fmt(invoice.total)}</span>
-        </div>
-      ''');
+      totalRows.add(_totalRow('الإجمالي', _fmt(invoice.total)));
     }
 
-    if (invoice.paidAmount > 0) {
-      totalsHtml.writeln('''
-        <div class="total-row">
-            <span>المدفوع</span>
-            <span class="amount">${_fmt(invoice.paidAmount)}</span>
-        </div>
-      ''');
+    if (invoice.previousBalance != null) {
+      totalRows.add(_totalRow('الرصيد السابق', _fmt(invoice.previousBalance!)));
     }
-    if (invoice.remainingAmount > 0) {
-      totalsHtml.writeln('''
-        <div class="total-row">
-            <span>المتبقي</span>
-            <span class="amount">${_fmt(invoice.remainingAmount)}</span>
-        </div>
-      ''');
+    if (invoice.currentBalance != null) {
+      totalRows.add(_totalRow('الرصيد الحالي', _fmt(invoice.currentBalance!)));
     }
 
-    // Notes section
-    final notesHtml = (invoice.notes != null && invoice.notes!.isNotEmpty)
-        ? '''
-        <div class="notes-section">
-            <div class="notes-label">ملاحظات:</div>
-            <div class="notes-text">${_escapeHtml(invoice.notes!)}</div>
-        </div>
-        '''
-        : '';
-
-    return '''
-<!DOCTYPE html>
-<html dir="rtl" lang="ar">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${isReturn ? 'فاتورة مرتجعات' : 'فاتورة بيع'} رقم $invoiceNum</title>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
-        
-        @page {
-            size: A4;
-            margin: 0;
-        }
-        
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-        }
-        
-        body {
-            font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif;
-            direction: rtl;
-            background: #fff;
-            color: #000;
-            width: 210mm;
-            min-height: 297mm;
-            margin: 0 auto;
-            position: relative;
-        }
-        
-        .invoice-container {
-            padding: 10mm 12mm 12mm 12mm;
-        }
-        
-        /* ===== HEADER SECTION ===== */
-        .header-section {
-            display: flex;
-            flex-direction: row-reverse;
-            align-items: flex-start;
-            justify-content: space-between;
-            margin-bottom: 10px;
-        }
-
-        .header-top {
-            display: flex;
-            flex-direction: column-reverse;
-            align-items: flex-start;
-            margin-bottom: 0;
-        }
-        
-        .logo-section {
-            text-align: left;
-            margin-right: auto;
-            margin-left: 0;
-        }
-        
-        .logo-container {
-            width: 150px;
-        }
-        
-        .logo {
-            width: 100%;
-            height: auto;
-        }
-        
-        /* ===== META TABLE ===== */
-        .meta-section {
-            margin-top: 15px;
-        }
-        
-        .meta-table {
-            border-collapse: collapse;
-            width: 200px;
-        }
-        
-        .meta-table th {
-            background: #2d8a9e;
-            color: white;
-            padding: 5px 6px;
-            font-size: 12px;
-            font-weight: 600;
-            text-align: center;
-            border: none;
-        }
-        
-        .meta-table td {
-            background: #fff;
-            padding: 5px 6px;
-            font-size: 14px;
-            font-weight: 700;
-            text-align: center;
-            border: none;
-            border-bottom: 4px solid #2d8a9e;
-        }
-        
-        /* ===== COMPANY NAME & INVOICE TYPE BAR ===== */
-        .company-section {
-            text-align: right;
-            margin-bottom: 10px;
-        }
-        
-        .company-name {
-            font-size: 24px;
-            font-weight: 800;
-            color: #000;
-        }
-        
-        .invoice-type-bar {
-            background: #2d8a9e;
-            color: white;
-            display: block;
-            padding: 4px 20px 4px 12px;
-            font-size: 13px;
-            font-weight: 600;
-            margin-top: 4px;
-        }
-        
-        /* ===== CUSTOMER SECTION ===== */
-        .customer-section {
-            margin-bottom: 8px;
-            margin-top: 8px;
-            text-align: right;
-        }
-        
-        .customer-name {
-            font-size: 18px;
-            font-weight: 800;
-            color: #000;
-        }
-        
-        .customer-address {
-            font-size: 14px;
-            color: #333;
-            font-weight: 600;
-            margin-top: 3px;
-        }
-        
-        /* ===== ITEMS TABLE ===== */
-        .items-table-container {
-            margin-bottom: 15px;
-        }
-        
-        .items-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        
-        .items-table th {
-            background: #2d8a9e;
-            color: white;
-            padding: 7px 4px;
-            font-size: 13px;
-            font-weight: 700;
-            text-align: center;
-            vertical-align: middle;
-            border: 1px solid rgba(255,255,255,0.3);
-            border-bottom: 2px solid #2d8a9e;
-        }
-        
-        .items-table th.col-name {
-            text-align: right;
-            padding-right: 10px;
-        }
-        
-        .items-table td {
-            padding: 8px 4px;
-            font-size: 14px;
-            font-weight: 600;
-            text-align: center;
-            vertical-align: middle;
-            color: #000;
-            border: 1px solid #aaa;
-            border-bottom: 1px solid #888;
-        }
-        
-        .items-table td.col-name {
-            text-align: right;
-            padding-right: 10px;
-            font-size: 13px;
-        }
-        
-        .items-table td.col-index {
-            font-weight: 700;
-        }
-        
-        .items-table td.col-total {
-            font-weight: 700;
-        }
-        
-        /* Column widths */
-        .col-index { width: 6%; }
-        .col-name { width: 40%; }
-        .col-qty { width: 10%; }
-        .col-unit { width: 12%; }
-        .col-price { width: 16%; }
-        .col-total { width: 16%; }
-        
-        /* Outer borders */
-        .items-table th.col-index,
-        .items-table td.col-index {
-            border-right: 2px solid #2d8a9e;
-        }
-        .items-table th.col-total,
-        .items-table td.col-total {
-            border-left: 2px solid #2d8a9e;
-        }
-        .items-table thead th {
-            border-top: 2px solid #2d8a9e;
-        }
-        .items-table tbody tr:last-child td {
-            border-bottom: 2px solid #2d8a9e;
-        }
-        
-        /* ===== FOOTER ===== */
-        .footer {
-            display: flex;
-            flex-direction: row;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-top: 12px;
-        }
-        
-        .totals-block {
-            width: 260px;
-            order: 2;
-        }
-        
-        .total-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 5px 0;
-            font-size: 15px;
-            font-weight: 700;
-            border-bottom: 2px solid #000;
-        }
-        
-        .total-row .amount {
-            font-weight: 800;
-        }
-        
-        .qr-section {
-            display: flex;
-            flex-direction: row;
-            align-items: center;
-            gap: 12px;
-            order: 1;
-        }
-        
-        .site-url {
-            font-size: 14px;
-            font-weight: 700;
-            color: #2d8a9e;
-            text-decoration: none;
-        }
-        
-        /* ===== NOTES SECTION ===== */
-        .notes-section {
-            margin-top: 12px;
-            padding: 8px 12px;
-            border: 1.5px solid #2d8a9e;
-            border-radius: 4px;
-            text-align: right;
-        }
-        
-        .notes-label {
-            font-size: 13px;
-            font-weight: 700;
-            color: #2d8a9e;
-            margin-bottom: 4px;
-        }
-        
-        .notes-text {
-            font-size: 14px;
-            font-weight: 600;
-            color: #333;
-            line-height: 1.6;
-            white-space: pre-wrap;
-        }
-    </style>
-</head>
-<body>
-    <div class="invoice-container">
-        <div class="header-section">
-            <!-- Logo + Meta Table (Left in RTL) -->
-            <div class="header-top">
-                <div class="meta-section">
-                    <table class="meta-table">
-                        <thead>
-                            <tr>
-                                <th>رقم الفاتورة</th>
-                                <th>التاريخ</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td>$invoiceNum</td>
-                                <td>$dateStr</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-                
-                <div class="logo-section">
-                    <div class="logo-container">
-                        ${logoBase64.isNotEmpty ? '<img src="$logoBase64" class="logo" alt="Logo">' : ''}
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Company Name & Customer (Right in RTL) -->
-            <div class="company-section">
-                <div class="company-name">لونج تايم للصناعات الكهربائية</div>
-                <div class="invoice-type-bar">${isReturn ? 'مرتجع من:' : 'فاتورة إلى:'}</div>
-                <div class="customer-section">
-                    <div class="customer-name">السادة / ${_escapeHtml(invoice.customerName ?? '')}</div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Items Table -->
-        <div class="items-table-container">
-            <table class="items-table">
-                <thead>
-                    <tr>
-                        <th class="col-index">م</th>
-                        <th class="col-name">اسم الصنف</th>
-                        <th class="col-qty">الكمية</th>
-                        <th class="col-unit">الوحدة</th>
-                        <th class="col-price">الفئة</th>
-                        <th class="col-total">الإجمالي</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    $itemsRows
-                </tbody>
-            </table>
-        </div>
-        
-        <!-- Footer: QR/Website (right) + Totals (left) -->
-        <div class="footer">
-            <div class="qr-section">
-                <a href="https://longtimelt.com" class="site-url">longtimelt.com</a>
-            </div>
-
-            <div class="totals-block">
-                $totalsHtml
-            </div>
-        </div>
-        
-        $notesHtml
-    </div>
-</body>
-</html>
-    ''';
-  }
-
-  /// Escape HTML special characters
-  static String _escapeHtml(String text) {
-    return text
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
-  }
-
-  /// Generate PDF bytes from the HTML template using native rendering
-  static Future<Uint8List> generatePdf(Invoice invoice) async {
-    final html = await generateInvoiceHTML(invoice);
-    final pdfBytes = await Printing.convertHtml(
-      html: html,
-      format: PdfPageFormat.a4,
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        // Totals block (right in RTL)
+        pw.SizedBox(
+          width: 200,
+          child: pw.Column(children: totalRows),
+        ),
+        pw.Spacer(),
+        // Website (left in RTL)
+        pw.Text(
+          'longtimelt.com',
+          style: _ts(size: 12, bold: true, color: _teal),
+        ),
+      ],
     );
-    return pdfBytes;
   }
 
-  /// Generate PDF and share it
+  static pw.Widget _totalRow(String label, String amount) {
+    return pw.Container(
+      padding: const pw.EdgeInsets.symmetric(vertical: 4),
+      decoration: const pw.BoxDecoration(
+        border:
+            pw.Border(bottom: pw.BorderSide(color: _black, width: 1.5)),
+      ),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(label,
+              style: _ts(size: 12, bold: true),
+              textDirection: pw.TextDirection.rtl),
+          pw.Text(amount,
+              style: _ts(size: 12, bold: true),
+              textDirection: pw.TextDirection.rtl),
+        ],
+      ),
+    );
+  }
+
+  // ── NOTES ──────────────────────────────────────────────────────────────
+
+  static pw.Widget _buildNotes(String notes) {
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.all(8),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: _teal, width: 1),
+        borderRadius: pw.BorderRadius.circular(3),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text('ملاحظات:',
+              style: _ts(size: 11, bold: true, color: _teal),
+              textDirection: pw.TextDirection.rtl),
+          pw.SizedBox(height: 3),
+          pw.Text(notes,
+              style: _ts(size: 11),
+              textDirection: pw.TextDirection.rtl),
+        ],
+      ),
+    );
+  }
+
+  // ── Share ───────────────────────────────────────────────────────────────
+
   static Future<void> shareInvoice(Invoice invoice) async {
     final pdfBytes = await generatePdf(invoice);
 

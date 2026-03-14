@@ -1082,22 +1082,49 @@ class WhatsAppService {
 
   private async saveQueue(): Promise<void> {
     try {
-      localStorage.setItem("whatsappQueue", JSON.stringify(this.messageQueue));
+      // Clean up before saving: remove old sent/failed messages to prevent quota issues
+      const now = Date.now();
+      const ONE_HOUR = 60 * 60 * 1000;
+      const MAX_QUEUE_SIZE = 500;
+
+      // Keep: pending/sending messages always, sent/failed only if < 2 hours old
+      let queueToSave = this.messageQueue.filter(m => {
+        if (m.status === 'pending' || m.status === 'sending') return true;
+        const age = now - new Date(m.sentAt || m.createdAt).getTime();
+        return age < 2 * ONE_HOUR;
+      });
+
+      // If still too large, keep only pending/sending + most recent completed
+      if (queueToSave.length > MAX_QUEUE_SIZE) {
+        const active = queueToSave.filter(m => m.status === 'pending' || m.status === 'sending');
+        const completed = queueToSave
+          .filter(m => m.status !== 'pending' && m.status !== 'sending')
+          .slice(-(MAX_QUEUE_SIZE - active.length));
+        queueToSave = [...active, ...completed];
+      }
+
+      // Strip media data from sent/failed messages to save space
+      const lightweight = queueToSave.map(m => {
+        if ((m.status === 'sent' || m.status === 'failed') && m.media) {
+          const { media, ...rest } = m;
+          return rest;
+        }
+        return m;
+      });
+
+      localStorage.setItem("whatsappQueue", JSON.stringify(lightweight));
     } catch (error) {
       console.warn("⚠️ Failed to save WhatsApp queue to localStorage (Quota exceeded). Operations will continue in-memory.", error);
 
-      // Attempt to clean resolved messages to free space
+      // Last resort: save only pending/sending messages
       try {
         const essentialQueue = this.messageQueue.filter(m => m.status === 'pending' || m.status === 'sending');
-        if (essentialQueue.length < this.messageQueue.length) {
-          // Try saving only pending items
-          localStorage.setItem("whatsappQueue", JSON.stringify(essentialQueue));
-          console.log("✅ Recovered storage by clearing completed messages.");
-        } else {
-          console.error("❌ Critical: Queue too large to save even after cleanup. Media might be too large.");
-        }
+        localStorage.setItem("whatsappQueue", JSON.stringify(essentialQueue));
+        console.log("✅ Recovered storage by clearing completed messages.");
       } catch (e) {
-        console.error("❌ Critical: Secondary save attempt failed.", e);
+        // Clear the key entirely to free space for other operations
+        try { localStorage.removeItem("whatsappQueue"); } catch {}
+        console.error("❌ Critical: Secondary save attempt failed. Queue cleared from storage.", e);
       }
     }
   }

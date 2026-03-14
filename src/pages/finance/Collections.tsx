@@ -263,20 +263,35 @@ export default function Collections() {
                 // إذا لم توجد طريقة دفع "آجل"، قم بإنشائها تلقائياً
                 if (!creditMethod) {
                     try {
-                        const newCreditMethod: PaymentMethod = {
-                            id: `pm_${Date.now()}`,
-                            name: "آجل",
-                            type: "credit",
-                            isActive: true,
-                            createdAt: new Date().toISOString()
-                        };
-                        await db.add("paymentMethods", newCreditMethod);
-                        creditMethod = newCreditMethod;
+                        // Re-check from DB directly to avoid race conditions with other components
+                        const allMethods = await db.getAll<PaymentMethod>("paymentMethods");
+                        creditMethod = allMethods.find((m) => m.type === "credit") ||
+                            allMethods.find((m) => m.name.includes("آجل")) ||
+                            allMethods.find((m) => m.name.includes("اجل"));
 
-                        // تحديث القائمة
-                        setPaymentMethods(prev => [...prev, newCreditMethod]);
+                        if (!creditMethod) {
+                            const newCreditMethod: PaymentMethod = {
+                                id: `pm_${Date.now()}`,
+                                name: "آجل",
+                                type: "credit",
+                                isActive: true,
+                                createdAt: new Date().toISOString()
+                            };
+                            await db.add("paymentMethods", newCreditMethod);
+                            creditMethod = newCreditMethod;
+
+                            // تحديث القائمة
+                            setPaymentMethods(prev => [...prev, newCreditMethod]);
+                        }
                     } catch (error) {
                         console.error("Failed to auto-create credit payment method:", error);
+                        // If creation failed (e.g., uniqueness), try to find existing one from DB
+                        try {
+                            const allMethods = await db.getAll<PaymentMethod>("paymentMethods");
+                            creditMethod = allMethods.find((m) => m.type === "credit") ||
+                                allMethods.find((m) => m.name.includes("آجل")) ||
+                                allMethods.find((m) => m.name.includes("اجل"));
+                        } catch {}
                     }
                 }
 

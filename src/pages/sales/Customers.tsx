@@ -519,9 +519,11 @@ const Customers = () => {
                 ...c,
                 currentBalance: getBalance(c.id, Number(c.currentBalance) || 0),
                 creditDebit: getBalance(c.id, Number(c.currentBalance) || 0) >= 0 ? "دائنة" : "مدينة",
+                salesRepName: getSalesRepName(c.salesRepId),
               }))}
               columns={[
                 { header: "اسم الحساب", key: "name", width: 25 },
+                { header: "المندوب", key: "salesRepName", width: 20 },
                 { header: "الرصيد الحالي", key: "currentBalance", width: 15 },
                 { header: "دائن - مدين", key: "creditDebit", width: 12 },
                 { header: "عنوان", key: "address", width: 30 },

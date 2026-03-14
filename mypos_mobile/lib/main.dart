@@ -18,12 +18,14 @@ void main() async {
   print('Starting MyPOS Mobile App...');
 
   // Initialize Firebase & notifications
-  try {
-    final notificationService = NotificationService();
-    await notificationService.initialize();
-  } catch (e) {
-    print('Error initializing Firebase: $e');
-  }
+  // try {
+  //   final notificationService = NotificationService();
+  //   await notificationService.initialize();
+  // } catch (e) {
+  //   print('Error initializing Firebase: $e');
+  // }
+
+  print('Starting MyPOS Mobile App...2');
 
   // Set system UI overlays
   SystemChrome.setSystemUIOverlayStyle(
