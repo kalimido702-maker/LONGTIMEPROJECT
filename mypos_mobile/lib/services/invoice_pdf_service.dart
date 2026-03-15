@@ -53,10 +53,9 @@ class InvoicePdfService {
         color: color,
       );
 
-  static String _fmt(double n, {int maxDec = 2}) {
-    final hasDecimals = n % 1 != 0;
-    final str =
-        hasDecimals ? n.toStringAsFixed(maxDec) : n.toStringAsFixed(0);
+  static String _fmt(double n, {int maxDec = 0}) {
+    // Force no decimals as requested: "عايز الغي الكسور منها"
+    final str = n.toStringAsFixed(maxDec);
     return str.replaceAllMapped(
       RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
       (m) => '${m[1]},',
@@ -232,7 +231,7 @@ class InvoicePdfService {
     // Check if any item has unitsPerCarton
     final hasCarton = invoice.items.any((it) => it.unitsPerCarton != null && it.unitsPerCarton! > 0);
 
-    // Main table: RTL order (right-most column first)
+    // RTL order: Rightmost column = 0
     final headers = ['الإجمالي', 'الفئة', 'الوحدة', 'الكمية', 'اسم الصنف', 'م'];
     final colWidths = <int, pw.TableColumnWidth>{
       0: const pw.FlexColumnWidth(1.8),  // الإجمالي
@@ -243,79 +242,104 @@ class InvoicePdfService {
       5: const pw.FlexColumnWidth(0.7),  // م
     };
 
-    final mainTable = pw.TableHelper.fromTextArray(
-      border: pw.TableBorder(
-        left: const pw.BorderSide(color: _teal, width: 1.5),
-        right: const pw.BorderSide(color: _teal, width: 1.5),
-        top: const pw.BorderSide(color: _teal, width: 1.5),
-        bottom: const pw.BorderSide(color: _teal, width: 1.5),
-        horizontalInside: const pw.BorderSide(color: _greyLight, width: 0.5),
-        verticalInside: const pw.BorderSide(color: _greyLight, width: 0.5),
-      ),
+    if (hasCarton) {
+      // Add empty gap column and carton column to the left
+      headers.addAll(['', 'العدد في ك']);
+      colWidths[6] = const pw.FixedColumnWidth(8); // Gap
+      colWidths[7] = const pw.FlexColumnWidth(1.2); // Carton
+    }
+
+    // Build the table manually to allow gap column to be borderless
+    return pw.Table(
       columnWidths: colWidths,
-      headerDirection: pw.TextDirection.rtl,
-      tableDirection: pw.TextDirection.rtl,
-      headerAlignment: pw.Alignment.center,
-      cellAlignment: pw.Alignment.center,
-      headerStyle: _ts(size: 11, bold: true, color: _white),
-      cellStyle: _ts(size: 11, bold: false),
-      headerDecoration: const pw.BoxDecoration(color: _teal),
-      cellHeight: 28,
-      headerHeight: 28,
-      headers: headers,
-      data: List.generate(invoice.items.length, (i) {
-        final item = invoice.items[i];
-        return [
-          _fmt(item.total),
-          _fmt(item.price),
-          item.unitName ?? 'قطعة',
-          _fmt(item.quantity, maxDec: 0),
-          item.name,
-          '${i + 1}',
-        ];
-      }),
-    );
-
-    if (!hasCarton) return mainTable;
-
-    // Carton column as a separate table on the far left with a gap
-    final cartonTable = pw.TableHelper.fromTextArray(
-      border: pw.TableBorder(
-        left: const pw.BorderSide(color: _teal, width: 1.5),
-        right: const pw.BorderSide(color: _teal, width: 1.5),
-        top: const pw.BorderSide(color: _teal, width: 1.5),
-        bottom: const pw.BorderSide(color: _teal, width: 1.5),
-        horizontalInside: const pw.BorderSide(color: _greyLight, width: 0.5),
-      ),
-      columnWidths: {0: const pw.FlexColumnWidth(1)},
-      headerDirection: pw.TextDirection.rtl,
-      tableDirection: pw.TextDirection.rtl,
-      headerAlignment: pw.Alignment.center,
-      cellAlignment: pw.Alignment.center,
-      headerStyle: _ts(size: 7, bold: true, color: _white),
-      cellStyle: _ts(size: 11, bold: false),
-      headerDecoration: const pw.BoxDecoration(color: _teal),
-      cellHeight: 28,
-      headerHeight: 32,
-      headers: ['العدد في ك'],
-      data: List.generate(invoice.items.length, (i) {
-        final item = invoice.items[i];
-        return [
-          item.unitsPerCarton != null && item.unitsPerCarton! > 0
-              ? _fmt(item.unitsPerCarton!.toDouble(), maxDec: 0)
-              : '',
-        ];
-      }),
-    );
-
-    return pw.Row(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        // Main table fills the rest
-        pw.Expanded(child: mainTable),
-        pw.SizedBox(width: 8), // spacer gap
-        // Carton column on the far right
-        pw.SizedBox(width: 55, child: cartonTable),
+        // Header Row
+        pw.TableRow(
+          children: List.generate(headers.length, (i) {
+            if (i == 6 && hasCarton) return pw.SizedBox(width: 8); // Gap
+
+            final isCarton = hasCarton && i == 7;
+            final isFirstMain = i == 0;
+            final isLastMain = i == 5;
+
+            final rightBorder = (isFirstMain || isCarton) ? const pw.BorderSide(color: _teal, width: 1.5) : pw.BorderSide.none;
+            final leftBorder = (isLastMain || isCarton) ? const pw.BorderSide(color: _teal, width: 1.5) : const pw.BorderSide(color: _greyLight, width: 0.5);
+
+            return pw.Container(
+              height: 28,
+              alignment: pw.Alignment.center,
+              decoration: pw.BoxDecoration(
+                color: _teal,
+                border: pw.Border(
+                  top: const pw.BorderSide(color: _teal, width: 1.5),
+                  bottom: const pw.BorderSide(color: _teal, width: 1.5),
+                  left: leftBorder,
+                  right: rightBorder,
+                ),
+              ),
+              child: pw.Text(
+                headers[i],
+                style: _ts(size: isCarton ? 7 : 11, bold: true, color: _white),
+                textAlign: pw.TextAlign.center,
+                textDirection: pw.TextDirection.rtl,
+              ),
+            );
+          }),
+        ),
+        // Data Rows
+        ...List.generate(invoice.items.length, (rowIndex) {
+          final item = invoice.items[rowIndex];
+          final isLastRow = rowIndex == invoice.items.length - 1;
+
+          final cells = [
+            _fmt(item.total),
+            _fmt(item.price),
+            item.unitName ?? 'قطعة',
+            _fmt(item.quantity),
+            item.name,
+            '${rowIndex + 1}',
+          ];
+
+          if (hasCarton) {
+            cells.add(''); // Gap
+            cells.add(item.unitsPerCarton != null && item.unitsPerCarton! > 0
+                ? _fmt(item.unitsPerCarton!.toDouble())
+                : '');
+          }
+
+          return pw.TableRow(
+            children: List.generate(cells.length, (i) {
+              if (i == 6 && hasCarton) return pw.SizedBox(width: 8); // Gap
+
+              final isCarton = hasCarton && i == 7;
+              final isFirstMain = i == 0;
+              final isLastMain = i == 5;
+
+              final rightBorder = (isFirstMain || isCarton) ? const pw.BorderSide(color: _teal, width: 1.5) : pw.BorderSide.none;
+              final leftBorder = (isLastMain || isCarton) ? const pw.BorderSide(color: _teal, width: 1.5) : const pw.BorderSide(color: _greyLight, width: 0.5);
+              final bottomBorder = isLastRow ? const pw.BorderSide(color: _teal, width: 1.5) : const pw.BorderSide(color: _greyLight, width: 0.5);
+
+              return pw.Container(
+                constraints: const pw.BoxConstraints(minHeight: 28),
+                padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                alignment: pw.Alignment.center,
+                decoration: pw.BoxDecoration(
+                  border: pw.Border(
+                    bottom: bottomBorder,
+                    left: leftBorder,
+                    right: rightBorder,
+                  ),
+                ),
+                child: pw.Text(
+                  cells[i],
+                  style: _ts(size: 11, bold: false),
+                  textAlign: pw.TextAlign.center,
+                  textDirection: pw.TextDirection.rtl,
+                ),
+              );
+            }),
+          );
+        }),
       ],
     );
   }

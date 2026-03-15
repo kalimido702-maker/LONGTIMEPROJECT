@@ -233,8 +233,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
     try {
       final res = await _api.getAccountStatement(
         customerId: widget.customerId,
-        fromDate: _fromParam,
-        toDate: _toParam,
+        // Removed fromDate and toDate to show all statement entries
       );
       final data = res['data'] as Map<String, dynamic>? ?? {};
       final entries = data['entries'] as List? ?? [];
