@@ -231,19 +231,20 @@ class InvoicePdfService {
     // Check if any item has unitsPerCarton
     final hasCarton = invoice.items.any((it) => it.unitsPerCarton != null && it.unitsPerCarton! > 0);
 
-    // RTL order: Rightmost column = 0
-    final headers = ['الإجمالي', 'الفئة', 'الوحدة', 'الكمية', 'اسم الصنف', 'م'];
+    // RTL order: The array passed to pw.Table is rendered from Right-to-Left. 
+    // Thus index 0 is on the FAR RIGHT visuals.
+    final headers = ['م', 'اسم الصنف', 'الكمية', 'الوحدة', 'الفئة', 'الإجمالي'];
     final colWidths = <int, pw.TableColumnWidth>{
-      0: const pw.FlexColumnWidth(1.8),  // الإجمالي
-      1: const pw.FlexColumnWidth(1.8),  // الفئة
-      2: const pw.FlexColumnWidth(1.4),  // الوحدة
-      3: const pw.FlexColumnWidth(1.2),  // الكمية
-      4: const pw.FlexColumnWidth(4.5),  // اسم الصنف
-      5: const pw.FlexColumnWidth(0.7),  // م
+      0: const pw.FlexColumnWidth(0.7),  // م
+      1: const pw.FlexColumnWidth(4.5),  // اسم الصنف
+      2: const pw.FlexColumnWidth(1.2),  // الكمية
+      3: const pw.FlexColumnWidth(1.4),  // الوحدة
+      4: const pw.FlexColumnWidth(1.8),  // الفئة
+      5: const pw.FlexColumnWidth(1.8),  // الإجمالي
     };
 
     if (hasCarton) {
-      // Add empty gap column and carton column to the left
+      // Add empty gap column and carton column to the left (end of array)
       headers.addAll(['', 'العدد في ك']);
       colWidths[6] = const pw.FixedColumnWidth(8); // Gap
       colWidths[7] = const pw.FlexColumnWidth(1.2); // Carton
@@ -258,12 +259,19 @@ class InvoicePdfService {
           children: List.generate(headers.length, (i) {
             if (i == 6 && hasCarton) return pw.SizedBox(width: 8); // Gap
 
-            final isCarton = hasCarton && i == 7;
-            final isFirstMain = i == 0;
-            final isLastMain = i == 5;
+            pw.BorderSide rightBorder = pw.BorderSide.none;
+            pw.BorderSide leftBorder = const pw.BorderSide(color: _greyLight, width: 0.5);
 
-            final rightBorder = (isFirstMain || isCarton) ? const pw.BorderSide(color: _teal, width: 1.5) : pw.BorderSide.none;
-            final leftBorder = (isLastMain || isCarton) ? const pw.BorderSide(color: _teal, width: 1.5) : const pw.BorderSide(color: _greyLight, width: 0.5);
+            // Far RIGHT edge of main table
+            if (i == 0) rightBorder = const pw.BorderSide(color: _teal, width: 1.5);
+            // Far LEFT edge of main table
+            if (i == 5) leftBorder = const pw.BorderSide(color: _teal, width: 1.5);
+            
+            // Edges for Carton standalone piece
+            if (i == 7 && hasCarton) {
+              rightBorder = const pw.BorderSide(color: _teal, width: 1.5);
+              leftBorder = const pw.BorderSide(color: _teal, width: 1.5);
+            }
 
             return pw.Container(
               height: 28,
@@ -279,9 +287,9 @@ class InvoicePdfService {
               ),
               child: pw.Text(
                 headers[i],
-                style: _ts(size: isCarton ? 7 : 11, bold: true, color: _white),
+                style: _ts(size: (i == 7 && hasCarton) ? 9 : 11, bold: true, color: _white),
                 textAlign: pw.TextAlign.center,
-                textDirection: pw.TextDirection.rtl,
+                // Avoid redundant TextDirection inside text, table handles it
               ),
             );
           }),
@@ -292,12 +300,12 @@ class InvoicePdfService {
           final isLastRow = rowIndex == invoice.items.length - 1;
 
           final cells = [
-            _fmt(item.total),
-            _fmt(item.price),
-            item.unitName ?? 'قطعة',
-            _fmt(item.quantity),
-            item.name,
             '${rowIndex + 1}',
+            item.name,
+            _fmt(item.quantity),
+            item.unitName ?? 'قطعة',
+            _fmt(item.price),
+            _fmt(item.total),
           ];
 
           if (hasCarton) {
@@ -311,12 +319,17 @@ class InvoicePdfService {
             children: List.generate(cells.length, (i) {
               if (i == 6 && hasCarton) return pw.SizedBox(width: 8); // Gap
 
-              final isCarton = hasCarton && i == 7;
-              final isFirstMain = i == 0;
-              final isLastMain = i == 5;
+              pw.BorderSide rightBorder = pw.BorderSide.none;
+              pw.BorderSide leftBorder = const pw.BorderSide(color: _greyLight, width: 0.5);
 
-              final rightBorder = (isFirstMain || isCarton) ? const pw.BorderSide(color: _teal, width: 1.5) : pw.BorderSide.none;
-              final leftBorder = (isLastMain || isCarton) ? const pw.BorderSide(color: _teal, width: 1.5) : const pw.BorderSide(color: _greyLight, width: 0.5);
+              if (i == 0) rightBorder = const pw.BorderSide(color: _teal, width: 1.5);
+              if (i == 5) leftBorder = const pw.BorderSide(color: _teal, width: 1.5);
+              
+              if (i == 7 && hasCarton) {
+                rightBorder = const pw.BorderSide(color: _teal, width: 1.5);
+                leftBorder = const pw.BorderSide(color: _teal, width: 1.5);
+              }
+              
               final bottomBorder = isLastRow ? const pw.BorderSide(color: _teal, width: 1.5) : const pw.BorderSide(color: _greyLight, width: 0.5);
 
               return pw.Container(

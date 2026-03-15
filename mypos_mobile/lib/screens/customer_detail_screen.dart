@@ -65,6 +65,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
     _toDate = DateTime(now.year, 12, 31);
 
     _tabController.addListener(() {
+      if (mounted) setState(() {});
       if (!_tabController.indexIsChanging) {
         _loadTabData(_tabController.index);
       }
@@ -296,18 +297,19 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
           _buildCustomerHeader(formatter),
 
           // Date filter
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: Row(
-              children: [
-                DateFilterWidget(
-                  fromDate: _fromDate,
-                  toDate: _toDate,
-                  onChanged: _onDateChanged,
-                ),
-              ],
+          if (_tabController.index != 3)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: Row(
+                children: [
+                  DateFilterWidget(
+                    fromDate: _fromDate,
+                    toDate: _toDate,
+                    onChanged: _onDateChanged,
+                  ),
+                ],
+              ),
             ),
-          ),
 
           // Tab content
           Expanded(
