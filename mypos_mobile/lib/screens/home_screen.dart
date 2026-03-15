@@ -24,7 +24,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     final now = DateTime.now();
     _fromDate = DateTime(now.year, 1, 1);
-    _toDate = DateTime(now.year, 12, 31);
+    _toDate = now;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadData();
     });
@@ -32,10 +32,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   bool get _isStaff {
     final role = context.read<AuthProvider>().user?.role;
-    return role == 'sales_rep' || role == 'salesRep' || role == 'salesman' || role == 'supervisor' || role == 'admin';
+    return role == 'sales_rep' ||
+        role == 'salesRep' ||
+        role == 'salesman' ||
+        role == 'supervisor' ||
+        role == 'admin';
   }
-
-  String? get _userRole => context.read<AuthProvider>().user?.role;
 
   Future<void> _loadData() async {
     final authProvider = context.read<AuthProvider>();
@@ -78,8 +80,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final dataProvider = context.watch<DataProvider>();
     final user = authProvider.user;
     final formatter = NumberFormat('#,##0.00', 'ar');
-    final isStaff = user != null &&
-        (user.isSalesRep || user.isSupervisor || user.isAdmin);
+    final isStaff =
+        user != null && (user.isSalesRep || user.isSupervisor || user.isAdmin);
 
     return Scaffold(
       appBar: AppBar(
@@ -118,7 +120,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     Icon(LucideIcons.logOut, size: 18, color: AppColors.error),
                     SizedBox(width: 8),
-                    Text('تسجيل الخروج', style: TextStyle(color: AppColors.error)),
+                    Text(
+                      'تسجيل الخروج',
+                      style: TextStyle(color: AppColors.error),
+                    ),
                   ],
                 ),
               ),
@@ -130,11 +135,13 @@ class _HomeScreenState extends State<HomeScreen> {
         onRefresh: _loadData,
         color: AppColors.primary,
         child: dataProvider.isLoading
-            ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+            ? const Center(
+                child: CircularProgressIndicator(color: AppColors.primary),
+              )
             : ListView(
                 padding: const EdgeInsets.all(16),
                 children: isStaff
-                    ? _buildStaffHomeContent(dataProvider, formatter, user!.role)
+                    ? _buildStaffHomeContent(dataProvider, formatter, user.role)
                     : _buildCustomerHomeContent(dataProvider, formatter),
               ),
       ),
@@ -142,12 +149,19 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ===================== CUSTOMER HOME =====================
-  List<Widget> _buildCustomerHomeContent(DataProvider dataProvider, NumberFormat formatter) {
+  List<Widget> _buildCustomerHomeContent(
+    DataProvider dataProvider,
+    NumberFormat formatter,
+  ) {
     return [
       // Balance Card
       _BalanceCard(
         remaining: dataProvider.customerInfo != null
-            ? double.tryParse(dataProvider.customerInfo!['current_balance']?.toString() ?? '0') ?? 0
+            ? double.tryParse(
+                    dataProvider.customerInfo!['current_balance']?.toString() ??
+                        '0',
+                  ) ??
+                  0
             : dataProvider.totalRemaining,
         formatter: formatter,
       ),
@@ -216,9 +230,9 @@ class _HomeScreenState extends State<HomeScreen> {
       // Quick Actions
       Text(
         'الوصول السريع',
-        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
+        style: Theme.of(
+          context,
+        ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
       ),
       const SizedBox(height: 12),
       _QuickActionTile(
@@ -256,7 +270,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ===================== STAFF HOME (sales_rep / supervisor / admin) =====================
-  List<Widget> _buildStaffHomeContent(DataProvider dataProvider, NumberFormat formatter, String? role) {
+  List<Widget> _buildStaffHomeContent(
+    DataProvider dataProvider,
+    NumberFormat formatter,
+    String? role,
+  ) {
     final customerCount = dataProvider.customers.length;
     final isAdmin = role == 'admin';
     final isSupervisor = role == 'supervisor';
@@ -342,16 +360,30 @@ class _HomeScreenState extends State<HomeScreen> {
                       color: Colors.white.withOpacity(0.2),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(LucideIcons.users, color: Colors.white, size: 24),
+                    child: const Icon(
+                      LucideIcons.users,
+                      color: Colors.white,
+                      size: 24,
+                    ),
                   ),
                   const SizedBox(width: 12),
-                  Text('عدد العملاء', style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 15)),
+                  Text(
+                    'عدد العملاء',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.9),
+                      fontSize: 15,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 20),
               Text(
                 '$customerCount عميل',
-                style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ],
           ),
@@ -429,7 +461,9 @@ class _HomeScreenState extends State<HomeScreen> {
       // Quick Actions for staff
       Text(
         'الوصول السريع',
-        style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+        style: Theme.of(
+          context,
+        ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
       ),
       const SizedBox(height: 12),
 
@@ -508,10 +542,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 10),
                   Text(
                     '${item.count}',
-                    style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 26,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 2),
-                  Text(item.label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                  Text(
+                    item.label,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
                 ],
               ),
             ),
@@ -547,7 +588,13 @@ class _SummaryItem {
   final int count;
   final String label;
   final VoidCallback? onTap;
-  const _SummaryItem({required this.icon, required this.gradient, required this.count, required this.label, this.onTap});
+  const _SummaryItem({
+    required this.icon,
+    required this.gradient,
+    required this.count,
+    required this.label,
+    this.onTap,
+  });
 }
 
 class _BalanceCard extends StatelessWidget {
@@ -587,7 +634,11 @@ class _BalanceCard extends StatelessWidget {
                   color: Colors.white.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(LucideIcons.wallet, color: Colors.white, size: 24),
+                child: const Icon(
+                  LucideIcons.wallet,
+                  color: Colors.white,
+                  size: 24,
+                ),
               ),
               const SizedBox(width: 12),
               Text(
@@ -758,10 +809,7 @@ class _TotalDebtCard extends StatelessWidget {
   final double totalBalance;
   final NumberFormat formatter;
 
-  const _TotalDebtCard({
-    required this.totalBalance,
-    required this.formatter,
-  });
+  const _TotalDebtCard({required this.totalBalance, required this.formatter});
 
   @override
   Widget build(BuildContext context) {
@@ -794,16 +842,30 @@ class _TotalDebtCard extends StatelessWidget {
                   color: Colors.white.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(LucideIcons.alertTriangle, color: Colors.white, size: 24),
+                child: const Icon(
+                  LucideIcons.alertTriangle,
+                  color: Colors.white,
+                  size: 24,
+                ),
               ),
               const SizedBox(width: 12),
-              Text('إجمالي المديونيات', style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 15)),
+              Text(
+                'إجمالي المديونيات',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.9),
+                  fontSize: 15,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 20),
           Text(
             '${formatter.format(totalBalance)} جنيه',
-            style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ],
       ),

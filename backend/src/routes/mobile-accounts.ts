@@ -574,6 +574,13 @@ export async function mobileAccountRoutes(server: FastifyInstance) {
           params
         );
 
+        if (body.password) {
+          await db.query(
+            "DELETE FROM refresh_tokens WHERE user_id = ?",
+            [id]
+          );
+        }
+
         return reply.code(200).send({
           message: "تم تحديث الحساب بنجاح",
         });

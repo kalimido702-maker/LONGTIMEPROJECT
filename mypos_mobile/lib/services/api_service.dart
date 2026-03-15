@@ -5,50 +5,81 @@ import '../config/api_config.dart';
 class ApiService {
   late Dio _dio;
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
+  Future<void> Function()? _sessionExpiredHandler;
+  bool _isHandlingSessionExpiry = false;
 
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
 
   ApiService._internal() {
-    _dio = Dio(BaseOptions(
-      baseUrl: ApiConfig.baseUrl,
-      connectTimeout: const Duration(milliseconds: ApiConfig.connectTimeout),
-      receiveTimeout: const Duration(milliseconds: ApiConfig.receiveTimeout),
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    ));
+    _dio = Dio(
+      BaseOptions(
+        baseUrl: ApiConfig.baseUrl,
+        connectTimeout: const Duration(milliseconds: ApiConfig.connectTimeout),
+        receiveTimeout: const Duration(milliseconds: ApiConfig.receiveTimeout),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      ),
+    );
 
     // Add interceptor for auth token & refresh
-    _dio.interceptors.add(InterceptorsWrapper(
-      onRequest: (options, handler) async {
-        final token = await _storage.read(key: 'access_token');
-        if (token != null) {
-          options.headers['Authorization'] = 'Bearer $token';
-        }
-        return handler.next(options);
-      },
-      onError: (error, handler) async {
-        if (error.response?.statusCode == 401) {
-          // Try to refresh token
-          final refreshed = await _refreshToken();
-          if (refreshed) {
-            // Retry the request
-            final opts = error.requestOptions;
-            final token = await _storage.read(key: 'access_token');
-            opts.headers['Authorization'] = 'Bearer $token';
-            try {
-              final response = await _dio.fetch(opts);
-              return handler.resolve(response);
-            } catch (e) {
-              return handler.reject(error);
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) async {
+          final token = await _storage.read(key: 'access_token');
+          if (token != null) {
+            options.headers['Authorization'] = 'Bearer $token';
+          }
+          return handler.next(options);
+        },
+        onError: (error, handler) async {
+          if (error.response?.statusCode == 401) {
+            // Try to refresh token
+            final refreshed = await _refreshToken();
+            if (refreshed) {
+              // Retry the request
+              final opts = error.requestOptions;
+              final token = await _storage.read(key: 'access_token');
+              opts.headers['Authorization'] = 'Bearer $token';
+              try {
+                final response = await _dio.fetch(opts);
+                return handler.resolve(response);
+              } catch (e) {
+                return handler.reject(error);
+              }
+            } else {
+              final hasTokens =
+                  (await _storage.read(key: 'access_token')) != null ||
+                  (await _storage.read(key: 'refresh_token')) != null;
+              if (hasTokens) {
+                await _handleSessionExpired();
+              }
             }
           }
-        }
-        return handler.next(error);
-      },
-    ));
+          return handler.next(error);
+        },
+      ),
+    );
+  }
+
+  void setSessionExpiredHandler(Future<void> Function()? handler) {
+    _sessionExpiredHandler = handler;
+  }
+
+  Future<void> _handleSessionExpired() async {
+    if (_isHandlingSessionExpiry) return;
+    _isHandlingSessionExpiry = true;
+    try {
+      if (_sessionExpiredHandler != null) {
+        await _sessionExpiredHandler!();
+      } else {
+        await clearTokens();
+      }
+    } finally {
+      _isHandlingSessionExpiry = false;
+    }
   }
 
   void updateBaseUrl(String url) {
@@ -61,12 +92,12 @@ class ApiService {
       final refreshToken = await _storage.read(key: 'refresh_token');
       if (refreshToken == null) return false;
 
-      final response = await Dio(BaseOptions(
-        baseUrl: ApiConfig.baseUrl,
-        headers: {'Content-Type': 'application/json'},
-      )).post(ApiConfig.refresh, data: {
-        'refreshToken': refreshToken,
-      });
+      final response = await Dio(
+        BaseOptions(
+          baseUrl: ApiConfig.baseUrl,
+          headers: {'Content-Type': 'application/json'},
+        ),
+      ).post(ApiConfig.refresh, data: {'refreshToken': refreshToken});
 
       if (response.statusCode == 200) {
         final newToken = response.data['accessToken'];
@@ -81,10 +112,10 @@ class ApiService {
 
   // Auth
   Future<Map<String, dynamic>> login(String username, String password) async {
-    final response = await _dio.post(ApiConfig.login, data: {
-      'username': username,
-      'password': password,
-    });
+    final response = await _dio.post(
+      ApiConfig.login,
+      data: {'username': username, 'password': password},
+    );
     return response.data;
   }
 
@@ -116,7 +147,10 @@ class ApiService {
     final params = <String, dynamic>{};
     if (fromDate != null) params['from_date'] = fromDate;
     if (toDate != null) params['to_date'] = toDate;
-    final response = await _dio.get(ApiConfig.dashboard, queryParameters: params);
+    final response = await _dio.get(
+      ApiConfig.dashboard,
+      queryParameters: params,
+    );
     return response.data;
   }
 
@@ -130,17 +164,17 @@ class ApiService {
     String? paymentStatus,
     String? search,
   }) async {
-    final params = <String, dynamic>{
-      'page': page,
-      'limit': limit,
-    };
+    final params = <String, dynamic>{'page': page, 'limit': limit};
     if (customerId != null) params['customer_id'] = customerId;
     if (fromDate != null) params['from_date'] = fromDate;
     if (toDate != null) params['to_date'] = toDate;
     if (paymentStatus != null) params['payment_status'] = paymentStatus;
     if (search != null) params['search'] = search;
 
-    final response = await _dio.get(ApiConfig.invoices, queryParameters: params);
+    final response = await _dio.get(
+      ApiConfig.invoices,
+      queryParameters: params,
+    );
     return response.data;
   }
 
@@ -159,16 +193,16 @@ class ApiService {
     String? toDate,
     String? search,
   }) async {
-    final params = <String, dynamic>{
-      'page': page,
-      'limit': limit,
-    };
+    final params = <String, dynamic>{'page': page, 'limit': limit};
     if (customerId != null) params['customer_id'] = customerId;
     if (fromDate != null) params['from_date'] = fromDate;
     if (toDate != null) params['to_date'] = toDate;
     if (search != null) params['search'] = search;
 
-    final response = await _dio.get(ApiConfig.payments, queryParameters: params);
+    final response = await _dio.get(
+      ApiConfig.payments,
+      queryParameters: params,
+    );
     return response.data;
   }
 
@@ -181,10 +215,7 @@ class ApiService {
     String? toDate,
     String? search,
   }) async {
-    final params = <String, dynamic>{
-      'page': page,
-      'limit': limit,
-    };
+    final params = <String, dynamic>{'page': page, 'limit': limit};
     if (customerId != null) params['customer_id'] = customerId;
     if (fromDate != null) params['from_date'] = fromDate;
     if (toDate != null) params['to_date'] = toDate;
@@ -205,7 +236,10 @@ class ApiService {
     if (fromDate != null) params['from_date'] = fromDate;
     if (toDate != null) params['to_date'] = toDate;
 
-    final response = await _dio.get(ApiConfig.accountStatement, queryParameters: params);
+    final response = await _dio.get(
+      ApiConfig.accountStatement,
+      queryParameters: params,
+    );
     return response.data;
   }
 
@@ -218,16 +252,16 @@ class ApiService {
     String? supervisorId,
     String? customerId,
   }) async {
-    final params = <String, dynamic>{
-      'page': page,
-      'limit': limit,
-    };
+    final params = <String, dynamic>{'page': page, 'limit': limit};
     if (search != null) params['search'] = search;
     if (salesRepId != null) params['sales_rep_id'] = salesRepId;
     if (supervisorId != null) params['supervisor_id'] = supervisorId;
     if (customerId != null) params['customer_id'] = customerId;
 
-    final response = await _dio.get(ApiConfig.customers, queryParameters: params);
+    final response = await _dio.get(
+      ApiConfig.customers,
+      queryParameters: params,
+    );
     return response.data;
   }
 
@@ -238,14 +272,14 @@ class ApiService {
     String? search,
     String? supervisorId,
   }) async {
-    final params = <String, dynamic>{
-      'page': page,
-      'limit': limit,
-    };
+    final params = <String, dynamic>{'page': page, 'limit': limit};
     if (search != null) params['search'] = search;
     if (supervisorId != null) params['supervisor_id'] = supervisorId;
 
-    final response = await _dio.get(ApiConfig.salesReps, queryParameters: params);
+    final response = await _dio.get(
+      ApiConfig.salesReps,
+      queryParameters: params,
+    );
     return response.data;
   }
 
@@ -255,13 +289,13 @@ class ApiService {
     int limit = 50,
     String? search,
   }) async {
-    final params = <String, dynamic>{
-      'page': page,
-      'limit': limit,
-    };
+    final params = <String, dynamic>{'page': page, 'limit': limit};
     if (search != null) params['search'] = search;
 
-    final response = await _dio.get(ApiConfig.supervisors, queryParameters: params);
+    final response = await _dio.get(
+      ApiConfig.supervisors,
+      queryParameters: params,
+    );
     return response.data;
   }
 
@@ -276,11 +310,11 @@ class ApiService {
     int page = 1,
     int limit = 50,
   }) async {
-    final params = <String, dynamic>{
-      'page': page,
-      'limit': limit,
-    };
-    final response = await _dio.get(ApiConfig.notifications, queryParameters: params);
+    final params = <String, dynamic>{'page': page, 'limit': limit};
+    final response = await _dio.get(
+      ApiConfig.notifications,
+      queryParameters: params,
+    );
     return response.data;
   }
 
@@ -295,12 +329,19 @@ class ApiService {
   }
 
   /// Register FCM token for push notifications
-  Future<void> registerFcmToken(String token, {String deviceType = 'android', String? deviceName}) async {
-    await _dio.post(ApiConfig.fcmToken, data: {
-      'token': token,
-      'device_type': deviceType,
-      'device_name': deviceName,
-    });
+  Future<void> registerFcmToken(
+    String token, {
+    String deviceType = 'android',
+    String? deviceName,
+  }) async {
+    await _dio.post(
+      ApiConfig.fcmToken,
+      data: {
+        'token': token,
+        'device_type': deviceType,
+        'device_name': deviceName,
+      },
+    );
   }
 
   /// Remove FCM token on logout
@@ -312,7 +353,10 @@ class ApiService {
   // Generic helpers
   // ============================================================
 
-  Future<Response> get(String path, {Map<String, dynamic>? queryParameters}) async {
+  Future<Response> get(
+    String path, {
+    Map<String, dynamic>? queryParameters,
+  }) async {
     return await _dio.get(path, queryParameters: queryParameters);
   }
 

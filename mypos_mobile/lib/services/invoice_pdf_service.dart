@@ -318,7 +318,7 @@ class InvoicePdfService {
 
           cells.addAll([
             _fmt(item.total),
-            _fmt(item.price),
+            _fmt(item.price, maxDec: 2),
             item.unitName ?? 'قطعة',
             _fmt(item.quantity),
             item.name,

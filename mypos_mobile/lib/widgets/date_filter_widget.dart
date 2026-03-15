@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../config/theme.dart';
 
-/// A compact date-range filter that defaults to the current year.
+/// A compact date-range filter that defaults to the current year (year-to-date).
 /// Tapping it opens a bottom sheet where the user can pick a year
 /// or choose a custom date range.
 class DateFilterWidget extends StatelessWidget {
@@ -23,15 +23,18 @@ class DateFilterWidget extends StatelessWidget {
 
   String get _label {
     final now = DateTime.now();
-    // Check if it's a full year range
-    if (fromDate.month == 1 &&
+    final isYearStart =
+        fromDate.month == 1 &&
         fromDate.day == 1 &&
-        toDate.month == 12 &&
-        toDate.day == 31 &&
-        fromDate.year == toDate.year) {
-      if (fromDate.year == now.year) {
-        return 'العام الحالي ${fromDate.year}';
-      }
+        fromDate.year == toDate.year;
+    final isFullYear = isYearStart && toDate.month == 12 && toDate.day == 31;
+    final isCurrentYearToDate =
+        isYearStart && fromDate.year == now.year && _isSameDay(toDate, now);
+
+    if (isCurrentYearToDate || (isFullYear && fromDate.year == now.year)) {
+      return 'العام الحالي ${fromDate.year}';
+    }
+    if (isFullYear) {
       return '${fromDate.year}';
     }
     // Check "all time"  (year < 2000 hack)
@@ -44,6 +47,9 @@ class DateFilterWidget extends StatelessWidget {
 
   String _fmt(DateTime d) =>
       '${d.year}/${d.month.toString().padLeft(2, '0')}/${d.day.toString().padLeft(2, '0')}';
+
+  bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
 
   @override
   Widget build(BuildContext context) {
@@ -109,10 +115,7 @@ class DateFilterWidget extends StatelessWidget {
                 const SizedBox(height: 16),
                 const Text(
                   'اختر الفترة الزمنية',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 16),
@@ -126,18 +129,29 @@ class DateFilterWidget extends StatelessWidget {
                     for (final year in years)
                       _YearChip(
                         label: '$year',
-                        isSelected: fromDate.year == year &&
-                            fromDate.month == 1 &&
-                            fromDate.day == 1 &&
-                            toDate.year == year &&
-                            toDate.month == 12 &&
-                            toDate.day == 31,
+                        isSelected: year == now.year
+                            ? fromDate.year == year &&
+                                  fromDate.month == 1 &&
+                                  fromDate.day == 1 &&
+                                  toDate.year == year &&
+                                  (_isSameDay(toDate, now) ||
+                                      (toDate.month == 12 && toDate.day == 31))
+                            : fromDate.year == year &&
+                                  fromDate.month == 1 &&
+                                  fromDate.day == 1 &&
+                                  toDate.year == year &&
+                                  toDate.month == 12 &&
+                                  toDate.day == 31,
                         onTap: () {
                           Navigator.pop(ctx);
-                          onChanged(DateRange(
-                            from: DateTime(year, 1, 1),
-                            to: DateTime(year, 12, 31),
-                          ));
+                          onChanged(
+                            DateRange(
+                              from: DateTime(year, 1, 1),
+                              to: year == now.year
+                                  ? now
+                                  : DateTime(year, 12, 31),
+                            ),
+                          );
                         },
                       ),
                   ],
@@ -156,10 +170,12 @@ class DateFilterWidget extends StatelessWidget {
                     isSelected: fromDate.year <= 2000,
                     onTap: () {
                       Navigator.pop(ctx);
-                      onChanged(DateRange(
-                        from: DateTime(2000, 1, 1),
-                        to: DateTime(2099, 12, 31),
-                      ));
+                      onChanged(
+                        DateRange(
+                          from: DateTime(2000, 1, 1),
+                          to: DateTime(2099, 12, 31),
+                        ),
+                      );
                     },
                   ),
 
@@ -174,8 +190,12 @@ class DateFilterWidget extends StatelessWidget {
                       firstDate: DateTime(2020),
                       lastDate: DateTime(now.year, 12, 31),
                       initialDateRange: DateTimeRange(
-                        start: fromDate.year <= 2000 ? DateTime(now.year, 1, 1) : fromDate,
-                        end: toDate.year >= 2099 ? DateTime(now.year, 12, 31) : toDate,
+                        start: fromDate.year <= 2000
+                            ? DateTime(now.year, 1, 1)
+                            : fromDate,
+                        end: toDate.year >= 2099
+                            ? DateTime(now.year, 12, 31)
+                            : toDate,
                       ),
                       locale: const Locale('ar'),
                       builder: (context, child) {
@@ -193,10 +213,7 @@ class DateFilterWidget extends StatelessWidget {
                       },
                     );
                     if (range != null) {
-                      onChanged(DateRange(
-                        from: range.start,
-                        to: range.end,
-                      ));
+                      onChanged(DateRange(from: range.start, to: range.end));
                     }
                   },
                 ),
@@ -265,7 +282,10 @@ class _OptionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: Icon(icon, color: isSelected ? AppColors.primary : AppColors.textSecondary),
+      leading: Icon(
+        icon,
+        color: isSelected ? AppColors.primary : AppColors.textSecondary,
+      ),
       title: Text(
         label,
         style: TextStyle(

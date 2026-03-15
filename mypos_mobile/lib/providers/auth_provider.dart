@@ -9,6 +9,10 @@ class AuthProvider extends ChangeNotifier {
   final ApiService _api = ApiService();
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
+  AuthProvider() {
+    _api.setSessionExpiredHandler(_handleSessionExpired);
+  }
+
   User? _user;
   bool _isLoading = false;
   String? _error;
@@ -18,6 +22,15 @@ class AuthProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get isLoggedIn => _isLoggedIn;
+
+  Future<void> _handleSessionExpired() async {
+    await _api.clearTokens();
+    _user = null;
+    _isLoggedIn = false;
+    _isLoading = false;
+    _error = 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مرة أخرى';
+    notifyListeners();
+  }
 
   /// Try to restore session from saved tokens
   Future<bool> tryAutoLogin() async {
@@ -46,7 +59,11 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> login(String username, String password, {String? serverUrl}) async {
+  Future<bool> login(
+    String username,
+    String password, {
+    String? serverUrl,
+  }) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -87,7 +104,8 @@ class AuthProvider extends ChangeNotifier {
         _error = 'اسم المستخدم أو كلمة المرور غير صحيحة';
       } else if (e.toString().contains('403')) {
         _error = 'الحساب غير مفعل';
-      } else if (e.toString().contains('SocketException') || e.toString().contains('timeout')) {
+      } else if (e.toString().contains('SocketException') ||
+          e.toString().contains('timeout')) {
         _error = 'لا يمكن الاتصال بالسيرفر. تحقق من عنوان السيرفر والإنترنت';
       } else {
         _error = 'حدث خطأ أثناء تسجيل الدخول';
@@ -98,13 +116,20 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> logout() async {
-    // Unregister FCM token before logout
-    await NotificationService().unregisterToken();
+    try {
+      await NotificationService().unregisterToken();
+    } catch (_) {}
 
     await _api.clearTokens();
     _user = null;
     _isLoggedIn = false;
     _error = null;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _api.setSessionExpiredHandler(null);
+    super.dispose();
   }
 }

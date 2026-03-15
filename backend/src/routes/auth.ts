@@ -7,7 +7,7 @@ import {
   JWTAccessPayload,
   JWTRefreshPayload,
 } from "../config/jwt.js";
-import { randomUUID } from "crypto";
+import { createHash } from "crypto";
 
 // Validation schemas
 const loginSchema = z.object({
@@ -33,6 +33,10 @@ interface User {
 
 interface Role {
   permissions: string[];
+}
+
+function getPasswordVersion(passwordHash: string): string {
+  return createHash("sha256").update(passwordHash).digest("hex").slice(0, 24);
 }
 
 export default async function authRoutes(fastify: FastifyInstance) {
@@ -99,6 +103,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
           branchId: user.branch_id,
           role: user.role,
           permissions: Array.isArray(permissions) ? permissions : [],
+          pwdv: getPasswordVersion(user.password_hash),
           type: "access",
         };
 
@@ -107,6 +112,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
           clientId: user.client_id,
           branchId: user.branch_id,
           role: user.role,
+          pwdv: getPasswordVersion(user.password_hash),
           type: "refresh",
           tokenId,
         };
@@ -223,6 +229,15 @@ export default async function authRoutes(fastify: FastifyInstance) {
         }
 
         const user = users[0];
+        const currentPwdv = getPasswordVersion(user.password_hash);
+
+        if (payload.pwdv && payload.pwdv !== currentPwdv) {
+          await query("DELETE FROM refresh_tokens WHERE id = ?", [payload.tokenId]);
+          return reply.code(401).send({
+            error: "Unauthorized",
+            message: "Session expired, please login again",
+          });
+        }
 
         // Get permissions
         const roles = await query<Role>(
@@ -244,6 +259,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
           branchId: user.branch_id,
           role: user.role,
           permissions: Array.isArray(permissions) ? permissions : [],
+          pwdv: currentPwdv,
           type: "access",
         };
 
