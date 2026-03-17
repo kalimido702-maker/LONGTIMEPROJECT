@@ -18,6 +18,8 @@ class ShellScreen extends StatelessWidget {
     switch (role) {
       case 'admin':
         return _NavVariant.admin;
+      case 'مدير النظام':
+        return _NavVariant.admin;
       case 'supervisor':
         return _NavVariant.supervisor;
       case 'sales_rep':
@@ -32,30 +34,58 @@ class ShellScreen extends StatelessWidget {
   }
 
   // ---------- Routes per role ----------
-  static const _customerRoutes   = ['/home', '/invoices', '/payments', '/statement', '/notifications'];
-  static const _salesRepRoutes   = ['/home', '/customers', '/notifications'];
-  static const _supervisorRoutes = ['/home', '/sales-reps', '/customers', '/notifications'];
-  static const _adminRoutes      = ['/home', '/supervisors', '/sales-reps', '/customers', '/notifications'];
+  static const _customerRoutes = [
+    '/home',
+    '/invoices',
+    '/payments',
+    '/statement',
+    '/notifications',
+  ];
+  static const _salesRepRoutes = ['/home', '/customers', '/notifications'];
+  static const _supervisorRoutes = [
+    '/home',
+    '/sales-reps',
+    '/customers',
+    '/notifications',
+  ];
+  static const _adminRoutes = [
+    '/home',
+    '/supervisors',
+    '/sales-reps',
+    '/customers',
+    '/notifications',
+  ];
 
   List<String> _routes(BuildContext context, _NavVariant v, User? user) {
     if (v == _NavVariant.employee && user != null) {
       final routes = <String>[];
       // Home is always available if they can log in
       routes.add('/home');
-      if (user.hasPermission('mobile_app.invoices') || user.hasPermission('invoices.view')) routes.add('/invoices');
-      if (user.hasPermission('mobile_app.payments') || user.hasPermission('payments.view')) routes.add('/payments');
-      if (user.hasPermission('mobile_app.statement') || user.hasPermission('customers.view')) routes.add('/customers');
+      if (user.hasPermission('mobile_app.invoices') ||
+          user.hasPermission('invoices.view'))
+        routes.add('/invoices');
+      if (user.hasPermission('mobile_app.payments') ||
+          user.hasPermission('payments.view'))
+        routes.add('/payments');
+      if (user.hasPermission('mobile_app.statement') ||
+          user.hasPermission('customers.view'))
+        routes.add('/customers');
       routes.add('/notifications');
       if (routes.length == 1) routes.insert(0, '/home'); // Fallback
       return routes;
     }
 
     switch (v) {
-      case _NavVariant.admin:      return _adminRoutes;
-      case _NavVariant.supervisor: return _supervisorRoutes;
-      case _NavVariant.salesRep:   return _salesRepRoutes;
-      case _NavVariant.customer:   return _customerRoutes;
-      case _NavVariant.employee:   return _customerRoutes; // Fallback
+      case _NavVariant.admin:
+        return _adminRoutes;
+      case _NavVariant.supervisor:
+        return _supervisorRoutes;
+      case _NavVariant.salesRep:
+        return _salesRepRoutes;
+      case _NavVariant.customer:
+        return _customerRoutes;
+      case _NavVariant.employee:
+        return _customerRoutes; // Fallback
     }
   }
 
@@ -110,67 +140,233 @@ class ShellScreen extends StatelessWidget {
     );
   }
 
-  List<NavigationDestination> _destinations(BuildContext context, _NavVariant v, User? user) {
+  List<NavigationDestination> _destinations(
+    BuildContext context,
+    _NavVariant v,
+    User? user,
+  ) {
     if (v == _NavVariant.employee && user != null) {
       final dests = <NavigationDestination>[];
       // Home is always available if they can log in
-      dests.add(const NavigationDestination(icon: Icon(LucideIcons.home, size: 22), selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary), label: 'الرئيسية'));
-      if (user.hasPermission('mobile_app.invoices') || user.hasPermission('invoices.view')) {
-        dests.add(const NavigationDestination(icon: Icon(LucideIcons.fileText, size: 22), selectedIcon: Icon(LucideIcons.fileText, size: 22, color: AppColors.primary), label: 'الفواتير'));
+      dests.add(
+        const NavigationDestination(
+          icon: Icon(LucideIcons.home, size: 22),
+          selectedIcon: Icon(
+            LucideIcons.home,
+            size: 22,
+            color: AppColors.primary,
+          ),
+          label: 'الرئيسية',
+        ),
+      );
+      if (user.hasPermission('mobile_app.invoices') ||
+          user.hasPermission('invoices.view')) {
+        dests.add(
+          const NavigationDestination(
+            icon: Icon(LucideIcons.fileText, size: 22),
+            selectedIcon: Icon(
+              LucideIcons.fileText,
+              size: 22,
+              color: AppColors.primary,
+            ),
+            label: 'الفواتير',
+          ),
+        );
       }
-      if (user.hasPermission('mobile_app.payments') || user.hasPermission('payments.view')) {
-        dests.add(const NavigationDestination(icon: Icon(LucideIcons.creditCard, size: 22), selectedIcon: Icon(LucideIcons.creditCard, size: 22, color: AppColors.primary), label: 'المدفوعات'));
+      if (user.hasPermission('mobile_app.payments') ||
+          user.hasPermission('payments.view')) {
+        dests.add(
+          const NavigationDestination(
+            icon: Icon(LucideIcons.creditCard, size: 22),
+            selectedIcon: Icon(
+              LucideIcons.creditCard,
+              size: 22,
+              color: AppColors.primary,
+            ),
+            label: 'المدفوعات',
+          ),
+        );
       }
-      if (user.hasPermission('mobile_app.statement') || user.hasPermission('customers.view')) {
-        dests.add(const NavigationDestination(icon: Icon(LucideIcons.users, size: 22), selectedIcon: Icon(LucideIcons.users, size: 22, color: AppColors.primary), label: 'العملاء'));
+      if (user.hasPermission('mobile_app.statement') ||
+          user.hasPermission('customers.view')) {
+        dests.add(
+          const NavigationDestination(
+            icon: Icon(LucideIcons.users, size: 22),
+            selectedIcon: Icon(
+              LucideIcons.users,
+              size: 22,
+              color: AppColors.primary,
+            ),
+            label: 'العملاء',
+          ),
+        );
       }
-      dests.add(const NavigationDestination(icon: Icon(LucideIcons.bell, size: 22), selectedIcon: Icon(LucideIcons.bell, size: 22, color: AppColors.primary), label: 'الإشعارات'));
-      
-      if (dests.length == 1) { // Only notifications
-        dests.insert(0, const NavigationDestination(icon: Icon(LucideIcons.home, size: 22), selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary), label: 'الرئيسية'));
+      dests.add(
+        const NavigationDestination(
+          icon: Icon(LucideIcons.bell, size: 22),
+          selectedIcon: Icon(
+            LucideIcons.bell,
+            size: 22,
+            color: AppColors.primary,
+          ),
+          label: 'الإشعارات',
+        ),
+      );
+
+      if (dests.length == 1) {
+        // Only notifications
+        dests.insert(
+          0,
+          const NavigationDestination(
+            icon: Icon(LucideIcons.home, size: 22),
+            selectedIcon: Icon(
+              LucideIcons.home,
+              size: 22,
+              color: AppColors.primary,
+            ),
+            label: 'الرئيسية',
+          ),
+        );
       }
       return dests;
     }
 
     switch (v) {
-      case _NavVariant.customer:    return _customerDestinations;
-      case _NavVariant.salesRep:    return _salesRepDestinations;
-      case _NavVariant.supervisor:  return _supervisorDestinations;
-      case _NavVariant.admin:       return _adminDestinations;
-      case _NavVariant.employee:    return _customerDestinations; // Fallback
+      case _NavVariant.customer:
+        return _customerDestinations;
+      case _NavVariant.salesRep:
+        return _salesRepDestinations;
+      case _NavVariant.supervisor:
+        return _supervisorDestinations;
+      case _NavVariant.admin:
+        return _adminDestinations;
+      case _NavVariant.employee:
+        return _customerDestinations; // Fallback
     }
   }
 
   // ── Customer: الرئيسية | الفواتير | المدفوعات | كشف حساب | الإشعارات
   static const _customerDestinations = [
-    NavigationDestination(icon: Icon(LucideIcons.home, size: 22), selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary), label: 'الرئيسية'),
-    NavigationDestination(icon: Icon(LucideIcons.fileText, size: 22), selectedIcon: Icon(LucideIcons.fileText, size: 22, color: AppColors.primary), label: 'الفواتير'),
-    NavigationDestination(icon: Icon(LucideIcons.creditCard, size: 22), selectedIcon: Icon(LucideIcons.creditCard, size: 22, color: AppColors.primary), label: 'المدفوعات'),
-    NavigationDestination(icon: Icon(LucideIcons.scrollText, size: 22), selectedIcon: Icon(LucideIcons.scrollText, size: 22, color: AppColors.primary), label: 'كشف حساب'),
-    NavigationDestination(icon: Icon(LucideIcons.bell, size: 22), selectedIcon: Icon(LucideIcons.bell, size: 22, color: AppColors.primary), label: 'الإشعارات'),
+    NavigationDestination(
+      icon: Icon(LucideIcons.home, size: 22),
+      selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary),
+      label: 'الرئيسية',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.fileText, size: 22),
+      selectedIcon: Icon(
+        LucideIcons.fileText,
+        size: 22,
+        color: AppColors.primary,
+      ),
+      label: 'الفواتير',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.creditCard, size: 22),
+      selectedIcon: Icon(
+        LucideIcons.creditCard,
+        size: 22,
+        color: AppColors.primary,
+      ),
+      label: 'المدفوعات',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.scrollText, size: 22),
+      selectedIcon: Icon(
+        LucideIcons.scrollText,
+        size: 22,
+        color: AppColors.primary,
+      ),
+      label: 'كشف حساب',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.bell, size: 22),
+      selectedIcon: Icon(LucideIcons.bell, size: 22, color: AppColors.primary),
+      label: 'الإشعارات',
+    ),
   ];
 
   // ── Sales Rep: الرئيسية | العملاء | الإشعارات
   static const _salesRepDestinations = [
-    NavigationDestination(icon: Icon(LucideIcons.home, size: 22), selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary), label: 'الرئيسية'),
-    NavigationDestination(icon: Icon(LucideIcons.users, size: 22), selectedIcon: Icon(LucideIcons.users, size: 22, color: AppColors.primary), label: 'العملاء'),
-    NavigationDestination(icon: Icon(LucideIcons.bell, size: 22), selectedIcon: Icon(LucideIcons.bell, size: 22, color: AppColors.primary), label: 'الإشعارات'),
+    NavigationDestination(
+      icon: Icon(LucideIcons.home, size: 22),
+      selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary),
+      label: 'الرئيسية',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.users, size: 22),
+      selectedIcon: Icon(LucideIcons.users, size: 22, color: AppColors.primary),
+      label: 'العملاء',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.bell, size: 22),
+      selectedIcon: Icon(LucideIcons.bell, size: 22, color: AppColors.primary),
+      label: 'الإشعارات',
+    ),
   ];
 
   // ── Supervisor: الرئيسية | المندوبين | العملاء | الإشعارات
   static const _supervisorDestinations = [
-    NavigationDestination(icon: Icon(LucideIcons.home, size: 22), selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary), label: 'الرئيسية'),
-    NavigationDestination(icon: Icon(LucideIcons.briefcase, size: 22), selectedIcon: Icon(LucideIcons.briefcase, size: 22, color: AppColors.primary), label: 'المندوبين'),
-    NavigationDestination(icon: Icon(LucideIcons.users, size: 22), selectedIcon: Icon(LucideIcons.users, size: 22, color: AppColors.primary), label: 'العملاء'),
-    NavigationDestination(icon: Icon(LucideIcons.bell, size: 22), selectedIcon: Icon(LucideIcons.bell, size: 22, color: AppColors.primary), label: 'الإشعارات'),
+    NavigationDestination(
+      icon: Icon(LucideIcons.home, size: 22),
+      selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary),
+      label: 'الرئيسية',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.briefcase, size: 22),
+      selectedIcon: Icon(
+        LucideIcons.briefcase,
+        size: 22,
+        color: AppColors.primary,
+      ),
+      label: 'المندوبين',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.users, size: 22),
+      selectedIcon: Icon(LucideIcons.users, size: 22, color: AppColors.primary),
+      label: 'العملاء',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.bell, size: 22),
+      selectedIcon: Icon(LucideIcons.bell, size: 22, color: AppColors.primary),
+      label: 'الإشعارات',
+    ),
   ];
 
   // ── Admin: الرئيسية | المشرفين | المندوبين | العملاء | الإشعارات
   static const _adminDestinations = [
-    NavigationDestination(icon: Icon(LucideIcons.home, size: 22), selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary), label: 'الرئيسية'),
-    NavigationDestination(icon: Icon(LucideIcons.shield, size: 22), selectedIcon: Icon(LucideIcons.shield, size: 22, color: AppColors.primary), label: 'المشرفين'),
-    NavigationDestination(icon: Icon(LucideIcons.briefcase, size: 22), selectedIcon: Icon(LucideIcons.briefcase, size: 22, color: AppColors.primary), label: 'المندوبين'),
-    NavigationDestination(icon: Icon(LucideIcons.users, size: 22), selectedIcon: Icon(LucideIcons.users, size: 22, color: AppColors.primary), label: 'العملاء'),
-    NavigationDestination(icon: Icon(LucideIcons.bell, size: 22), selectedIcon: Icon(LucideIcons.bell, size: 22, color: AppColors.primary), label: 'الإشعارات'),
+    NavigationDestination(
+      icon: Icon(LucideIcons.home, size: 22),
+      selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary),
+      label: 'الرئيسية',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.shield, size: 22),
+      selectedIcon: Icon(
+        LucideIcons.shield,
+        size: 22,
+        color: AppColors.primary,
+      ),
+      label: 'المشرفين',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.briefcase, size: 22),
+      selectedIcon: Icon(
+        LucideIcons.briefcase,
+        size: 22,
+        color: AppColors.primary,
+      ),
+      label: 'المندوبين',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.users, size: 22),
+      selectedIcon: Icon(LucideIcons.users, size: 22, color: AppColors.primary),
+      label: 'العملاء',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.bell, size: 22),
+      selectedIcon: Icon(LucideIcons.bell, size: 22, color: AppColors.primary),
+      label: 'الإشعارات',
+    ),
   ];
 }

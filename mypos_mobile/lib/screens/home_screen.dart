@@ -42,7 +42,10 @@ class _HomeScreenState extends State<HomeScreen> {
         toDate: range.toParam,
       );
       // For staff, also load customers if they have permission
-      if (!user.isCustomer && (user.hasPermission('customers.view') || user.hasPermission('mobile_app.statement') || user.hasPermission('mobile_app.home'))) {
+      if (!user.isCustomer &&
+          (user.hasPermission('customers.view') ||
+              user.hasPermission('mobile_app.statement') ||
+              user.hasPermission('mobile_app.home'))) {
         await dataProvider.loadCustomers();
       }
       // Supervisor: also load their sales reps
@@ -110,7 +113,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 value: 'profile',
                 child: Row(
                   children: [
-                    Icon(LucideIcons.user, size: 18, color: AppColors.textPrimary),
+                    Icon(
+                      LucideIcons.user,
+                      size: 18,
+                      color: AppColors.textPrimary,
+                    ),
                     SizedBox(width: 8),
                     Text(
                       'الملف الشخصي',
@@ -281,7 +288,8 @@ class _HomeScreenState extends State<HomeScreen> {
     String? role,
   ) {
     final customerCount = dataProvider.customers.length;
-    final isAdmin = role == 'admin';
+    print(role);
+    final isAdmin = role == 'admin' || role == 'مدير النظام';
     final isSupervisor = role == 'supervisor';
 
     return [
