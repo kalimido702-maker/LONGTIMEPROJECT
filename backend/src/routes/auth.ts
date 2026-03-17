@@ -113,9 +113,19 @@ export default async function authRoutes(fastify: FastifyInstance) {
         }
 
         // Resolve actual role name from the role record (prefer name_en to avoid localization issues in mobile app)
-        const resolvedRoleName = (roles.length > 0)
-          ? (roles[0].name_en || roles[0].name || user.role)
-          : user.role;
+        let resolvedRoleName = user.role;
+        if (roles.length > 0) {
+          if (roles[0].name_en) {
+            resolvedRoleName = roles[0].name_en;
+          } else {
+            // Fallback for Arabic default roles if name_en is not set
+            const arName = roles[0].name;
+            if (arName === 'مدير النظام') resolvedRoleName = 'admin';
+            else if (arName === 'مشرف') resolvedRoleName = 'supervisor';
+            else if (arName === 'مندوب مبيعات') resolvedRoleName = 'sales_rep';
+            else resolvedRoleName = arName;
+          }
+        }
 
         // Generate tokens
         const tokenId = crypto.randomUUID();
