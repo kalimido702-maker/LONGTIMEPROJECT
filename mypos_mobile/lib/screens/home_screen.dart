@@ -23,20 +23,11 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     final now = DateTime.now();
-    _fromDate = DateTime(now.year, 1, 1);
+    _fromDate = DateTime(now.year, now.month, 1);
     _toDate = now;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadData();
     });
-  }
-
-  bool get _isStaff {
-    final role = context.read<AuthProvider>().user?.role;
-    return role == 'sales_rep' ||
-        role == 'salesRep' ||
-        role == 'salesman' ||
-        role == 'supervisor' ||
-        role == 'admin';
   }
 
   Future<void> _loadData() async {
@@ -50,8 +41,8 @@ class _HomeScreenState extends State<HomeScreen> {
         fromDate: range.fromParam,
         toDate: range.toParam,
       );
-      // For staff, also load customers
-      if (_isStaff) {
+      // For staff, also load customers if they have permission
+      if (!user.isCustomer && (user.hasPermission('customers.view') || user.hasPermission('mobile_app.statement') || user.hasPermission('mobile_app.home'))) {
         await dataProvider.loadCustomers();
       }
       // Supervisor: also load their sales reps
@@ -80,8 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final dataProvider = context.watch<DataProvider>();
     final user = authProvider.user;
     final formatter = NumberFormat('#,##0.00', 'ar');
-    final isStaff =
-        user != null && (user.isSalesRep || user.isSupervisor || user.isAdmin);
+    final isStaff = user != null && !user.isCustomer;
 
     return Scaffold(
       appBar: AppBar(
@@ -109,11 +99,26 @@ class _HomeScreenState extends State<HomeScreen> {
           PopupMenuButton<String>(
             icon: const Icon(LucideIcons.moreVertical, size: 20),
             onSelected: (value) {
-              if (value == 'logout') {
+              if (value == 'profile') {
+                context.push('/profile');
+              } else if (value == 'logout') {
                 authProvider.logout();
               }
             },
             itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'profile',
+                child: Row(
+                  children: [
+                    Icon(LucideIcons.user, size: 18, color: AppColors.textPrimary),
+                    SizedBox(width: 8),
+                    Text(
+                      'الملف الشخصي',
+                      style: TextStyle(color: AppColors.textPrimary),
+                    ),
+                  ],
+                ),
+              ),
               const PopupMenuItem(
                 value: 'logout',
                 child: Row(

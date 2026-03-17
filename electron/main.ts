@@ -18,9 +18,9 @@ import { registerDriveHandlers, setDriveMainWindow } from "./handlers/driveHandl
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // تعيين اسم التطبيق من متغير البيئة APP_ID
-// if (process.env.APP_ID) {
-//   app.setName(process.env.APP_ID);
-// }
+if (process.env.APP_ID) {
+  app.setName(process.env.APP_ID);
+}
 
 // يمنع تشغيل أكثر من نسخة واحدة من التطبيق
 const gotTheLock = app.requestSingleInstanceLock();

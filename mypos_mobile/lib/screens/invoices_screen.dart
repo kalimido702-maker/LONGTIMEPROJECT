@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
@@ -21,12 +22,19 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
   String _filterStatus = 'all'; // all, paid, unpaid
   late DateTime _fromDate;
   late DateTime _toDate;
+  Timer? _debounce;
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
 
   @override
   void initState() {
     super.initState();
     final now = DateTime.now();
-    _fromDate = DateTime(now.year, 1, 1);
+    _fromDate = DateTime(now.year, now.month, 1);
     _toDate = DateTime(now.year, 12, 31);
     WidgetsBinding.instance.addPostFrameCallback((_) => _reloadInvoices());
   }
@@ -38,6 +46,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
       refresh: true,
       fromDate: range.fromParam,
       toDate: range.toParam,
+      search: _searchQuery,
     );
   }
 
@@ -88,7 +97,13 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: TextField(
-              onChanged: (v) => setState(() => _searchQuery = v),
+              onChanged: (v) {
+                setState(() => _searchQuery = v);
+                if (_debounce?.isActive ?? false) _debounce!.cancel();
+                _debounce = Timer(const Duration(milliseconds: 500), () {
+                  _reloadInvoices();
+                });
+              },
               decoration: InputDecoration(
                 hintText: 'بحث عن فاتورة...',
                 prefixIcon: const Icon(LucideIcons.search, size: 20, color: Colors.white70),

@@ -16,6 +16,7 @@ import '../screens/sales_rep_detail_screen.dart';
 import '../screens/supervisors_screen.dart';
 import '../screens/supervisor_detail_screen.dart';
 import '../screens/shell_screen.dart';
+import '../screens/profile_screen.dart';
 
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
@@ -37,6 +38,10 @@ GoRouter createRouter(AuthProvider authProvider) {
       GoRoute(
         path: '/login',
         builder: (context, state) => const LoginScreen(),
+      ),
+      GoRoute(
+        path: '/profile',
+        builder: (context, state) => const ProfileScreen(),
       ),
       ShellRoute(
         navigatorKey: _shellNavigatorKey,

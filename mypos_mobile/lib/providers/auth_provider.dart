@@ -59,6 +59,28 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  void updateLocalUsername(String newUsername) async {
+    if (_user != null) {
+      _user = User(
+        id: _user!.id,
+        username: newUsername,
+        fullName: _user!.fullName,
+        role: _user!.role,
+        clientId: _user!.clientId,
+        branchId: _user!.branchId,
+        permissions: _user!.permissions,
+      );
+      notifyListeners();
+
+      final currentUserDataStr = await _storage.read(key: 'user_data');
+      if (currentUserDataStr != null) {
+        final Map<String, dynamic> currentUserData = json.decode(currentUserDataStr);
+        currentUserData['username'] = newUsername;
+        await _storage.write(key: 'user_data', value: json.encode(currentUserData));
+      }
+    }
+  }
+
   Future<bool> login(
     String username,
     String password, {

@@ -18,11 +18,13 @@ class User {
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
+    print("Role is ${json['role']}");
+    print("Permissions is ${json['permissions']}");
     return User(
       id: json['id']?.toString() ?? '',
       username: json['username'] ?? '',
       fullName: json['fullName'] ?? json['full_name'] ?? json['name'] ?? '',
-      role: json['role'] ?? 'customer',
+      role: (json['role'] as String?)?.toLowerCase() ?? 'customer',
       clientId: json['clientId'] ?? json['client_id'] ?? '',
       branchId: json['branchId'] ?? json['branch_id'] ?? '',
       permissions: json['permissions'] != null
@@ -35,4 +37,9 @@ class User {
   bool get isSupervisor => role == 'supervisor';
   bool get isSalesRep => role == 'sales_rep' || role == 'salesRep';
   bool get isCustomer => role == 'customer';
+
+  bool hasPermission(String permission) {
+    if (isAdmin) return true;
+    return permissions.contains(permission);
+  }
 }

@@ -82,18 +82,40 @@ export default async function authRoutes(fastify: FastifyInstance) {
           });
         }
 
-        // Get user permissions from role
-        const roles = await query<Role>(
-          "SELECT permissions FROM roles WHERE client_id = ? AND name = ? AND is_deleted = FALSE LIMIT 1",
-          [user.client_id, user.role]
+        // Get user permissions from role (role field may contain role name OR role ID)
+        const [roles] = await db.query<RowDataPacket[]>(
+          "SELECT name, name_en, permissions FROM roles WHERE client_id = ? AND (id = ? OR name = ?) AND is_deleted = 0 LIMIT 1",
+          [user.client_id, user.role, user.role]
         );
 
-        const permissions =
-          roles.length > 0 && roles[0].permissions
-            ? typeof roles[0].permissions === 'string'
+        let parsedPermissions: any = [];
+        if (roles.length > 0 && roles[0].permissions) {
+          try {
+            const rawPerms = typeof roles[0].permissions === 'string'
               ? JSON.parse(roles[0].permissions)
-              : roles[0].permissions
-            : [];
+              : roles[0].permissions;
+
+            if (Array.isArray(rawPerms)) {
+              parsedPermissions = rawPerms;
+            } else if (typeof rawPerms === 'object' && rawPerms !== null) {
+              parsedPermissions = [];
+              for (const [resource, actions] of Object.entries(rawPerms)) {
+                if (Array.isArray(actions)) {
+                  actions.forEach((action: string) => {
+                    parsedPermissions.push(`${resource}.${action}`);
+                  });
+                }
+              }
+            }
+          } catch (e) {
+            parsedPermissions = [];
+          }
+        }
+
+        // Resolve actual role name from the role record (prefer name_en to avoid localization issues in mobile app)
+        const resolvedRoleName = (roles.length > 0)
+          ? (roles[0].name_en || roles[0].name || user.role)
+          : user.role;
 
         // Generate tokens
         const tokenId = crypto.randomUUID();
@@ -101,8 +123,8 @@ export default async function authRoutes(fastify: FastifyInstance) {
           userId: user.id,
           clientId: user.client_id,
           branchId: user.branch_id,
-          role: user.role,
-          permissions: Array.isArray(permissions) ? permissions : [],
+          role: resolvedRoleName,
+          permissions: parsedPermissions,
           pwdv: getPasswordVersion(user.password_hash),
           type: "access",
         };
@@ -111,7 +133,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
           userId: user.id,
           clientId: user.client_id,
           branchId: user.branch_id,
-          role: user.role,
+          role: resolvedRoleName,
           pwdv: getPasswordVersion(user.password_hash),
           type: "refresh",
           tokenId,
@@ -148,9 +170,10 @@ export default async function authRoutes(fastify: FastifyInstance) {
             id: user.id,
             username: user.username,
             fullName: user.full_name,
-            role: user.role,
+            role: resolvedRoleName,
             clientId: user.client_id,
             branchId: user.branch_id,
+            permissions: parsedPermissions,
           },
         });
       } catch (error) {
@@ -239,26 +262,46 @@ export default async function authRoutes(fastify: FastifyInstance) {
           });
         }
 
-        // Get permissions
-        const roles = await query<Role>(
-          "SELECT permissions FROM roles WHERE client_id = ? AND name = ? AND is_deleted = FALSE LIMIT 1",
-          [user.client_id, user.role]
+        // Get permissions (role field may contain role name OR role ID)
+        const roles = await query<Role & { name: string }>(
+          "SELECT name, permissions FROM roles WHERE client_id = ? AND (id = ? OR name = ?) AND is_deleted = FALSE LIMIT 1",
+          [user.client_id, user.role, user.role]
         );
 
-        const permissions =
-          roles.length > 0 && roles[0].permissions
-            ? typeof roles[0].permissions === 'string'
+        let parsedPermissions: any = [];
+        if (roles.length > 0 && roles[0].permissions) {
+          try {
+            const rawPerms = typeof roles[0].permissions === 'string'
               ? JSON.parse(roles[0].permissions)
-              : roles[0].permissions
-            : [];
+              : roles[0].permissions;
+
+            if (Array.isArray(rawPerms)) {
+              parsedPermissions = rawPerms;
+            } else if (typeof rawPerms === 'object' && rawPerms !== null) {
+              parsedPermissions = [];
+              for (const [resource, actions] of Object.entries(rawPerms)) {
+                if (Array.isArray(actions)) {
+                  actions.forEach((action: string) => {
+                    parsedPermissions.push(`${resource}.${action}`);
+                  });
+                }
+              }
+            }
+          } catch (e) {
+            parsedPermissions = [];
+          }
+        }
+
+        // Resolve actual role name
+        const resolvedRoleName = (roles.length > 0 && roles[0].name) ? roles[0].name : user.role;
 
         // Generate new access token
         const accessPayload: JWTAccessPayload = {
           userId: user.id,
           clientId: user.client_id,
           branchId: user.branch_id,
-          role: user.role,
-          permissions: Array.isArray(permissions) ? permissions : [],
+          role: resolvedRoleName,
+          permissions: parsedPermissions,
           pwdv: currentPwdv,
           type: "access",
         };

@@ -61,7 +61,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen>
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
     final now = DateTime.now();
-    _fromDate = DateTime(now.year, 1, 1);
+    _fromDate = DateTime(now.year, now.month, 1);
     _toDate = DateTime(now.year, 12, 31);
 
     _tabController.addListener(() {

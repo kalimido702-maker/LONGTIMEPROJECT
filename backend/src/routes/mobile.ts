@@ -47,55 +47,39 @@ export async function mobileRoutes(server: FastifyInstance) {
     const conditions: string[] = [];
     const params: any[] = [];
 
-    if (role === 'customer') {
-      // Customer: find their linked customer record
-      const [users] = await db.query<RowDataPacket[]>(
-        "SELECT linked_customer_id FROM users WHERE id = ? AND client_id = ?",
-        [userId, clientId]
-      );
+    const [users] = await db.query<RowDataPacket[]>(
+      "SELECT linked_customer_id, linked_sales_rep_id, linked_supervisor_id, role FROM users WHERE id = ? AND client_id = ?",
+      [userId, clientId]
+    );
 
-      if (users.length > 0 && users[0].linked_customer_id) {
-        conditions.push(`${prefix}${customerIdColumn} = ?`);
-        params.push(users[0].linked_customer_id);
-      } else {
-        // No linked customer — show nothing
-        conditions.push("1 = 0");
-      }
-    } else if (role === 'sales_rep' || role === 'salesman' || role === 'salesRep') {
-      // Sales rep: find their linked_sales_rep_id, then get their assigned customers
-      const [users] = await db.query<RowDataPacket[]>(
-        "SELECT linked_sales_rep_id FROM users WHERE id = ? AND client_id = ?",
-        [userId, clientId]
-      );
-
-      if (users.length > 0 && users[0].linked_sales_rep_id) {
-        conditions.push(`${prefix}${customerIdColumn} IN (
-          SELECT id FROM customers 
-          WHERE sales_rep_id = ? AND client_id = ? AND is_deleted = 0
-        )`);
-        params.push(users[0].linked_sales_rep_id, clientId);
-      } else {
-        // No linked sales rep — show nothing
-        conditions.push("1 = 0");
-      }
-    } else if (role === 'supervisor') {
-      // Supervisor: find their linked_supervisor_id, then get their sales reps' customers
-      const [users] = await db.query<RowDataPacket[]>(
-        "SELECT linked_supervisor_id FROM users WHERE id = ? AND client_id = ?",
-        [userId, clientId]
-      );
-
-      if (users.length > 0 && users[0].linked_supervisor_id) {
-        conditions.push(`${prefix}${customerIdColumn} IN (
-          SELECT c.id FROM customers c
-          JOIN sales_reps sr ON c.sales_rep_id = sr.id
-          WHERE sr.supervisor_id = ? AND c.client_id = ? AND c.is_deleted = 0
-        )`);
-        params.push(users[0].linked_supervisor_id, clientId);
-      }
-      // If no linked_supervisor_id — supervisor sees everything (fallback)
+    const user = users[0];
+    if (!user) {
+      conditions.push("1 = 0");
+      return { conditions, params };
     }
-    // admin/super_admin: no additional filtering (sees everything in client+branch)
+
+    if (user.linked_customer_id) {
+      conditions.push(`${prefix}${customerIdColumn} = ?`);
+      params.push(user.linked_customer_id);
+    } else if (user.linked_sales_rep_id) {
+      conditions.push(`${prefix}${customerIdColumn} IN (
+        SELECT id FROM customers 
+        WHERE sales_rep_id = ? AND client_id = ? AND is_deleted = 0
+      )`);
+      params.push(user.linked_sales_rep_id, clientId);
+    } else if (user.linked_supervisor_id) {
+      conditions.push(`${prefix}${customerIdColumn} IN (
+        SELECT c.id FROM customers c
+        JOIN sales_reps sr ON c.sales_rep_id = sr.id
+        WHERE sr.supervisor_id = ? AND c.client_id = ? AND c.is_deleted = 0
+      )`);
+      params.push(user.linked_supervisor_id, clientId);
+    } else if (!['admin', 'super_admin', 'owner'].includes(user.role)) {
+      // General employees (like accountants, managers, etc.) who are NOT linked to a specific entity
+      // should see all data, just like admins. The mobile app UI handles showing/hiding tabs
+      // based on their permissions, but the API should return the data if requested.
+    }
+    // Admins and general unlinked employees see everything (no conditions added)
 
     return { conditions, params };
   }
@@ -843,9 +827,9 @@ export async function mobileRoutes(server: FastifyInstance) {
           targetCustomerId = users[0].linked_customer_id;
         }
 
-        if (!targetCustomerId && (role === 'sales_rep' || role === 'salesman' || role === 'salesRep')) {
-          // Sales rep without specific customer — return error
-          return reply.code(400).send({ error: "customer_id is required for sales reps" });
+        if (!targetCustomerId && role === 'customer') {
+          // Customers must have a linked customer_id to view their statement
+          return reply.code(400).send({ error: "customer_id is required" });
         }
 
         // Fetch opening balance (previous_statement) for the target customer
@@ -1622,4 +1606,46 @@ export async function mobileRoutes(server: FastifyInstance) {
       }
     }
   );
+
+  // ============================================================
+  // PUT /api/mobile/profile
+  // Update current user profile (e.g. username)
+  // ============================================================
+  server.put(
+    "/profile",
+    { preHandler: [server.authenticate] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { userId, clientId } = request.user!;
+        const body = request.body as any;
+        const newUsername = body.username?.trim();
+
+        if (!newUsername) {
+          return reply.code(400).send({ error: "Username is required" });
+        }
+
+        // Check if username is already taken by another user in the exact same client
+        const [existing] = await db.query<RowDataPacket[]>(
+          "SELECT id FROM users WHERE username = ? AND client_id = ? AND id != ? AND is_deleted = 0",
+          [newUsername, clientId, userId]
+        );
+
+        if (existing.length > 0) {
+          return reply.code(409).send({ error: "Username is already taken" });
+        }
+
+        await db.query(
+          "UPDATE users SET username = ? WHERE id = ? AND client_id = ?",
+          [newUsername, userId, clientId]
+        );
+
+        return reply.code(200).send({ message: "Profile updated successfully", username: newUsername });
+      } catch (error) {
+        logger.error({ error }, "Failed to update profile");
+        return reply.code(500).send({ error: "Failed to update profile" });
+      }
+    }
+  );
+
+
 }

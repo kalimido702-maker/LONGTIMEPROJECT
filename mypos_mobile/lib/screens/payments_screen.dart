@@ -24,7 +24,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
   void initState() {
     super.initState();
     final now = DateTime.now();
-    _fromDate = DateTime(now.year, 1, 1);
+    _fromDate = DateTime(now.year, now.month, 1);
     _toDate = DateTime(now.year, 12, 31);
     WidgetsBinding.instance.addPostFrameCallback((_) => _reloadPayments());
   }

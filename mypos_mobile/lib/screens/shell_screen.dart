@@ -5,8 +5,10 @@ import 'package:provider/provider.dart';
 import '../config/theme.dart';
 import '../providers/auth_provider.dart';
 
+import '../models/user.dart';
+
 /// Determines which navigation variant to show based on user role.
-enum _NavVariant { customer, salesRep, supervisor, admin }
+enum _NavVariant { customer, salesRep, supervisor, admin, employee }
 
 class ShellScreen extends StatelessWidget {
   final Widget child;
@@ -22,8 +24,10 @@ class ShellScreen extends StatelessWidget {
       case 'salesRep':
       case 'salesman':
         return _NavVariant.salesRep;
-      default:
+      case 'customer':
         return _NavVariant.customer;
+      default:
+        return _NavVariant.employee;
     }
   }
 
@@ -33,26 +37,39 @@ class ShellScreen extends StatelessWidget {
   static const _supervisorRoutes = ['/home', '/sales-reps', '/customers', '/notifications'];
   static const _adminRoutes      = ['/home', '/supervisors', '/sales-reps', '/customers', '/notifications'];
 
-  List<String> _routes(_NavVariant v) {
+  List<String> _routes(BuildContext context, _NavVariant v, User? user) {
+    if (v == _NavVariant.employee && user != null) {
+      final routes = <String>[];
+      // Home is always available if they can log in
+      routes.add('/home');
+      if (user.hasPermission('mobile_app.invoices') || user.hasPermission('invoices.view')) routes.add('/invoices');
+      if (user.hasPermission('mobile_app.payments') || user.hasPermission('payments.view')) routes.add('/payments');
+      if (user.hasPermission('mobile_app.statement') || user.hasPermission('customers.view')) routes.add('/customers');
+      routes.add('/notifications');
+      if (routes.length == 1) routes.insert(0, '/home'); // Fallback
+      return routes;
+    }
+
     switch (v) {
       case _NavVariant.admin:      return _adminRoutes;
       case _NavVariant.supervisor: return _supervisorRoutes;
       case _NavVariant.salesRep:   return _salesRepRoutes;
       case _NavVariant.customer:   return _customerRoutes;
+      case _NavVariant.employee:   return _customerRoutes; // Fallback
     }
   }
 
-  int _currentIndex(BuildContext context, _NavVariant v) {
+  int _currentIndex(BuildContext context, _NavVariant v, User? user) {
     final location = GoRouterState.of(context).matchedLocation;
-    final r = _routes(v);
+    final r = _routes(context, v, user);
     for (int i = 0; i < r.length; i++) {
       if (location.startsWith(r[i])) return i;
     }
     return 0;
   }
 
-  void _onTap(BuildContext context, int index, _NavVariant v) {
-    final r = _routes(v);
+  void _onTap(BuildContext context, int index, _NavVariant v, User? user) {
+    final r = _routes(context, v, user);
     if (index < r.length) context.go(r[index]);
   }
 
@@ -78,14 +95,14 @@ class ShellScreen extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: NavigationBar(
-              selectedIndex: _currentIndex(context, v),
-              onDestinationSelected: (index) => _onTap(context, index, v),
+              selectedIndex: _currentIndex(context, v, user),
+              onDestinationSelected: (index) => _onTap(context, index, v, user),
               backgroundColor: Colors.transparent,
               elevation: 0,
               indicatorColor: AppColors.primary.withOpacity(0.12),
               labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
               height: 64,
-              destinations: _destinations(v),
+              destinations: _destinations(context, v, user),
             ),
           ),
         ),
@@ -93,12 +110,34 @@ class ShellScreen extends StatelessWidget {
     );
   }
 
-  List<NavigationDestination> _destinations(_NavVariant v) {
+  List<NavigationDestination> _destinations(BuildContext context, _NavVariant v, User? user) {
+    if (v == _NavVariant.employee && user != null) {
+      final dests = <NavigationDestination>[];
+      // Home is always available if they can log in
+      dests.add(const NavigationDestination(icon: Icon(LucideIcons.home, size: 22), selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary), label: 'الرئيسية'));
+      if (user.hasPermission('mobile_app.invoices') || user.hasPermission('invoices.view')) {
+        dests.add(const NavigationDestination(icon: Icon(LucideIcons.fileText, size: 22), selectedIcon: Icon(LucideIcons.fileText, size: 22, color: AppColors.primary), label: 'الفواتير'));
+      }
+      if (user.hasPermission('mobile_app.payments') || user.hasPermission('payments.view')) {
+        dests.add(const NavigationDestination(icon: Icon(LucideIcons.creditCard, size: 22), selectedIcon: Icon(LucideIcons.creditCard, size: 22, color: AppColors.primary), label: 'المدفوعات'));
+      }
+      if (user.hasPermission('mobile_app.statement') || user.hasPermission('customers.view')) {
+        dests.add(const NavigationDestination(icon: Icon(LucideIcons.users, size: 22), selectedIcon: Icon(LucideIcons.users, size: 22, color: AppColors.primary), label: 'العملاء'));
+      }
+      dests.add(const NavigationDestination(icon: Icon(LucideIcons.bell, size: 22), selectedIcon: Icon(LucideIcons.bell, size: 22, color: AppColors.primary), label: 'الإشعارات'));
+      
+      if (dests.length == 1) { // Only notifications
+        dests.insert(0, const NavigationDestination(icon: Icon(LucideIcons.home, size: 22), selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary), label: 'الرئيسية'));
+      }
+      return dests;
+    }
+
     switch (v) {
       case _NavVariant.customer:    return _customerDestinations;
       case _NavVariant.salesRep:    return _salesRepDestinations;
       case _NavVariant.supervisor:  return _supervisorDestinations;
       case _NavVariant.admin:       return _adminDestinations;
+      case _NavVariant.employee:    return _customerDestinations; // Fallback
     }
   }
 

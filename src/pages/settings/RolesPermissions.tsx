@@ -214,6 +214,16 @@ const RolesPermissions = () => {
         approve: "اعتماد/رفض سُلفة",
       },
     },
+    mobile_app: {
+      name: "تطبيق الجوال",
+      actions: {
+        home: "عرض الرئيسية",
+        due: "عرض المستحقات",
+        invoices: "عرض الفواتير",
+        payments: "عرض المدفوعات",
+        statement: "عرض كشف الحساب",
+      },
+    },
   };
 
   const colorOptions = [

@@ -739,7 +739,9 @@ export class SmartSyncManager extends EventEmitter {
                 changes: any[];
                 has_more?: boolean;
                 next_cursor?: string;
-            }>(`/api/sync/pull-changes?since=${encodeURIComponent(since)}&tables=${SYNCABLE_TABLES.join(',')}`);
+            }>(`/api/sync/pull-changes?since=${encodeURIComponent(since)}&tables=${SYNCABLE_TABLES.join(',')}`, {
+                timeout: 120000, // 2 minutes for large pulls (force-overwrite)
+            });
 
             // Normalize response format - convert array to object keyed by table
             const changesObj: Record<string, any[]> = {};
@@ -1603,6 +1605,8 @@ export class SmartSyncManager extends EventEmitter {
             }>('/api/sync/batch-push', {
                 device_id: this.deviceId,
                 records: requestRecords,
+            }, {
+                timeout: 120000, // 2 minutes for large batch pushes
             });
 
             result.pushed = response.synced_count || 0;

@@ -2,6 +2,7 @@ import {
   getDatabaseService,
   initializeDatabase,
 } from "@/infrastructure/database/DatabaseService";
+import type { Role } from "@/domain/entities/Index";
 
 /**
  * Legacy IndexedDBService wrapper for backward compatibility
@@ -21,12 +22,12 @@ class IndexedDBService {
     await this.service.reset();
   }
 
-  async add<T>(storeName: string, data: T): Promise<void> {
+  async add<T extends { id: string | number; local_updated_at?: string }>(storeName: string, data: T): Promise<void> {
     const repo = this.service.getRepository<T>(storeName);
     return repo.add(data);
   }
 
-  async update<T>(storeName: string, data: T): Promise<void> {
+  async update<T extends { id: string | number; local_updated_at?: string }>(storeName: string, data: T): Promise<void> {
     const repo = this.service.getRepository<T>(storeName);
     return repo.update(data);
   }
@@ -36,17 +37,17 @@ class IndexedDBService {
     return repo.delete(id);
   }
 
-  async get<T>(storeName: string, id: string): Promise<T | undefined> {
+  async get<T extends { id: string | number; local_updated_at?: string }>(storeName: string, id: string): Promise<T | undefined> {
     const repo = this.service.getRepository<T>(storeName);
     return repo.get(id);
   }
 
-  async getAll<T>(storeName: string): Promise<T[]> {
+  async getAll<T extends { id: string | number; local_updated_at?: string }>(storeName: string): Promise<T[]> {
     const repo = this.service.getRepository<T>(storeName);
     return repo.getAll();
   }
 
-  async getByIndex<T>(
+  async getByIndex<T extends { id: string | number; local_updated_at?: string }>(
     storeName: string,
     indexName: string,
     value: any
@@ -90,10 +91,15 @@ class IndexedDBService {
       const currentCollectionsPerms = adminRole.permissions.collections || [];
       const updatedCollectionsPerms = [...new Set([...currentCollectionsPerms, "view", "create", "edit", "delete"])];
 
+      // إضافة صلاحيات تطبيق الجوال
+      const currentMobileAppPerms = adminRole.permissions.mobile_app || [];
+      const updatedMobileAppPerms = [...new Set([...currentMobileAppPerms, "home", "due", "invoices", "payments", "statement"])];
+
       const needsUpdate = updatedInvoicePerms.length !== currentInvoicePerms.length ||
         updatedReturnsPerms.length !== currentReturnsPerms.length ||
         updatedPaymentsPerms.length !== currentPaymentsPerms.length ||
-        updatedCollectionsPerms.length !== currentCollectionsPerms.length;
+        updatedCollectionsPerms.length !== currentCollectionsPerms.length ||
+        updatedMobileAppPerms.length !== currentMobileAppPerms.length;
 
       if (needsUpdate) {
         await this.update("roles", {
@@ -104,6 +110,7 @@ class IndexedDBService {
             returns: updatedReturnsPerms,
             payments: updatedPaymentsPerms,
             collections: updatedCollectionsPerms,
+            mobile_app: updatedMobileAppPerms,
           }
         });
       }
@@ -140,6 +147,7 @@ class IndexedDBService {
             expenseCategories: ["view"],
             expenses: ["view"],
             employeeAdvances: ["view"],
+            mobile_app: ["home", "due", "invoices", "payments", "statement"],
           },
         };
         await this.add("roles", viewerRole);

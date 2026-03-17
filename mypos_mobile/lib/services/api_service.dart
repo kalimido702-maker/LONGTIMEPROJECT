@@ -305,6 +305,15 @@ class ApiService {
     return response.data;
   }
 
+  /// Update user profile (e.g. username)
+  Future<Map<String, dynamic>> updateProfile({required String username}) async {
+    final response = await _dio.put(
+      ApiConfig.profile,
+      data: {'username': username},
+    );
+    return response.data;
+  }
+
   /// Notifications list with unread count
   Future<Map<String, dynamic>> getNotifications({
     int page = 1,

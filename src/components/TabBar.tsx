@@ -148,15 +148,17 @@ export function TabBar() {
                             {IconComponent && <IconComponent className="h-4 w-4 shrink-0" />}
                             <span className="truncate flex-1 text-right">{tab.title}</span>
                             {tab.closeable && (
-                                <button
+                                <div
+                                    role="button"
+                                    tabIndex={0}
                                     onClick={(e) => handleCloseTab(e, tab.id)}
                                     className={cn(
-                                        "h-4 w-4 rounded-sm hover:bg-destructive/20 flex items-center justify-center shrink-0",
+                                        "h-4 w-4 rounded-sm hover:bg-destructive/20 flex items-center justify-center shrink-0 cursor-pointer",
                                         isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"
                                     )}
                                 >
                                     <X className="h-3 w-3" />
-                                </button>
+                                </div>
                             )}
                         </button>
                     );
