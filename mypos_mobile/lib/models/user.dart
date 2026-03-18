@@ -37,6 +37,8 @@ class User {
   bool get isSupervisor => role == 'supervisor';
   bool get isSalesRep => role == 'sales_rep' || role == 'salesRep';
   bool get isCustomer => role == 'customer';
+  bool get isGeneralManager => role == 'general_manager';
+  bool get isSalesManager => role == 'sales_manager';
 
   bool hasPermission(String permission) {
     if (isAdmin) return true;

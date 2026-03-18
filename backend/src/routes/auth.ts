@@ -127,6 +127,10 @@ export default async function authRoutes(fastify: FastifyInstance) {
           resolvedRoleName = 'supervisor';
         } else if (resolvedRoleName === 'مندوب مبيعات' || resolvedRoleName === 'sales rep' || resolvedRoleName === 'sales representative') {
           resolvedRoleName = 'sales_rep';
+        } else if (resolvedRoleName === 'مدير عام' || resolvedRoleName === 'general manager') {
+          resolvedRoleName = 'general_manager';
+        } else if (resolvedRoleName === 'مسؤول مبيعات' || resolvedRoleName === 'sales manager') {
+          resolvedRoleName = 'sales_manager';
         }
 
         // Generate tokens

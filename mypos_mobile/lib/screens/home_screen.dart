@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../config/theme.dart';
 import '../providers/auth_provider.dart';
 import '../providers/data_provider.dart';
+import '../models/user.dart';
 import '../widgets/date_filter_widget.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -36,6 +37,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final user = authProvider.user;
 
     if (user != null) {
+      // Sales manager: no dashboard data needed (empty home)
+      if (user.isSalesManager) return;
+
       final range = DateRange(from: _fromDate, to: _toDate);
       await dataProvider.loadAllData(
         fromDate: range.fromParam,
@@ -52,8 +56,8 @@ class _HomeScreenState extends State<HomeScreen> {
       if (user.isSupervisor) {
         await dataProvider.loadSalesReps();
       }
-      // Admin: load supervisors + sales reps
-      if (user.isAdmin) {
+      // Admin or General Manager: load supervisors + sales reps
+      if (user.isAdmin || user.isGeneralManager) {
         await dataProvider.loadSupervisors();
         await dataProvider.loadSalesReps();
       }
@@ -153,7 +157,9 @@ class _HomeScreenState extends State<HomeScreen> {
             : ListView(
                 padding: const EdgeInsets.all(16),
                 children: isStaff
-                    ? _buildStaffHomeContent(dataProvider, formatter, user.role)
+                    ? (user.isSalesManager
+                        ? _buildSalesManagerHomeContent()
+                        : _buildStaffHomeContent(dataProvider, formatter, user))
                     : _buildCustomerHomeContent(dataProvider, formatter),
               ),
       ),
@@ -281,20 +287,62 @@ class _HomeScreenState extends State<HomeScreen> {
     ];
   }
 
-  // ===================== STAFF HOME (sales_rep / supervisor / admin) =====================
+  // ===================== SALES MANAGER HOME (empty) =====================
+  List<Widget> _buildSalesManagerHomeContent() {
+    return [
+      const SizedBox(height: 40),
+      Center(
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Icon(
+                LucideIcons.briefcase,
+                size: 48,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'مرحباً',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'يمكنك عرض الفواتير من التبويب أدناه',
+              style: TextStyle(
+                fontSize: 14,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ];
+  }
+
+  // ===================== STAFF HOME (sales_rep / supervisor / admin / general_manager) =====================
   List<Widget> _buildStaffHomeContent(
     DataProvider dataProvider,
     NumberFormat formatter,
-    String? role,
+    User user,
   ) {
     final customerCount = dataProvider.customers.length;
-    print(role);
-    final isAdmin = role == 'admin' || role == 'مدير النظام';
-    final isSupervisor = role == 'supervisor';
+    final isAdmin = user.isAdmin;
+    final isGeneralManager = user.isGeneralManager;
+    final isSupervisor = user.isSupervisor;
 
     return [
-      // ── Admin: supervisors + reps + customers summary ──
-      if (isAdmin) ...[
+      // ── Admin or General Manager: supervisors + reps + customers summary ──
+      if (isAdmin || isGeneralManager) ...[
         _buildSummaryRow(
           items: [
             _SummaryItem(
@@ -480,8 +528,8 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       const SizedBox(height: 12),
 
-      // Admin-specific quick actions
-      if (isAdmin) ...[
+      // Admin or General Manager quick actions for supervisors
+      if (isAdmin || isGeneralManager) ...[
         _QuickActionTile(
           icon: LucideIcons.shield,
           label: 'المشرفين',
@@ -492,8 +540,8 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 8),
       ],
 
-      // Admin or Supervisor quick action for reps
-      if (isAdmin || isSupervisor) ...[
+      // Admin, General Manager, or Supervisor quick action for reps
+      if (isAdmin || isGeneralManager || isSupervisor) ...[
         _QuickActionTile(
           icon: LucideIcons.briefcase,
           label: 'المندوبين',
@@ -511,14 +559,17 @@ class _HomeScreenState extends State<HomeScreen> {
         color: AppColors.primary,
         onTap: () => context.go('/customers'),
       ),
-      const SizedBox(height: 8),
-      _QuickActionTile(
-        icon: LucideIcons.bell,
-        label: 'الإشعارات',
-        subtitle: 'عرض الإشعارات والتنبيهات',
-        color: AppColors.secondary,
-        onTap: () => context.go('/notifications'),
-      ),
+      // General Manager: no notifications
+      if (!isGeneralManager) ...[
+        const SizedBox(height: 8),
+        _QuickActionTile(
+          icon: LucideIcons.bell,
+          label: 'الإشعارات',
+          subtitle: 'عرض الإشعارات والتنبيهات',
+          color: AppColors.secondary,
+          onTap: () => context.go('/notifications'),
+        ),
+      ],
     ];
   }
 
@@ -588,6 +639,10 @@ class _HomeScreenState extends State<HomeScreen> {
         return 'عميل';
       case 'cashier':
         return 'كاشير';
+      case 'general_manager':
+        return 'مدير عام';
+      case 'sales_manager':
+        return 'مسؤول مبيعات';
       default:
         return role ?? '';
     }

@@ -9,7 +9,8 @@ import '../widgets/date_filter_widget.dart';
 
 class PaymentsScreen extends StatefulWidget {
   final String? filterId;
-  const PaymentsScreen({super.key, this.filterId});
+  final bool defaultCurrentMonth;
+  const PaymentsScreen({super.key, this.filterId, this.defaultCurrentMonth = false});
 
   @override
   State<PaymentsScreen> createState() => _PaymentsScreenState();
@@ -25,7 +26,9 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
     super.initState();
     final now = DateTime.now();
     _fromDate = DateTime(now.year, now.month, 1);
-    _toDate = DateTime(now.year, 12, 31);
+    _toDate = widget.defaultCurrentMonth
+        ? DateTime(now.year, now.month + 1, 0) // Last day of current month
+        : DateTime(now.year, 12, 31);
     WidgetsBinding.instance.addPostFrameCallback((_) => _reloadPayments());
   }
 
@@ -69,8 +72,8 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
       }).toList();
     }
 
-    // Calculate total
-    final totalPayments = payments.fold<double>(0, (sum, p) => sum + p.amount);
+    // Use server-side total for accurate display across all pages
+    final totalPayments = dataProvider.paymentsFilteredTotal;
 
     return Scaffold(
       appBar: AppBar(

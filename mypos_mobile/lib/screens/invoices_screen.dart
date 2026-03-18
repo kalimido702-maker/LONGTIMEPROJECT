@@ -11,7 +11,8 @@ import '../widgets/date_filter_widget.dart';
 
 class InvoicesScreen extends StatefulWidget {
   final String? filterId;
-  const InvoicesScreen({super.key, this.filterId});
+  final bool defaultCurrentMonth;
+  const InvoicesScreen({super.key, this.filterId, this.defaultCurrentMonth = false});
 
   @override
   State<InvoicesScreen> createState() => _InvoicesScreenState();
@@ -35,7 +36,9 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     super.initState();
     final now = DateTime.now();
     _fromDate = DateTime(now.year, now.month, 1);
-    _toDate = DateTime(now.year, 12, 31);
+    _toDate = widget.defaultCurrentMonth
+        ? DateTime(now.year, now.month + 1, 0) // Last day of current month
+        : DateTime(now.year, 12, 31);
     WidgetsBinding.instance.addPostFrameCallback((_) => _reloadInvoices());
   }
 

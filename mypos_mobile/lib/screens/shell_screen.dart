@@ -8,7 +8,7 @@ import '../providers/auth_provider.dart';
 import '../models/user.dart';
 
 /// Determines which navigation variant to show based on user role.
-enum _NavVariant { customer, salesRep, supervisor, admin, employee }
+enum _NavVariant { customer, salesRep, supervisor, admin, employee, generalManager, salesManager }
 
 class ShellScreen extends StatelessWidget {
   final Widget child;
@@ -28,6 +28,10 @@ class ShellScreen extends StatelessWidget {
         return _NavVariant.salesRep;
       case 'customer':
         return _NavVariant.customer;
+      case 'general_manager':
+        return _NavVariant.generalManager;
+      case 'sales_manager':
+        return _NavVariant.salesManager;
       default:
         return _NavVariant.employee;
     }
@@ -55,6 +59,15 @@ class ShellScreen extends StatelessWidget {
     '/customers',
     '/notifications',
   ];
+  static const _generalManagerRoutes = [
+    '/home',
+    '/supervisors',
+    '/sales-reps',
+    '/customers',
+    '/invoices',
+    '/payments',
+  ];
+  static const _salesManagerRoutes = ['/home', '/invoices'];
 
   List<String> _routes(BuildContext context, _NavVariant v, User? user) {
     if (v == _NavVariant.employee && user != null) {
@@ -84,6 +97,10 @@ class ShellScreen extends StatelessWidget {
         return _salesRepRoutes;
       case _NavVariant.customer:
         return _customerRoutes;
+      case _NavVariant.generalManager:
+        return _generalManagerRoutes;
+      case _NavVariant.salesManager:
+        return _salesManagerRoutes;
       case _NavVariant.employee:
         return _customerRoutes; // Fallback
     }
@@ -240,6 +257,10 @@ class ShellScreen extends StatelessWidget {
         return _supervisorDestinations;
       case _NavVariant.admin:
         return _adminDestinations;
+      case _NavVariant.generalManager:
+        return _generalManagerDestinations;
+      case _NavVariant.salesManager:
+        return _salesManagerDestinations;
       case _NavVariant.employee:
         return _customerDestinations; // Fallback
     }
@@ -367,6 +388,74 @@ class ShellScreen extends StatelessWidget {
       icon: Icon(LucideIcons.bell, size: 22),
       selectedIcon: Icon(LucideIcons.bell, size: 22, color: AppColors.primary),
       label: 'الإشعارات',
+    ),
+  ];
+
+  // ── General Manager: الرئيسية | المشرفين | المندوبين | العملاء | الفواتير | المدفوعات
+  static const _generalManagerDestinations = [
+    NavigationDestination(
+      icon: Icon(LucideIcons.home, size: 22),
+      selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary),
+      label: 'الرئيسية',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.shield, size: 22),
+      selectedIcon: Icon(
+        LucideIcons.shield,
+        size: 22,
+        color: AppColors.primary,
+      ),
+      label: 'المشرفين',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.briefcase, size: 22),
+      selectedIcon: Icon(
+        LucideIcons.briefcase,
+        size: 22,
+        color: AppColors.primary,
+      ),
+      label: 'المندوبين',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.users, size: 22),
+      selectedIcon: Icon(LucideIcons.users, size: 22, color: AppColors.primary),
+      label: 'العملاء',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.fileText, size: 22),
+      selectedIcon: Icon(
+        LucideIcons.fileText,
+        size: 22,
+        color: AppColors.primary,
+      ),
+      label: 'الفواتير',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.creditCard, size: 22),
+      selectedIcon: Icon(
+        LucideIcons.creditCard,
+        size: 22,
+        color: AppColors.primary,
+      ),
+      label: 'المدفوعات',
+    ),
+  ];
+
+  // ── Sales Manager: الرئيسية | الفواتير
+  static const _salesManagerDestinations = [
+    NavigationDestination(
+      icon: Icon(LucideIcons.home, size: 22),
+      selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary),
+      label: 'الرئيسية',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.fileText, size: 22),
+      selectedIcon: Icon(
+        LucideIcons.fileText,
+        size: 22,
+        color: AppColors.primary,
+      ),
+      label: 'الفواتير',
     ),
   ];
 }

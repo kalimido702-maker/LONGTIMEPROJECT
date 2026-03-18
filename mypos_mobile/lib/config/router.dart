@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../screens/login_screen.dart';
 import '../screens/home_screen.dart';
@@ -57,8 +58,10 @@ GoRouter createRouter(AuthProvider authProvider) {
             path: '/invoices',
             pageBuilder: (context, state) {
               final filterId = state.uri.queryParameters['filterId'];
+              final user = context.read<AuthProvider>().user;
+              final isGM = user?.isGeneralManager ?? false;
               return NoTransitionPage(
-                child: InvoicesScreen(filterId: filterId),
+                child: InvoicesScreen(filterId: filterId, defaultCurrentMonth: isGM),
               );
             },
             routes: [
@@ -75,8 +78,10 @@ GoRouter createRouter(AuthProvider authProvider) {
             path: '/payments',
             pageBuilder: (context, state) {
               final filterId = state.uri.queryParameters['filterId'];
+              final user = context.read<AuthProvider>().user;
+              final isGM = user?.isGeneralManager ?? false;
               return NoTransitionPage(
-                child: PaymentsScreen(filterId: filterId),
+                child: PaymentsScreen(filterId: filterId, defaultCurrentMonth: isGM),
               );
             },
           ),

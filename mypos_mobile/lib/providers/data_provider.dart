@@ -32,6 +32,7 @@ class DataProvider extends ChangeNotifier {
   int _totalReturns = 0;
   double _totalReturnAmount = 0;
   double _totalCustomersBalance = 0;
+  double _paymentsFilteredTotal = 0;
 
   // Customer info (for customer role)
   Map<String, dynamic>? _customerInfo;
@@ -64,6 +65,7 @@ class DataProvider extends ChangeNotifier {
   int get totalReturns => _totalReturns;
   double get totalReturnAmount => _totalReturnAmount;
   double get totalCustomersBalance => _totalCustomersBalance;
+  double get paymentsFilteredTotal => _paymentsFilteredTotal > 0 ? _paymentsFilteredTotal : _totalPaymentAmount;
   Map<String, dynamic>? get customerInfo => _customerInfo;
   bool get hasMoreInvoices => _hasMoreInvoices;
   bool get hasMorePayments => _hasMorePayments;
@@ -226,6 +228,12 @@ class DataProvider extends ChangeNotifier {
 
       _paymentPage++;
       _hasMorePayments = _paymentPage <= (_toInt(pagination['pages']) > 0 ? _toInt(pagination['pages']) : 1);
+
+      // Store server-side total for accurate display
+      final totals = response['totals'] as Map<String, dynamic>? ?? {};
+      if (refresh) {
+        _paymentsFilteredTotal = _toDouble(totals['total_amount']);
+      }
 
       _isLoading = false;
       notifyListeners();
