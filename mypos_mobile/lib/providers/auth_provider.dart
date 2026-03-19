@@ -17,11 +17,13 @@ class AuthProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
   bool _isLoggedIn = false;
+  List<Map<String, dynamic>> _linkedProfiles = [];
 
   User? get user => _user;
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get isLoggedIn => _isLoggedIn;
+  List<Map<String, dynamic>> get linkedProfiles => _linkedProfiles;
 
   Future<void> _handleSessionExpired() async {
     await _api.clearTokens();
@@ -50,6 +52,9 @@ class AuthProvider extends ChangeNotifier {
 
         // Register FCM token after auto-login
         NotificationService().registerToken();
+
+        // Load linked profiles in background
+        loadLinkedProfiles().catchError((_) {});
 
         return true;
       }
@@ -119,6 +124,9 @@ class AuthProvider extends ChangeNotifier {
       // Register FCM token after login
       NotificationService().registerToken();
 
+      // Load linked profiles in background
+      loadLinkedProfiles().catchError((_) {});
+
       return true;
     } catch (e) {
       _isLoading = false;
@@ -137,6 +145,51 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> loadLinkedProfiles() async {
+    try {
+      final response = await _api.getLinkedProfiles();
+      _linkedProfiles = List<Map<String, dynamic>>.from(response['data'] ?? []);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Failed to load linked profiles: $e');
+    }
+  }
+
+  Future<bool> switchProfile(String targetUserId) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final response = await _api.switchProfile(targetUserId);
+
+      final accessToken = response['accessToken'];
+      final refreshToken = response['refreshToken'];
+      final userData = response['user'];
+
+      await _api.saveTokens(accessToken, refreshToken);
+      await _storage.write(key: 'user_data', value: json.encode(userData));
+
+      _user = User.fromJson(userData);
+      _isLoading = false;
+      
+      // Reload linked profiles after switch
+      await loadLinkedProfiles();
+      
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _isLoading = false;
+      if (e.toString().contains('403')) {
+        _error = 'غير مصرح لك بالتبديل لهذا الحساب';
+      } else {
+        _error = 'حدث خطأ أثناء تبديل الحساب';
+      }
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<void> logout() async {
     try {
       await NotificationService().unregisterToken();
@@ -146,6 +199,7 @@ class AuthProvider extends ChangeNotifier {
     _user = null;
     _isLoggedIn = false;
     _error = null;
+    _linkedProfiles = [];
     notifyListeners();
   }
 

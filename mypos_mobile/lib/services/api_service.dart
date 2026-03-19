@@ -305,6 +305,21 @@ class ApiService {
     return response.data;
   }
 
+  /// Get all linked profiles (parent + siblings) for current user
+  Future<Map<String, dynamic>> getLinkedProfiles() async {
+    final response = await _dio.get('/mobile/linked-profiles');
+    return response.data;
+  }
+
+  /// Switch active profile to a linked account
+  Future<Map<String, dynamic>> switchProfile(String targetUserId) async {
+    final response = await _dio.post(
+      '/auth/switch-profile',
+      data: {'targetUserId': targetUserId},
+    );
+    return response.data;
+  }
+
   /// Update user profile (e.g. username)
   Future<Map<String, dynamic>> updateProfile({required String username}) async {
     final response = await _dio.put(

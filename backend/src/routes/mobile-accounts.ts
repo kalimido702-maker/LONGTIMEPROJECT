@@ -23,6 +23,7 @@ interface CreateAccountBody {
   entityId: string;
   username?: string;  // optional, defaults to phone number
   password?: string;  // optional, defaults to phone number
+  parentUserId?: string; // optional, links this account as a sub-account
 }
 
 interface BulkCreateAccountBody {
@@ -34,6 +35,7 @@ interface BulkCreateAccountBody {
 interface UpdateAccountBody {
   password?: string;
   isActive?: boolean;
+  parentUserId?: string | null;
 }
 
 interface BulkActionBody {
@@ -134,11 +136,13 @@ export async function mobileAccountRoutes(server: FastifyInstance) {
           `SELECT 
             u.id, u.username, u.full_name, u.phone, u.role, u.is_active,
             u.linked_customer_id, u.linked_sales_rep_id, u.linked_supervisor_id,
+            u.parent_user_id, p.full_name as parent_name,
             u.account_source, u.created_at, u.last_login_at,
             c.name as customer_name, c.phone as customer_phone, c.balance as customer_balance,
             sr.name as sales_rep_name, sr.phone as sales_rep_phone,
             sv.name as supervisor_name, sv.phone as supervisor_phone
           FROM users u
+          LEFT JOIN users p ON u.parent_user_id = p.id
           LEFT JOIN customers c ON u.linked_customer_id = c.id
           LEFT JOIN sales_reps sr ON u.linked_sales_rep_id = sr.id
           LEFT JOIN supervisors sv ON u.linked_supervisor_id = sv.id
@@ -375,9 +379,9 @@ export async function mobileAccountRoutes(server: FastifyInstance) {
 
         // Create user record
         await db.query(
-          `INSERT INTO users (id, client_id, branch_id, username, password_hash, full_name, phone, role, is_active, account_source, ${linkColumn})
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, 'mobile_admin', ?)`,
-          [newUserId, clientId, branchId, username, passwordHash, entityName, entityPhone, userRole, entityId]
+          `INSERT INTO users (id, client_id, branch_id, username, password_hash, full_name, phone, role, is_active, account_source, ${linkColumn}, parent_user_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, 'mobile_admin', ?, ?)`,
+          [newUserId, clientId, branchId, username, passwordHash, entityName, entityPhone, userRole, entityId, body.parentUserId || null]
         );
 
         logger.info(
@@ -401,6 +405,133 @@ export async function mobileAccountRoutes(server: FastifyInstance) {
       } catch (error) {
         logger.error({ error }, "Failed to create mobile account");
         return reply.code(500).send({ error: "Failed to create mobile account" });
+      }
+    }
+  );
+
+  // ============================================================
+  // GET /api/mobile/accounts/roles
+  // List available roles for standalone account creation
+  // ============================================================
+  server.get(
+    "/roles",
+    { preHandler: [server.authenticate] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { clientId, role } = request.user!;
+        if (!requireAdmin(role, reply)) return;
+
+        const [roles] = await db.query<RowDataPacket[]>(
+          "SELECT id, name, name_en FROM roles WHERE client_id = ? AND is_deleted = 0 ORDER BY name",
+          [clientId]
+        );
+
+        return reply.code(200).send({ data: roles });
+      } catch (error) {
+        logger.error({ error }, "Failed to fetch roles");
+        return reply.code(500).send({ error: "Failed to fetch roles" });
+      }
+    }
+  );
+
+  // ============================================================
+  // POST /api/mobile/accounts/standalone
+  // Create a standalone mobile account (not linked to entity)
+  // For admin/management roles like general_manager, sales_manager
+  // ============================================================
+  server.post(
+    "/standalone",
+    { preHandler: [server.authenticate] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { userId, clientId, branchId, role } = request.user!;
+        if (!requireAdmin(role, reply)) return;
+
+        const body = request.body as {
+          fullName: string;
+          phone?: string;
+          username: string;
+          password: string;
+          roleId: string;
+          parentUserId?: string;
+        };
+
+        const { fullName, phone, username, password, roleId, parentUserId } = body;
+
+        if (!fullName || !username || !password || !roleId) {
+          return reply.code(400).send({
+            error: "fullName, username, password, and roleId are required",
+          });
+        }
+
+        if (username.length < 2) {
+          return reply.code(400).send({ error: "Username must be at least 2 characters" });
+        }
+
+        if (password.length < 4) {
+          return reply.code(400).send({ error: "Password must be at least 4 characters" });
+        }
+
+        // Check username uniqueness
+        const [usernameCheck] = await db.query<RowDataPacket[]>(
+          "SELECT id FROM users WHERE username = ? AND is_deleted = 0",
+          [username]
+        );
+        if (usernameCheck.length > 0) {
+          return reply.code(409).send({
+            error: "Username already taken",
+            message: `اسم المستخدم "${username}" مستخدم بالفعل. اختر اسم آخر.`,
+          });
+        }
+
+        // Verify role exists
+        const [roleCheck] = await db.query<RowDataPacket[]>(
+          "SELECT id, name, name_en FROM roles WHERE id = ? AND client_id = ? AND is_deleted = 0",
+          [roleId, clientId]
+        );
+        if (roleCheck.length === 0) {
+          return reply.code(404).send({ error: "Role not found" });
+        }
+
+        // If parentUserId provided, verify it exists in the same client
+        if (parentUserId) {
+          const [parentCheck] = await db.query<RowDataPacket[]>(
+            "SELECT id FROM users WHERE id = ? AND client_id = ? AND is_deleted = 0",
+            [parentUserId, clientId]
+          );
+          if (parentCheck.length === 0) {
+            return reply.code(404).send({ error: "Parent user not found" });
+          }
+        }
+
+        const passwordHash = await bcrypt.hash(password, 10);
+        const newUserId = randomUUID();
+        const roleName = roleCheck[0].name;
+
+        await db.query(
+          `INSERT INTO users (id, client_id, branch_id, username, password_hash, full_name, phone, role, is_active, account_source, parent_user_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, 'mobile_admin', ?)`,
+          [newUserId, clientId, branchId, username, passwordHash, fullName, phone || '', roleName, parentUserId || null]
+        );
+
+        logger.info(
+          { username, newUserId, role: roleName },
+          "Standalone mobile account created"
+        );
+
+        return reply.code(201).send({
+          data: {
+            id: newUserId,
+            username,
+            fullName,
+            phone: phone || '',
+            role: roleName,
+          },
+          message: `تم إنشاء الحساب بنجاح - اسم المستخدم: ${username}`,
+        });
+      } catch (error) {
+        logger.error({ error }, "Failed to create standalone account");
+        return reply.code(500).send({ error: "Failed to create standalone account" });
       }
     }
   );
@@ -560,6 +691,26 @@ export async function mobileAccountRoutes(server: FastifyInstance) {
         if (typeof body.isActive === 'boolean') {
           updates.push("is_active = ?");
           params.push(body.isActive);
+        }
+
+        if (body.parentUserId !== undefined) {
+          if (body.parentUserId === null || body.parentUserId === '' || body.parentUserId === 'none') {
+            updates.push("parent_user_id = NULL");
+          } else {
+            // Verify parent exists in same client
+            const [parentCheck] = await db.query<RowDataPacket[]>(
+              "SELECT id FROM users WHERE id = ? AND client_id = ? AND is_deleted = 0",
+              [body.parentUserId, clientId]
+            );
+            if (parentCheck.length === 0) {
+              return reply.code(404).send({ error: "الحساب الرئيسي غير موجود" });
+            }
+            if (body.parentUserId === id) {
+              return reply.code(400).send({ error: "لا يمكن ربط الحساب بنفسه" });
+            }
+            updates.push("parent_user_id = ?");
+            params.push(body.parentUserId);
+          }
         }
 
         if (updates.length === 0) {

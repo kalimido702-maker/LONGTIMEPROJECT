@@ -21,6 +21,10 @@ const migrations: Migration[] = [
     name: "021_add_missing_product_payment_fields",
     path: join(__dirname, "migrations", "021_add_missing_product_payment_fields.sql"),
   },
+  {
+    name: "031_sub_accounts",
+    path: join(__dirname, "migrations", "031_sub_accounts.sql"),
+  },
   // Add more migrations here
 ];
 

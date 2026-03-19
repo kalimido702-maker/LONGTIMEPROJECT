@@ -54,6 +54,8 @@ import {
   AlertCircle,
   Ban,
   Power,
+  UserPlus,
+  Link2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { getFastifyClient } from "@/infrastructure/http/FastifyClient";
@@ -69,6 +71,8 @@ interface MobileAccount {
   linked_customer_id?: string;
   linked_sales_rep_id?: string;
   linked_supervisor_id?: string;
+  parent_user_id?: string;
+  parent_name?: string;
   account_source: string;
   created_at: string;
   last_login_at?: string;
@@ -133,7 +137,26 @@ const MobileAccounts = () => {
   const [selectedEntity, setSelectedEntity] = useState<AvailableEntity | null>(null);
   const [customUsername, setCustomUsername] = useState("");
   const [customPassword, setCustomPassword] = useState("");
+  const [selectedParentId, setSelectedParentId] = useState<string>("");
+  const [parentAccounts, setParentAccounts] = useState<MobileAccount[]>([]);
   const [creating, setCreating] = useState(false);
+
+  // Standalone account dialog
+  const [standaloneDialogOpen, setStandaloneDialogOpen] = useState(false);
+  const [standaloneFullName, setStandaloneFullName] = useState("");
+  const [standalonePhone, setStandalonePhone] = useState("");
+  const [standaloneUsername, setStandaloneUsername] = useState("");
+  const [standalonePassword, setStandalonePassword] = useState("");
+  const [standaloneRoleId, setStandaloneRoleId] = useState("");
+  const [standaloneParentId, setStandaloneParentId] = useState("");
+  const [availableRoles, setAvailableRoles] = useState<{id: string; name: string; name_en?: string}[]>([]);
+  const [creatingStandalone, setCreatingStandalone] = useState(false);
+
+  // Link account dialog
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [linkAccount, setLinkAccount] = useState<MobileAccount | null>(null);
+  const [linkParentId, setLinkParentId] = useState<string>("");
+  const [linkSaving, setLinkSaving] = useState(false);
 
   // Reset password dialog
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
@@ -219,6 +242,28 @@ const MobileAccounts = () => {
     }
   }, []);
 
+  const loadParentAccounts = useCallback(async () => {
+    try {
+      const httpClient = getFastifyClient();
+      const response = await httpClient.get<any>(
+        `/api/mobile/accounts?limit=200`
+      );
+      setParentAccounts(response.data || []);
+    } catch (error) {
+      console.error("Failed to load parent accounts:", error);
+    }
+  }, []);
+
+  const loadRoles = useCallback(async () => {
+    try {
+      const httpClient = getFastifyClient();
+      const response = await httpClient.get<any>(`/api/mobile/accounts/roles`);
+      setAvailableRoles(response.data || []);
+    } catch (error) {
+      console.error("Failed to load roles:", error);
+    }
+  }, []);
+
   useEffect(() => {
     setCurrentPage(1);
     loadAccounts(1);
@@ -234,14 +279,101 @@ const MobileAccounts = () => {
     setSelectedEntity(null);
     setCustomUsername("");
     setCustomPassword("");
+    setSelectedParentId("");
     setAvailableSearch("");
     setCreateDialogOpen(true);
     loadAvailableEntities(type);
+    loadParentAccounts();
   };
 
   const handleSearchAvailable = (search: string) => {
     setAvailableSearch(search);
     loadAvailableEntities(createEntityType, search);
+  };
+
+  const openLinkDialog = (account: MobileAccount) => {
+    setLinkAccount(account);
+    setLinkParentId(account.parent_user_id || "none");
+    setLinkDialogOpen(true);
+    loadParentAccounts();
+  };
+
+  const handleLinkAccount = async () => {
+    if (!linkAccount) return;
+
+    try {
+      setLinkSaving(true);
+      const httpClient = getFastifyClient();
+      await httpClient.put(`/api/mobile/accounts/${linkAccount.id}`, {
+        parentUserId: linkParentId && linkParentId !== 'none' ? linkParentId : null,
+      });
+
+      toast({
+        title: "تم بنجاح",
+        description: linkParentId && linkParentId !== 'none'
+          ? `تم ربط ${linkAccount.full_name} كحساب فرعي`
+          : `تم فك ربط ${linkAccount.full_name}`,
+      });
+
+      setLinkDialogOpen(false);
+      loadAccounts();
+    } catch (error: any) {
+      const msg = error.response?.data?.error || "فشل في تحديث الربط";
+      toast({ title: "خطأ", description: msg, variant: "destructive" });
+    } finally {
+      setLinkSaving(false);
+    }
+  };
+
+  const openStandaloneDialog = () => {
+    setStandaloneFullName("");
+    setStandalonePhone("");
+    setStandaloneUsername("");
+    setStandalonePassword("");
+    setStandaloneRoleId("");
+    setStandaloneParentId("");
+    setStandaloneDialogOpen(true);
+    loadRoles();
+    loadParentAccounts();
+  };
+
+  const handleCreateStandalone = async () => {
+    if (!standaloneFullName || !standaloneUsername || !standalonePassword || !standaloneRoleId) return;
+
+    try {
+      setCreatingStandalone(true);
+      const httpClient = getFastifyClient();
+      const body: any = {
+        fullName: standaloneFullName,
+        phone: standalonePhone,
+        username: standaloneUsername,
+        password: standalonePassword,
+        roleId: standaloneRoleId,
+      };
+      if (standaloneParentId && standaloneParentId !== 'none') {
+        body.parentUserId = standaloneParentId;
+      }
+
+      const response = await httpClient.post<any>("/api/mobile/accounts/standalone", body);
+
+      toast({
+        title: "تم بنجاح",
+        description: response.message || "تم إنشاء الحساب الإداري بنجاح",
+      });
+
+      setStandaloneDialogOpen(false);
+      loadAccounts();
+      loadStats();
+    } catch (error: any) {
+      const msg = error.response?.data?.message || error.response?.data?.error || "فشل في إنشاء الحساب";
+      toast({
+        title: "خطأ",
+        description: msg,
+        variant: "destructive",
+      });
+    } finally {
+      setCreatingStandalone(false);
+    }
   };
 
   const handleCreateAccount = async () => {
@@ -256,6 +388,7 @@ const MobileAccounts = () => {
       };
       if (customUsername) body.username = customUsername;
       if (customPassword) body.password = customPassword;
+      if (selectedParentId && selectedParentId !== 'none') body.parentUserId = selectedParentId;
 
       const response = await httpClient.post<any>("/api/mobile/accounts", body);
 
@@ -490,6 +623,15 @@ const MobileAccounts = () => {
         return <Badge className="bg-blue-100 text-blue-700"><UserCheck className="h-3 w-3 ml-1" />مندوب</Badge>;
       case 'supervisor':
         return <Badge className="bg-purple-100 text-purple-700"><Shield className="h-3 w-3 ml-1" />مشرف</Badge>;
+      case 'general_manager':
+      case 'مدير عام':
+        return <Badge className="bg-amber-100 text-amber-700"><Shield className="h-3 w-3 ml-1" />مدير عام</Badge>;
+      case 'sales_manager':
+      case 'مسؤول مبيعات':
+        return <Badge className="bg-teal-100 text-teal-700"><UserCheck className="h-3 w-3 ml-1" />مسؤول مبيعات</Badge>;
+      case 'admin':
+      case 'مدير النظام':
+        return <Badge className="bg-red-100 text-red-700"><Shield className="h-3 w-3 ml-1" />مدير النظام</Badge>;
       default:
         return <Badge>{role}</Badge>;
     }
@@ -583,6 +725,10 @@ const MobileAccounts = () => {
           <Button onClick={() => openCreateDialog('supervisor')} variant="outline" className="gap-1">
             <Plus className="h-4 w-4" />
             إنشاء حساب مشرف
+          </Button>
+          <Button onClick={openStandaloneDialog} variant="outline" className="gap-1 border-primary text-primary hover:bg-primary/5">
+            <UserPlus className="h-4 w-4" />
+            إنشاء حساب إداري
           </Button>
           <div className="flex-1" />
           <Button
@@ -711,7 +857,12 @@ const MobileAccounts = () => {
                           aria-label={`تحديد ${account.full_name}`}
                         />
                       </TableCell>
-                      <TableCell className="font-medium">{getEntityName(account)}</TableCell>
+                      <TableCell className="font-medium">
+                        {getEntityName(account)}
+                        {account.parent_name && (
+                          <span className="text-xs text-muted-foreground block">فرعي من: {account.parent_name}</span>
+                        )}
+                      </TableCell>
                       <TableCell className="font-mono text-sm">{account.username}</TableCell>
                       <TableCell>{getRoleBadge(account.role)}</TableCell>
                       <TableCell dir="ltr" className="text-right">{account.phone}</TableCell>
@@ -754,6 +905,14 @@ const MobileAccounts = () => {
                             ) : (
                               <CheckCircle className="h-4 w-4 text-green-500" />
                             )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="ربط كحساب فرعي"
+                            onClick={() => openLinkDialog(account)}
+                          >
+                            <Link2 className="h-4 w-4 text-blue-500" />
                           </Button>
                           <Button
                             variant="ghost"
@@ -949,6 +1108,27 @@ const MobileAccounts = () => {
                     />
                   </div>
                 </div>
+
+                {/* Parent Account (Sub-Account) Selector */}
+                <div>
+                  <Label>حساب فرعي تابع لـ (اختياري)</Label>
+                  <Select value={selectedParentId} onValueChange={setSelectedParentId}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="بدون - حساب مستقل" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">بدون - حساب مستقل</SelectItem>
+                      {parentAccounts.map((acc) => (
+                        <SelectItem key={acc.id} value={acc.id}>
+                          {acc.full_name} ({acc.username}) - {acc.role === 'customer' ? 'عميل' : acc.role === 'sales_rep' ? 'مندوب' : acc.role === 'supervisor' ? 'مشرف' : acc.role}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    اختر حساب رئيسي إذا أردت ربط هذا الحساب كحساب فرعي
+                  </p>
+                </div>
               </div>
             )}
           </div>
@@ -998,6 +1178,170 @@ const MobileAccounts = () => {
             </Button>
             <Button onClick={handleResetPassword} disabled={!newPassword}>
               تغيير كلمة المرور
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ============================================ */}
+      {/* Link Account Dialog */}
+      {/* ============================================ */}
+      <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              <Link2 className="h-5 w-5 inline ml-2" />
+              ربط حساب فرعي
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              ربط <span className="font-medium text-foreground">{linkAccount?.full_name}</span> كحساب فرعي تابع لحساب آخر، أو فك الربط.
+            </p>
+
+            {linkAccount?.parent_name && (
+              <div className="bg-blue-50 border border-blue-200 p-3 rounded-md text-sm">
+                مرتبط حالياً بـ: <span className="font-medium">{linkAccount.parent_name}</span>
+              </div>
+            )}
+
+            <div>
+              <Label>الحساب الرئيسي</Label>
+              <Select value={linkParentId} onValueChange={setLinkParentId}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="بدون - حساب مستقل" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">بدون - حساب مستقل (فك الربط)</SelectItem>
+                  {parentAccounts
+                    .filter((acc) => acc.id !== linkAccount?.id)
+                    .map((acc) => (
+                      <SelectItem key={acc.id} value={acc.id}>
+                        {acc.full_name} ({acc.username}) - {acc.role === 'customer' ? 'عميل' : acc.role === 'sales_rep' ? 'مندوب' : acc.role === 'supervisor' ? 'مشرف' : acc.role}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLinkDialogOpen(false)}>
+              إلغاء
+            </Button>
+            <Button onClick={handleLinkAccount} disabled={linkSaving}>
+              {linkSaving ? "جاري الحفظ..." : "حفظ الربط"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ============================================ */}
+      {/* Standalone Account Dialog */}
+      {/* ============================================ */}
+      <Dialog open={standaloneDialogOpen} onOpenChange={setStandaloneDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              <UserPlus className="h-5 w-5 inline ml-2" />
+              إنشاء حساب إداري
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              أنشئ حساب موبايل مستقل غير مرتبط بعميل أو مندوب أو مشرف. مناسب لأدوار مثل مدير عام أو مسؤول مبيعات.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <Label>الاسم الكامل <span className="text-red-500">*</span></Label>
+                <Input
+                  value={standaloneFullName}
+                  onChange={(e) => setStandaloneFullName(e.target.value)}
+                  placeholder="مثال: محمود عبود"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label>رقم الهاتف</Label>
+                <Input
+                  value={standalonePhone}
+                  onChange={(e) => setStandalonePhone(e.target.value)}
+                  placeholder="01xxxxxxxxx"
+                  dir="ltr"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label>الدور <span className="text-red-500">*</span></Label>
+                <Select value={standaloneRoleId} onValueChange={setStandaloneRoleId}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="اختر الدور" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableRoles.map((r) => (
+                      <SelectItem key={r.id} value={r.id}>
+                        {r.name} {r.name_en ? `(${r.name_en})` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>اسم المستخدم <span className="text-red-500">*</span></Label>
+                <Input
+                  value={standaloneUsername}
+                  onChange={(e) => setStandaloneUsername(e.target.value)}
+                  placeholder="مثال: admin2"
+                  dir="ltr"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label>كلمة المرور <span className="text-red-500">*</span></Label>
+                <Input
+                  value={standalonePassword}
+                  onChange={(e) => setStandalonePassword(e.target.value)}
+                  placeholder="أدخل كلمة المرور"
+                  dir="ltr"
+                  className="mt-1"
+                />
+              </div>
+            </div>
+
+            {/* Parent Account Selector */}
+            <div>
+              <Label>حساب فرعي تابع لـ (اختياري)</Label>
+              <Select value={standaloneParentId} onValueChange={setStandaloneParentId}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="بدون - حساب مستقل" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">بدون - حساب مستقل</SelectItem>
+                  {parentAccounts.map((acc) => (
+                    <SelectItem key={acc.id} value={acc.id}>
+                      {acc.full_name} ({acc.username}) - {acc.role === 'customer' ? 'عميل' : acc.role === 'sales_rep' ? 'مندوب' : acc.role === 'supervisor' ? 'مشرف' : acc.role}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                اختر حساب رئيسي إذا أردت ربط هذا الحساب كحساب فرعي
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStandaloneDialogOpen(false)}>
+              إلغاء
+            </Button>
+            <Button
+              onClick={handleCreateStandalone}
+              disabled={!standaloneFullName || !standaloneUsername || !standalonePassword || !standaloneRoleId || creatingStandalone}
+            >
+              {creatingStandalone ? "جاري الإنشاء..." : "إنشاء الحساب"}
             </Button>
           </DialogFooter>
         </DialogContent>

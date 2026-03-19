@@ -74,12 +74,12 @@ export async function mobileRoutes(server: FastifyInstance) {
         WHERE sr.supervisor_id = ? AND c.client_id = ? AND c.is_deleted = 0
       )`);
       params.push(user.linked_supervisor_id, clientId);
-    } else if (!['admin', 'super_admin', 'owner'].includes(user.role)) {
+    } else if (!['admin', 'super_admin', 'owner', 'general_manager', 'sales_manager'].includes(user.role)) {
       // General employees (like accountants, managers, etc.) who are NOT linked to a specific entity
       // should see all data, just like admins. The mobile app UI handles showing/hiding tabs
       // based on their permissions, but the API should return the data if requested.
     }
-    // Admins and general unlinked employees see everything (no conditions added)
+    // Admins, general_manager, sales_manager, and general unlinked employees see everything (no conditions added)
 
     return { conditions, params };
   }
@@ -1124,8 +1124,8 @@ export async function mobileRoutes(server: FastifyInstance) {
               params.push(users[0].linked_supervisor_id, clientId);
             }
           }
-        } else if (role === 'admin') {
-          // Admin: optionally filter by sales_rep_id or supervisor_id
+        } else if (role === 'admin' || role === 'general_manager') {
+          // Admin/General Manager: optionally filter by sales_rep_id or supervisor_id
           if (sales_rep_id) {
             whereConditions.push("c.sales_rep_id = ?");
             params.push(sales_rep_id);
@@ -1220,9 +1220,15 @@ export async function mobileRoutes(server: FastifyInstance) {
             whereConditions.push("1 = 0");
           }
         } else if (role === 'admin' && supervisor_id) {
-          // Admin filtering by a specific supervisor
+          // Admin/General Manager filtering by a specific supervisor
           whereConditions.push("sr.supervisor_id = ?");
           params.push(supervisor_id);
+        } else if (role === 'general_manager') {
+          // General Manager: optionally filter by supervisor
+          if (supervisor_id) {
+            whereConditions.push("sr.supervisor_id = ?");
+            params.push(supervisor_id);
+          }
         }
         // admin without supervisor_id filter: sees all sales reps
 
@@ -1288,8 +1294,8 @@ export async function mobileRoutes(server: FastifyInstance) {
         const { userId, clientId, branchId, role } = request.user!;
         const offset = (page - 1) * limit;
 
-        if (role !== 'admin') {
-          // Only admins can list supervisors
+        if (role !== 'admin' && role !== 'general_manager') {
+          // Only admins and general managers can list supervisors
           return reply.code(200).send({ data: [], pagination: { page: 1, limit, total: 0, pages: 0 } });
         }
 
@@ -1480,7 +1486,7 @@ export async function mobileRoutes(server: FastifyInstance) {
             params.push(userId);
           }
         } else {
-          // admin / super_admin: see all notifications for this client
+          // admin / super_admin / general_manager / sales_manager: see all notifications for this client
           // No additional filtering needed (already filtered by client_id)
         }
 
@@ -1647,5 +1653,63 @@ export async function mobileRoutes(server: FastifyInstance) {
     }
   );
 
+
+  // ============================================================
+  // GET /api/mobile/linked-profiles
+  // Returns all accounts in the same family (parent + siblings)
+  // ============================================================
+  server.get(
+    "/linked-profiles",
+    { preHandler: [server.authenticate] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { userId, clientId } = request.user!;
+
+        // Find the logged-in user's parent_user_id
+        const [selfRows] = await db.query<RowDataPacket[]>(
+          "SELECT id, parent_user_id FROM users WHERE id = ? AND client_id = ? AND is_deleted = 0",
+          [userId, clientId]
+        );
+
+        if (selfRows.length === 0) {
+          return reply.code(404).send({ error: "User not found" });
+        }
+
+        const self = selfRows[0];
+        const parentId = self.parent_user_id || self.id; // If no parent, I am the parent
+
+        // Get parent + all children with same parent_user_id
+        const [profiles] = await db.query<RowDataPacket[]>(
+          `SELECT u.id, u.full_name, u.username, u.role, u.is_active, u.parent_user_id,
+                  u.linked_customer_id, u.linked_sales_rep_id, u.linked_supervisor_id
+           FROM users u
+           WHERE u.client_id = ? AND u.is_deleted = 0 AND u.is_active = 1
+             AND (u.id = ? OR u.parent_user_id = ? OR (u.parent_user_id = ? AND u.id != ?))
+           ORDER BY u.parent_user_id IS NULL DESC, u.full_name ASC`,
+          [clientId, parentId, parentId, self.parent_user_id, userId]
+        );
+
+        // Only return if there's more than 1 profile (including self)
+        const uniqueProfiles = profiles.filter(
+          (p, i, arr) => arr.findIndex(x => x.id === p.id) === i
+        );
+
+        return reply.code(200).send({
+          data: uniqueProfiles.map(p => ({
+            id: p.id,
+            fullName: p.full_name,
+            username: p.username,
+            role: p.role,
+            isActive: p.is_active,
+            isParent: !p.parent_user_id,
+            isCurrent: p.id === userId,
+          })),
+        });
+      } catch (error) {
+        logger.error({ error }, "Failed to fetch linked profiles");
+        return reply.code(500).send({ error: "Failed to fetch linked profiles" });
+      }
+    }
+  );
 
 }

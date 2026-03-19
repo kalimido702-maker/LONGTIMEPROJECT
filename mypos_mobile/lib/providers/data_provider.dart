@@ -74,6 +74,37 @@ class DataProvider extends ChangeNotifier {
   // ============================================================
   // Dashboard
   // ============================================================
+  void clearData() {
+    _invoices = [];
+    _payments = [];
+    _returns = [];
+    _customers = [];
+    _salesReps = [];
+    _supervisors = [];
+    _accountEntries = [];
+    
+    _totalDebt = 0;
+    _totalPaid = 0;
+    _totalRemaining = 0;
+    _totalInvoices = 0;
+    _totalPayments = 0;
+    _totalPaymentAmount = 0;
+    _totalReturns = 0;
+    _totalReturnAmount = 0;
+    _totalCustomersBalance = 0;
+    _paymentsFilteredTotal = 0;
+    _customerInfo = null;
+    
+    _invoicePage = 1;
+    _paymentPage = 1;
+    _returnPage = 1;
+    _hasMoreInvoices = true;
+    _hasMorePayments = true;
+    _hasMoreReturns = true;
+    
+    notifyListeners();
+  }
+
   Future<void> loadDashboard({String? fromDate, String? toDate}) async {
     _isLoading = true;
     _error = null;

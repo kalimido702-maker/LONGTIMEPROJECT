@@ -4,6 +4,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../config/theme.dart';
+import '../widgets/profile_switcher_widget.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -128,6 +129,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                     : const Text('حفظ التغييرات', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               ),
+              if (context.watch<AuthProvider>().linkedProfiles.length > 1) ...[
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: () => ProfileSwitcherWidget.show(context),
+                  icon: const Icon(Icons.switch_account_outlined),
+                  label: const Text('تبديل الحساب', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    side: const BorderSide(color: AppColors.primary),
+                    foregroundColor: AppColors.primary,
+                  ),
+                ),
+              ],
             ],
           ),
         ),

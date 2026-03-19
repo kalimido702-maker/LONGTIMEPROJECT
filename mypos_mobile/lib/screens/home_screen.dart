@@ -8,6 +8,7 @@ import '../providers/auth_provider.dart';
 import '../providers/data_provider.dart';
 import '../models/user.dart';
 import '../widgets/date_filter_widget.dart';
+import '../widgets/profile_switcher_widget.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -145,6 +146,11 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ),
+          if (context.watch<AuthProvider>().linkedProfiles.length > 1)
+            IconButton(
+              icon: const Icon(Icons.switch_account_outlined, color: AppColors.card),
+              onPressed: () => ProfileSwitcherWidget.show(context),
+            ),
         ],
       ),
       body: RefreshIndicator(
