@@ -256,55 +256,55 @@ export default function Collections() {
     useEffect(() => {
         if (paymentMethods.length > 0 && !selectedPaymentMethodId) {
             const selectDefaultMethod = async () => {
-                let creditMethod = paymentMethods.find((m) => m.type === "credit") ||
-                    paymentMethods.find((m) => m.name.includes("آجل")) ||
-                    paymentMethods.find((m) => m.name.includes("اجل"));
+                // let creditMethod = paymentMethods.find((m) => m.type === "credit") ||
+                    // paymentMethods.find((m) => m.name.includes("آجل")) ||
+                    // paymentMethods.find((m) => m.name.includes("اجل"));
 
                 // إذا لم توجد طريقة دفع "آجل"، قم بإنشائها تلقائياً
-                if (!creditMethod) {
-                    try {
-                        // Re-check from DB directly to avoid race conditions with other components
-                        const allMethods = await db.getAll<PaymentMethod>("paymentMethods");
-                        creditMethod = allMethods.find((m) => m.type === "credit") ||
-                            allMethods.find((m) => m.name.includes("آجل")) ||
-                            allMethods.find((m) => m.name.includes("اجل"));
+                // if (!creditMethod) {
+                //     try {
+                //         // Re-check from DB directly to avoid race conditions with other components
+                //         const allMethods = await db.getAll<PaymentMethod>("paymentMethods");
+                //         creditMethod = allMethods.find((m) => m.type === "credit") ||
+                //             allMethods.find((m) => m.name.includes("آجل")) ||
+                //             allMethods.find((m) => m.name.includes("اجل"));
 
-                        if (!creditMethod) {
-                            const newCreditMethod: PaymentMethod = {
-                                id: `pm_${Date.now()}`,
-                                name: "آجل",
-                                type: "credit",
-                                isActive: true,
-                                createdAt: new Date().toISOString()
-                            };
-                            await db.add("paymentMethods", newCreditMethod);
-                            creditMethod = newCreditMethod;
+                //         if (!creditMethod) {
+                //             const newCreditMethod: PaymentMethod = {
+                //                 id: `pm_${Date.now()}`,
+                //                 name: "آجل",
+                //                 type: "credit",
+                //                 isActive: true,
+                //                 createdAt: new Date().toISOString()
+                //             };
+                //             await db.add("paymentMethods", newCreditMethod);
+                //             creditMethod = newCreditMethod;
 
-                            // تحديث القائمة
-                            setPaymentMethods(prev => [...prev, newCreditMethod]);
-                        }
-                    } catch (error) {
-                        console.error("Failed to auto-create credit payment method:", error);
-                        // If creation failed (e.g., uniqueness), try to find existing one from DB
-                        try {
-                            const allMethods = await db.getAll<PaymentMethod>("paymentMethods");
-                            creditMethod = allMethods.find((m) => m.type === "credit") ||
-                                allMethods.find((m) => m.name.includes("آجل")) ||
-                                allMethods.find((m) => m.name.includes("اجل"));
-                        } catch {}
-                    }
-                }
+                //             // تحديث القائمة
+                //             setPaymentMethods(prev => [...prev, newCreditMethod]);
+                //         }
+                //     } catch (error) {
+                //         console.error("Failed to auto-create credit payment method:", error);
+                //         // If creation failed (e.g., uniqueness), try to find existing one from DB
+                //         try {
+                //             const allMethods = await db.getAll<PaymentMethod>("paymentMethods");
+                //             creditMethod = allMethods.find((m) => m.type === "credit") ||
+                //                 allMethods.find((m) => m.name.includes("آجل")) ||
+                //                 allMethods.find((m) => m.name.includes("اجل"));
+                //         } catch {}
+                //     }
+                // }
 
-                if (creditMethod) {
-                    setSelectedPaymentMethodId(creditMethod.id);
-                } else {
-                    const cashMethod = paymentMethods.find((m) => m.type === "cash");
-                    if (cashMethod) {
-                        setSelectedPaymentMethodId(cashMethod.id);
-                    } else {
-                        setSelectedPaymentMethodId(paymentMethods[0].id);
-                    }
-                }
+                // if (creditMethod) {
+                //     setSelectedPaymentMethodId(creditMethod.id);
+                // } else {
+                //     const cashMethod = paymentMethods.find((m) => m.type === "cash");
+                //     if (cashMethod) {
+                //         setSelectedPaymentMethodId(cashMethod.id);
+                //     } else {
+                //         setSelectedPaymentMethodId(paymentMethods[0].id);
+                //     }
+                // }
             };
 
             selectDefaultMethod();

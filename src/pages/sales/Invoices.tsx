@@ -49,7 +49,7 @@ import {
     ChevronLeft,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom"; // Import useNavigate
-import { db, Invoice, Customer, PaymentMethod, SalesReturn, SalesReturnItem, Product, Shift, SalesRep } from "@/shared/lib/indexedDB";
+import { db, Invoice, Customer, PaymentMethod, SalesReturn, SalesReturnItem, Product, Shift, SalesRep, ProductCategory, Supervisor } from "@/shared/lib/indexedDB";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -87,6 +87,14 @@ export default function Invoices() {
     // Delivery Status Filter
     const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<string>("all");
 
+    // Supervisor & Category Filters
+    const [supervisorFilter, setSupervisorFilter] = useState<string>("all");
+    const [categoryFilter, setCategoryFilter] = useState<string>("all");
+    const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
+    const [salesReps, setSalesReps] = useState<SalesRep[]>([]);
+    const [categories, setCategories] = useState<ProductCategory[]>([]);
+    const [products, setProducts] = useState<Product[]>([]);
+
     // Pagination
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState<number>(TABLE_SETTINGS.DEFAULT_PAGE_SIZE);
@@ -114,6 +122,18 @@ export default function Invoices() {
 
         const allMethods = await db.getAll<PaymentMethod>("paymentMethods");
         setPaymentMethods(allMethods);
+
+        const allSupervisors = await db.getAll<Supervisor>("supervisors");
+        setSupervisors(allSupervisors);
+
+        const allSalesReps = await db.getAll<SalesRep>("salesReps");
+        setSalesReps(allSalesReps);
+
+        const allCategories = await db.getAll<ProductCategory>("productCategories");
+        setCategories(allCategories);
+
+        const allProducts = await db.getAll<Product>("products");
+        setProducts(allProducts);
     };
 
     const getCustomerName = (customerId?: string) => {
@@ -178,13 +198,46 @@ export default function Invoices() {
                 deliveryStatusFilter === "all" || invoice.deliveryStatus === deliveryStatusFilter ||
                 (deliveryStatusFilter === "not_delivered" && !invoice.deliveryStatus);
 
+            // Supervisor filter — match invoices whose salesRepId belongs to this supervisor
+            let matchesSupervisor = true;
+            if (supervisorFilter !== "all") {
+                const repIdsForSupervisor = salesReps
+                    .filter(r => r.supervisorId === supervisorFilter)
+                    .map(r => r.id);
+                const invoiceRepId = invoice.salesRepId || "";
+                // Also check via customer's salesRepId
+                const customerRepId = invoice.customerId
+                    ? customers.find(c => c.id === invoice.customerId)?.salesRepId || ""
+                    : "";
+                matchesSupervisor = repIdsForSupervisor.includes(invoiceRepId)
+                    || repIdsForSupervisor.includes(customerRepId);
+            }
+
+            // Category filter — match invoices containing at least one product in the category
+            let matchesCategory = true;
+            if (categoryFilter !== "all") {
+                const productIdsInCategory = new Set(
+                    products
+                        .filter(p => {
+                            const catId = String(p.categoryId || (p as any).category_id || "");
+                            return catId === categoryFilter || p.category === categoryFilter;
+                        })
+                        .map(p => p.id)
+                );
+                matchesCategory = invoice.items?.some(
+                    item => productIdsInCategory.has(item.productId)
+                ) || false;
+            }
+
             return (
                 matchesSearch &&
                 matchesDateFrom &&
                 matchesDateTo &&
                 matchesPaymentType &&
                 matchesPaymentStatus &&
-                matchesDeliveryStatus
+                matchesDeliveryStatus &&
+                matchesSupervisor &&
+                matchesCategory
             );
 
         }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -196,12 +249,17 @@ export default function Invoices() {
         paymentTypeFilter,
         paymentStatusFilter,
         deliveryStatusFilter,
+        supervisorFilter,
+        categoryFilter,
+        salesReps,
+        customers,
+        products,
     ]);
 
     // Reset page when filters change
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchQuery, dateFrom, dateTo, paymentTypeFilter, paymentStatusFilter, deliveryStatusFilter]);
+    }, [searchQuery, dateFrom, dateTo, paymentTypeFilter, paymentStatusFilter, deliveryStatusFilter, supervisorFilter, categoryFilter]);
 
     // Pagination calculations
     const totalPages = Math.ceil(filteredInvoices.length / pageSize);
@@ -845,10 +903,42 @@ export default function Invoices() {
                                 </SelectContent>
                             </Select>
                         </div>
+
+                        {/* Supervisor Filter */}
+                        <div className="space-y-1">
+                            <Label className="text-xs">المشرف</Label>
+                            <Select value={supervisorFilter} onValueChange={setSupervisorFilter}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="المشرف" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">جميع المشرفين</SelectItem>
+                                    {supervisors.map((sup) => (
+                                        <SelectItem key={sup.id} value={sup.id}>{sup.name}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {/* Category Filter */}
+                        <div className="space-y-1">
+                            <Label className="text-xs">القسم</Label>
+                            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="القسم" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">جميع الأقسام</SelectItem>
+                                    {categories.map((cat) => (
+                                        <SelectItem key={cat.id} value={cat.id}>{cat.nameAr || cat.name}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
                     </div>
 
                     {/* Clear filters button */}
-                    {(searchQuery || dateFrom || dateTo || paymentTypeFilter !== "all" || paymentStatusFilter !== "all" || deliveryStatusFilter !== "all") && (
+                    {(searchQuery || dateFrom || dateTo || paymentTypeFilter !== "all" || paymentStatusFilter !== "all" || deliveryStatusFilter !== "all" || supervisorFilter !== "all" || categoryFilter !== "all") && (
                         <Button
                             variant="ghost"
                             size="sm"
@@ -860,6 +950,8 @@ export default function Invoices() {
                                 setPaymentTypeFilter("all");
                                 setPaymentStatusFilter("all");
                                 setDeliveryStatusFilter("all");
+                                setSupervisorFilter("all");
+                                setCategoryFilter("all");
                             }}
                         >
                             إزالة الفلاتر

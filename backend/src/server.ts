@@ -42,6 +42,12 @@ import { supervisorRoutes } from "./routes/supervisors.js";
 import { salesRepRoutes } from "./routes/salesReps.js";
 import { mobileRoutes } from "./routes/mobile.js";
 import { mobileAccountRoutes } from "./routes/mobile-accounts.js";
+import { whatsappRoutes } from "./routes/whatsapp.js";
+import {
+  initializeWhatsAppService,
+  shutdownWhatsAppService,
+  setBroadcaster,
+} from "./services/whatsapp/index.js";
 
 const fastify = Fastify({
   logger: logger,
@@ -181,6 +187,11 @@ async function registerRoutes() {
   await fastify.register(adminBranchesRoutes, { prefix: `${env.API_PREFIX}/admin/branches` });
   await fastify.register(adminPackagesRoutes, { prefix: `${env.API_PREFIX}/admin/packages` });
 
+  // WhatsApp routes
+  await fastify.register(whatsappRoutes, {
+    prefix: `${env.API_PREFIX}/whatsapp`,
+  });
+
   // App Updates routes - register under both /api/updates and /api/admin/updates
   await fastify.register(updateRoutes, { prefix: `${env.API_PREFIX}/updates` });
   await fastify.register(updateRoutes, { prefix: `${env.API_PREFIX}/admin/updates` });
@@ -195,6 +206,7 @@ fastify.setErrorHandler(errorHandler);
 async function gracefulShutdown() {
   logger.info("Received shutdown signal, closing server gracefully...");
   try {
+    await shutdownWhatsAppService();
     if (wsSyncServer) {
       await wsSyncServer.shutdown();
     }
@@ -236,6 +248,18 @@ async function start() {
 
     // Initialize WebSocket server
     await initializeWebSocketServer(fastify as any);
+
+    // Initialize WhatsApp service
+    initializeWhatsAppService();
+    setBroadcaster((clientId, event, data) => {
+      if (wsSyncServer) {
+        wsSyncServer.broadcastToClientRooms(String(clientId), {
+          type: event,
+          data,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
 
     // Initialize Firebase for push notifications
     notificationService.initialize();

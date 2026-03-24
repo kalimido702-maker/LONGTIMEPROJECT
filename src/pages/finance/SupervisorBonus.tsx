@@ -1,6 +1,6 @@
 /**
  * SupervisorBonus - صفحة بونص المشرفين
- * لحساب وتطبيق البونص على المشرفين بناءً على مبيعات فريقهم
+ * لحساب وتطبيق البونص على المشرفين بناءً على مدفوعات فريقهم
  */
 import { useState, useEffect, useMemo } from "react";
 import {
@@ -42,13 +42,12 @@ import {
     DollarSign,
     Users,
     Calendar,
-    TrendingUp,
-    Percent,
     UserCheck,
     Trash2,
     Pencil,
     Printer,
-    AlertTriangle,
+    CheckCircle,
+    XCircle,
 } from "lucide-react";
 import { db, Supervisor, SalesRep, Invoice, Product, ProductCategory, Customer } from "@/shared/lib/indexedDB";
 import { useSettingsContext } from "@/contexts/SettingsContext";
@@ -65,18 +64,25 @@ interface SupervisorBonusRecord {
     supervisorName: string;
     periodStart: string;
     periodEnd: string;
-    totalTeamSales: number;
-    bonusPercentage: number;
+    totalPayments: number;
+    totalTeamSales?: number; // backward compat
+    lightingInvoicesTotal?: number;
+    otherDepartmentsValue?: number;
+    lightingBonusPercentage?: number;
+    lightingBonus?: number;
+    otherBonus?: number;
+    bonusPercentage?: number;
     bonusAmount: number;
-    manualBonusAmount?: number; // مبلغ يدوي مضاف بجانب النسبة
-    totalDeposits?: number; // إجمالي إيداعات المشرف خلال الفترة
+    isManual?: boolean;
+    manualBonusAmount?: number;
+    totalDeposits?: number;
     createdAt: string;
     userId: string;
     userName: string;
     notes?: string;
-    salesReps: { id: string; name: string; sales: number }[];
-    invoiceIds?: string[]; // track individual invoices to prevent duplicates
-    byCategorySales?: Record<string, { sales: number; bonus: number; percentage: number }>; // تفصيل المبيعات حسب الأقسام
+    salesReps: { id: string; name: string; payments?: number; lighting?: number; other?: number; sales?: number }[];
+    invoiceIds?: string[];
+    byCategorySales?: Record<string, { sales: number; bonus: number; percentage: number }>;
 }
 
 const SupervisorBonus = () => {
@@ -94,11 +100,10 @@ const SupervisorBonus = () => {
     const [selectedSupervisorId, setSelectedSupervisorId] = useState<string>("");
     const [dateFrom, setDateFrom] = useState<string>("");
     const [dateTo, setDateTo] = useState<string>("");
-    const [useCategoryBonus, setUseCategoryBonus] = useState<boolean>(true);
-    const [bonusPercentage, setBonusPercentage] = useState<string>("5");
     const [notes, setNotes] = useState<string>("");
     const [recentBonuses, setRecentBonuses] = useState<SupervisorBonusRecord[]>([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [isManualMode, setIsManualMode] = useState<boolean>(false);
     const [manualBonusAmount, setManualBonusAmount] = useState<string>("");
     const [collections, setCollections] = useState<any[]>([]);
 
@@ -106,7 +111,7 @@ const SupervisorBonus = () => {
     const [editingBonus, setEditingBonus] = useState<SupervisorBonusRecord | null>(null);
     const [editDialog, setEditDialog] = useState(false);
     const [editNotes, setEditNotes] = useState("");
-    const [editManualAmount, setEditManualAmount] = useState("");
+    const [editBonusAmount, setEditBonusAmount] = useState("");
     const [deleteConfirmDialog, setDeleteConfirmDialog] = useState<string | null>(null);
 
     // Load data on mount
@@ -201,50 +206,42 @@ const SupervisorBonus = () => {
         return salesReps.filter(rep => rep.supervisorId === selectedSupervisorId);
     }, [selectedSupervisorId, salesReps]);
 
-    // Build product -> category name map (always resolve to display name)
-    const productCategoryMap = useMemo(() => {
-        // Build category ID → name lookup
-        const catIdToName: Record<string, string> = {};
+    // Build product -> category info maps
+    const { productCategoryNameMap, productBonusPercentageMap } = useMemo(() => {
+        // Build category lookups by ID
+        const catById: Record<string, ProductCategory> = {};
+        const catByName: Record<string, ProductCategory> = {};
         categories.forEach(c => {
-            catIdToName[String(c.id)] = c.nameAr || c.name || String(c.id);
+            catById[String(c.id)] = c;
+            if (c.name) catByName[c.name] = c;
+            if (c.nameAr) catByName[c.nameAr] = c;
         });
 
-        const map: Record<string, string> = {};
+        const nameMap: Record<string, string> = {};
+        const bonusMap: Record<string, number> = {};
+
         products.forEach(p => {
-            // If product.category is a name (not matching any ID), use it directly
-            // If it looks like an ID or is missing, resolve from categories
             const catName = p.category || "";
             const catId = String(p.categoryId || (p as any).category_id || "");
-            
-            // Check if category field already has a real name (not an ID)
-            if (catName && !catIdToName[catName]) {
-                // It's a real name, use it
-                map[p.id] = catName;
-            } else if (catName && catIdToName[catName]) {
-                // category field contains an ID, resolve it
-                map[p.id] = catIdToName[catName];
-            } else if (catId && catIdToName[catId]) {
-                // Use categoryId to resolve name
-                map[p.id] = catIdToName[catId];
-            } else {
-                map[p.id] = catName || "";
-            }
-        });
-        return map;
-    }, [products, categories]);
 
-    // Build category bonus map
-    const categoryBonusMap = useMemo(() => {
-        const map: Record<string, number> = {};
-        categories.forEach(c => {
-            const bp = Number(c.bonusPercentage) || 0;
-            // Match by name or id
-            map[c.id] = bp;
-            map[c.name] = bp;
-            if (c.nameAr) map[c.nameAr] = bp;
+            // Resolve category object (try by ID first, then by name)
+            let cat: ProductCategory | undefined;
+            if (catId && catById[catId]) {
+                cat = catById[catId];
+            } else if (catName && catById[catName]) {
+                cat = catById[catName]; // category field holds an ID
+            } else if (catName && catByName[catName]) {
+                cat = catByName[catName]; // category field holds a name
+            }
+
+            // Display name
+            nameMap[p.id] = cat ? (cat.nameAr || cat.name || catName) : catName;
+            // Bonus percentage — directly from category object
+            bonusMap[p.id] = cat ? (Number(cat.bonusPercentage) || 0) : 0;
         });
-        return map;
-    }, [categories]);
+
+        return { productCategoryNameMap: nameMap, productBonusPercentageMap: bonusMap };
+    }, [products, categories]);
 
     // Build customer -> salesRepId map for backward compatibility
     const customerSalesRepMap = useMemo(() => {
@@ -257,226 +254,173 @@ const SupervisorBonus = () => {
         return map;
     }, [customers]);
 
-    // Calculate team sales for selected period
+    // Calculate team data for selected period (payment-based)
     const teamSalesData = useMemo(() => {
-        if (!selectedSupervisorId || !dateFrom || !dateTo) {
-            return { total: 0, byRep: [] as { id: string; name: string; sales: number }[], categoryBonus: 0, byCategorySales: {} as Record<string, { sales: number; bonus: number; percentage: number }> };
-        }
+        const empty = {
+            totalPayments: 0,
+            bonusEligibleInvoicesTotal: 0,
+            totalAutoBonus: 0,
+            conditionMet: false,
+            byRep: [] as { id: string; name: string; payments: number; bonusEligible: number; nonEligible: number }[],
+            byCategorySales: {} as Record<string, { sales: number; bonus: number; percentage: number }>,
+            invoiceIds: [] as string[],
+        };
+        if (!selectedSupervisorId || !dateFrom || !dateTo) return empty;
 
         const startDate = new Date(dateFrom);
         const endDate = new Date(dateTo + "T23:59:59");
         const teamRepIds = teamMembers.map(rep => rep.id);
 
-        // Filter invoices by period and team members
-        // Check invoice.salesRepId first, then fall back to customer.salesRepId for older invoices
+        // Get team customer IDs
+        const teamCustomerIds = new Set(
+            customers.filter(c => c.salesRepId && teamRepIds.includes(c.salesRepId)).map(c => c.id)
+        );
+
+        // 1. Total payments (collections) for team customers in period
+        const periodCollections = collections.filter((col: any) => {
+            const colDate = new Date(col.createdAt || col.paymentDate);
+            return colDate >= startDate && colDate <= endDate && teamCustomerIds.has(col.customerId);
+        });
+        const totalPayments = periodCollections.reduce((sum: number, col: any) => sum + (Number(col.amount) || 0), 0);
+
+        // Payments by rep
+        const paymentsByRep: Record<string, number> = {};
+        periodCollections.forEach((col: any) => {
+            const customer = customers.find(c => c.id === col.customerId);
+            const repId = customer?.salesRepId || "";
+            if (repId && teamRepIds.includes(repId)) {
+                paymentsByRep[repId] = (paymentsByRep[repId] || 0) + (Number(col.amount) || 0);
+            }
+        });
+
+        // 2. Invoice category breakdown — each category uses its own bonusPercentage
         const periodInvoices = invoices.filter(inv => {
             const invDate = new Date(inv.createdAt);
             const isInPeriod = invDate >= startDate && invDate <= endDate;
             const invoiceSalesRepId = inv.salesRepId || customerSalesRepMap[inv.customerId || ""] || "";
-            const isTeamInvoice = teamRepIds.includes(invoiceSalesRepId);
-            return isInPeriod && isTeamInvoice;
+            return isInPeriod && teamRepIds.includes(invoiceSalesRepId);
         });
 
-        // Debug logging
-        console.log('[SupervisorBonus] Team Rep IDs:', teamRepIds);
-        console.log('[SupervisorBonus] Total invoices:', invoices.length);
-        console.log('[SupervisorBonus] Invoices with salesRepId:', invoices.filter(i => i.salesRepId).length);
-        console.log('[SupervisorBonus] Invoices matched via customer salesRepId:', invoices.filter(i => !i.salesRepId && customerSalesRepMap[i.customerId || ""]).length);
-        console.log('[SupervisorBonus] Period invoices found:', periodInvoices.length);
-
-        // Calculate sales by rep and by category
-        const salesByRep: Record<string, number> = {};
+        let bonusEligibleInvoicesTotal = 0;
+        let totalBonusCalc = 0;
         const byCategorySales: Record<string, { sales: number; bonus: number; percentage: number }> = {};
-        let categoryBonus = 0;
+        const repBonusEligible: Record<string, number> = {};
+        const repNonEligible: Record<string, number> = {};
 
         periodInvoices.forEach(inv => {
-            // Use resolved salesRepId (from invoice or customer)
             const repId = inv.salesRepId || customerSalesRepMap[inv.customerId || ""] || "";
-            if (repId) {
-                salesByRep[repId] = (salesByRep[repId] || 0) + (Number(inv.total) || 0);
-            }
-
-            // Process items for category bonus
             const items = inv.items || [];
-            // حساب إجمالي الأصناف قبل الخصم
             const itemsSubtotal = items.reduce((sum: number, item: any) => {
                 return sum + (Number(item.total) || (Number(item.price) * (Number(item.quantity) || 1)));
             }, 0);
-            // نسبة الخصم من الفاتورة (لتوزيعها على الأصناف)
             const invoiceDiscount = Number(inv.discount || (inv as any).discountAmount) || 0;
             const discountRatio = itemsSubtotal > 0 ? (1 - invoiceDiscount / itemsSubtotal) : 1;
-            
+
             items.forEach((item: any) => {
                 const productId = item.productId || "";
-                const categoryName = productCategoryMap[productId] || "بدون تصنيف";
-                const catBonusPercent = Number(categoryBonusMap[categoryName]) || 0;
+                const categoryName = productCategoryNameMap[productId] || "بدون تصنيف";
+                const catBonusPercent = productBonusPercentageMap[productId] || 0;
                 const itemTotal = Number(item.total) || (Number(item.price) * (Number(item.quantity) || 1));
-                // احتساب البونص على المبلغ بعد الخصم
                 const itemTotalAfterDiscount = Math.round(itemTotal * discountRatio);
-                const itemBonus = Math.round(itemTotalAfterDiscount * (catBonusPercent / 100));
+                const isBonusEligible = catBonusPercent > 0;
+
+                if (isBonusEligible) {
+                    bonusEligibleInvoicesTotal += itemTotalAfterDiscount;
+                    totalBonusCalc += Math.round(itemTotalAfterDiscount * (catBonusPercent / 100));
+                    if (repId) repBonusEligible[repId] = (repBonusEligible[repId] || 0) + itemTotalAfterDiscount;
+                } else {
+                    if (repId) repNonEligible[repId] = (repNonEligible[repId] || 0) + itemTotalAfterDiscount;
+                }
 
                 if (!byCategorySales[categoryName]) {
                     byCategorySales[categoryName] = { sales: 0, bonus: 0, percentage: catBonusPercent };
                 }
                 byCategorySales[categoryName].sales += itemTotalAfterDiscount;
-                byCategorySales[categoryName].bonus += itemBonus;
-                categoryBonus += itemBonus;
+                if (isBonusEligible) {
+                    byCategorySales[categoryName].bonus += Math.round(itemTotalAfterDiscount * (catBonusPercent / 100));
+                }
             });
         });
 
+        // 3. Condition: bonus-eligible invoices < payments → auto; else → manual
+        const conditionMet = totalPayments > 0 && bonusEligibleInvoicesTotal < totalPayments;
+
         const byRep = teamMembers.map(rep => ({
-            id: rep.id,
-            name: rep.name,
-            sales: salesByRep[rep.id] || 0,
+            id: rep.id, name: rep.name,
+            payments: paymentsByRep[rep.id] || 0,
+            bonusEligible: repBonusEligible[rep.id] || 0,
+            nonEligible: repNonEligible[rep.id] || 0,
         }));
 
-        const total = byRep.reduce((sum, rep) => sum + rep.sales, 0);
+        return {
+            totalPayments,
+            bonusEligibleInvoicesTotal,
+            totalAutoBonus: totalBonusCalc,
+            conditionMet, byRep, byCategorySales,
+            invoiceIds: periodInvoices.map(inv => String(inv.id)),
+        };
+    }, [selectedSupervisorId, dateFrom, dateTo, teamMembers, invoices, collections, customers, productCategoryNameMap, productBonusPercentageMap, customerSalesRepMap]);
 
-        return { total, byRep, categoryBonus, byCategorySales };
-    }, [selectedSupervisorId, dateFrom, dateTo, teamMembers, invoices, productCategoryMap, categoryBonusMap, customerSalesRepMap]);
+    // Force manual when condition not met
+    const forceManual = !!(selectedSupervisorId && dateFrom && dateTo && teamSalesData.totalPayments > 0 && !teamSalesData.conditionMet);
+    const effectiveManualMode = isManualMode || forceManual;
 
-    // Calculate bonus amount (percentage-based + manual amount)
-    const calculatedBonusFromPercentage = useMemo(() => {
-        if (useCategoryBonus) {
-            return teamSalesData.categoryBonus;
-        }
-        const percentage = parseFloat(bonusPercentage) || 0;
-        return Math.round(teamSalesData.total * (percentage / 100));
-    }, [teamSalesData.total, teamSalesData.categoryBonus, bonusPercentage, useCategoryBonus]);
-
-    const manualAmount = parseFloat(manualBonusAmount) || 0;
-    const bonusAmount = calculatedBonusFromPercentage + manualAmount;
-
-    // Calculate supervisor's team deposits (collections) for the period
-    const supervisorDeposits = useMemo(() => {
-        if (!selectedSupervisorId || !dateFrom || !dateTo) return 0;
-        const startDate = new Date(dateFrom);
-        const endDate = new Date(dateTo + "T23:59:59");
-        const teamRepIds = teamMembers.map(rep => rep.id);
-
-        // Get customer IDs belonging to this supervisor's reps
-        const teamCustomerIds = new Set(
-            customers
-                .filter(c => c.salesRepId && teamRepIds.includes(c.salesRepId))
-                .map(c => c.id)
-        );
-
-        // Sum collections from these customers in the period
-        return collections
-            .filter((col: any) => {
-                const colDate = new Date(col.createdAt);
-                return colDate >= startDate && colDate <= endDate && teamCustomerIds.has(col.customerId);
-            })
-            .reduce((sum: number, col: any) => sum + (Number(col.amount) || 0), 0);
-    }, [selectedSupervisorId, dateFrom, dateTo, teamMembers, customers, collections]);
-
-    // Check if bonus exceeds 10% of deposits
-    const depositsCap = Math.round(supervisorDeposits * 0.10);
-    const exceedsDepositCap = supervisorDeposits > 0 && bonusAmount > depositsCap;
+    // Final bonus amount
+    const bonusAmount = effectiveManualMode
+        ? (parseFloat(manualBonusAmount) || 0)
+        : teamSalesData.totalAutoBonus;
 
     // Apply bonus
     const handleApplyBonus = async () => {
-        if (!selectedSupervisorId) {
-            toast.error("يرجى اختيار المشرف");
-            return;
-        }
-        if (!dateFrom || !dateTo) {
-            toast.error("يرجى تحديد الفترة");
-            return;
-        }
-        if (teamSalesData.total <= 0) {
-            toast.error("لا توجد مبيعات للفريق في هذه الفترة");
-            return;
-        }
+        if (!selectedSupervisorId) { toast.error("يرجى اختيار المشرف"); return; }
+        if (!dateFrom || !dateTo) { toast.error("يرجى تحديد الفترة"); return; }
+        if (teamSalesData.totalPayments <= 0) { toast.error("لا توجد تحصيلات للفريق في هذه الفترة"); return; }
+        if (bonusAmount <= 0) { toast.error("قيمة البونص يجب أن تكون أكبر من صفر"); return; }
 
-        // Validate 10% deposit cap
-        if (exceedsDepositCap) {
-            toast.error(`قيمة البونص (${formatCurrency(bonusAmount)}) تتجاوز 10% من إيداعات المشرف (${formatCurrency(depositsCap)}). الحد الأقصى المسموح: ${formatCurrency(depositsCap)}`);
-            return;
-        }
-
-        // Check for duplicate bonus
+        // Check for duplicate bonus (invoice overlap)
         let existingBonuses: SupervisorBonusRecord[] = [];
-        try {
-            existingBonuses = await db.getAll<SupervisorBonusRecord>("supervisorBonuses");
-        } catch {
-            existingBonuses = [];
-        }
+        try { existingBonuses = await db.getAll<SupervisorBonusRecord>("supervisorBonuses"); } catch { existingBonuses = []; }
 
-        // Collect invoice IDs for this bonus period
-        const startDate = new Date(dateFrom);
-        const endDate = new Date(dateTo + "T23:59:59");
-        const teamRepIds = teamMembers.map(rep => rep.id);
-        const periodInvoiceIds = invoices
-            .filter(inv => {
-                const invDate = new Date(inv.createdAt);
-                const isInPeriod = invDate >= startDate && invDate <= endDate;
-                const invoiceSalesRepId = inv.salesRepId || customerSalesRepMap[inv.customerId || ""] || "";
-                const isTeamInvoice = teamRepIds.includes(invoiceSalesRepId);
-                return isInPeriod && isTeamInvoice;
-            })
-            .map(inv => String(inv.id));
-
-        // Check if ANY of these invoices were already bonused
         const alreadyBonusedInvoiceIds = new Set<string>();
-        existingBonuses.forEach(b => {
-            if (b.invoiceIds) {
-                b.invoiceIds.forEach(id => alreadyBonusedInvoiceIds.add(id));
-            }
-        });
-
-        const duplicateInvoiceIds = periodInvoiceIds.filter(id => alreadyBonusedInvoiceIds.has(id));
+        existingBonuses.forEach(b => { if (b.invoiceIds) b.invoiceIds.forEach(id => alreadyBonusedInvoiceIds.add(id)); });
+        const duplicateInvoiceIds = teamSalesData.invoiceIds.filter(id => alreadyBonusedInvoiceIds.has(id));
         if (duplicateInvoiceIds.length > 0) {
-            toast.error(`${duplicateInvoiceIds.length} فاتورة من هذه الفترة تم احتساب بونص عليها مسبقاً. لا يمكن تسجيل بونص مكرر.`);
-            return;
-        }
-
-        if (periodInvoiceIds.length === 0) {
-            toast.error("لا توجد فواتير لتسجيل بونص عليها");
+            toast.error(`${duplicateInvoiceIds.length} فاتورة من هذه الفترة تم احتساب بونص عليها مسبقاً.`);
             return;
         }
 
         setIsLoading(true);
-
         try {
             const supervisor = supervisors.find(s => s.id === selectedSupervisorId);
-
             const newBonusRecord: SupervisorBonusRecord = {
                 id: `sup_bonus_${Date.now()}`,
                 supervisorId: selectedSupervisorId,
                 supervisorName: supervisor?.name || "",
                 periodStart: dateFrom,
                 periodEnd: dateTo,
-                totalTeamSales: teamSalesData.total,
-                bonusPercentage: useCategoryBonus
-                    ? (teamSalesData.total > 0 ? parseFloat((calculatedBonusFromPercentage / teamSalesData.total * 100).toFixed(2)) : 0)
-                    : (parseFloat(bonusPercentage) || 0),
+                totalPayments: teamSalesData.totalPayments,
+                lightingInvoicesTotal: teamSalesData.bonusEligibleInvoicesTotal,
                 bonusAmount,
-                manualBonusAmount: manualAmount > 0 ? manualAmount : undefined,
-                totalDeposits: supervisorDeposits > 0 ? supervisorDeposits : undefined,
+                isManual: effectiveManualMode,
                 createdAt: new Date().toISOString(),
                 userId: user?.id || "",
                 userName: user?.username || user?.name || "",
-                notes: useCategoryBonus ? `${notes ? notes + " | " : ""}بونص حسب القسم` : notes,
+                notes: effectiveManualMode ? `${notes ? notes + " | " : ""}بونص يدوي` : notes,
                 salesReps: teamSalesData.byRep,
-                invoiceIds: periodInvoiceIds,
+                invoiceIds: teamSalesData.invoiceIds,
                 byCategorySales: teamSalesData.byCategorySales,
             };
 
-            // Save to IndexedDB (synced automatically via SyncableRepository)
             await db.add("supervisorBonuses", newBonusRecord);
-
-            toast.success(
-                `تم تسجيل بونص ${Math.round(bonusAmount)} ${currency} للمشرف ${supervisor?.name}`
-            );
+            toast.success(`تم تسجيل بونص ${Math.round(bonusAmount)} ${currency} للمشرف ${supervisor?.name}`);
 
             // Reset form
             setSelectedSupervisorId("");
             setDateFrom("");
             setDateTo("");
-            setBonusPercentage("5");
             setManualBonusAmount("");
             setNotes("");
+            setIsManualMode(false);
             loadRecentBonuses();
         } catch (error) {
             toast.error("حدث خطأ أثناء تسجيل البونص");
@@ -509,7 +453,7 @@ const SupervisorBonus = () => {
     const openEditDialog = (bonus: SupervisorBonusRecord) => {
         setEditingBonus(bonus);
         setEditNotes(bonus.notes || "");
-        setEditManualAmount(bonus.manualBonusAmount ? String(bonus.manualBonusAmount) : "");
+        setEditBonusAmount(String(bonus.bonusAmount || ""));
         setEditDialog(true);
     };
 
@@ -517,25 +461,17 @@ const SupervisorBonus = () => {
     const handleSaveEdit = async () => {
         if (!editingBonus) return;
         try {
-            const newManual = parseFloat(editManualAmount) || 0;
-            const oldManual = editingBonus.manualBonusAmount || 0;
-            const baseBonusAmount = editingBonus.bonusAmount - oldManual;
-            const newBonusAmount = baseBonusAmount + newManual;
-
-            // Check 10% deposit cap if deposits info exists
-            if (editingBonus.totalDeposits && editingBonus.totalDeposits > 0) {
-                const cap = Math.round(editingBonus.totalDeposits * 0.10);
-                if (newBonusAmount > cap) {
-                    toast.error(`البونص الجديد (${formatCurrency(newBonusAmount)}) يتجاوز 10% من الإيداعات (${formatCurrency(cap)})`);
-                    return;
-                }
+            const newBonusAmount = parseFloat(editBonusAmount) || 0;
+            if (newBonusAmount <= 0) {
+                toast.error("قيمة البونص يجب أن تكون أكبر من صفر");
+                return;
             }
 
             const updatedBonus: SupervisorBonusRecord = {
                 ...editingBonus,
                 notes: editNotes,
-                manualBonusAmount: newManual > 0 ? newManual : undefined,
                 bonusAmount: newBonusAmount,
+                isManual: true,
             };
 
             await db.update("supervisorBonuses", updatedBonus);
@@ -549,7 +485,7 @@ const SupervisorBonus = () => {
         }
     };
 
-    // Print comprehensive report
+    // Print comprehensive report (hand-drawn format)
     const handlePrintReport = (bonus: SupervisorBonusRecord) => {
         const printWindow = window.open("", "_blank");
         if (!printWindow) {
@@ -557,141 +493,115 @@ const SupervisorBonus = () => {
             return;
         }
 
+        const storeName = getSetting("storeName") || "شركة لونج تايم للصناعات الكهربائيه";
+        const totalPayments = bonus.totalPayments || 0;
+        const lightingTotal = bonus.lightingInvoicesTotal || 0;
+        const otherVal = bonus.otherDepartmentsValue || 0;
+        const lightingBonus = bonus.lightingBonus || 0;
+        const otherBonus = bonus.otherBonus || 0;
+
+        // Month from period end
+        const periodEndDate = new Date(bonus.periodEnd);
+        const monthName = periodEndDate.toLocaleDateString("ar-EG", { month: "long", year: "numeric" });
+
+        // Representative rows: المندوب | الإضاءة | باقي الأقسام
         const repRows = bonus.salesReps
-            .map((rep, i) => `<tr><td>${i + 1}</td><td>${rep.name}</td><td>${Math.round(rep.sales).toLocaleString("ar-EG")} ${currency}</td></tr>`)
+            .map((rep: any) => `<tr><td style="border: 1px solid #000; padding: 8px;">${rep.name}</td><td style="border: 1px solid #000; padding: 8px;">${Math.round(rep.lighting || 0).toLocaleString("ar-EG")} ${currency}</td><td style="border: 1px solid #000; padding: 8px;">${Math.round(rep.other || 0).toLocaleString("ar-EG")} ${currency}</td></tr>`)
             .join("");
-
-        // Build category rows if available
-        let categoryTableHtml = "";
-        if (bonus.byCategorySales && Object.keys(bonus.byCategorySales).length > 0) {
-            const catRows = Object.entries(bonus.byCategorySales)
-                .sort(([, a], [, b]) => b.sales - a.sales)
-                .map(([catName, data], i) => `
-                    <tr>
-                        <td>${i + 1}</td>
-                        <td>${catName || "بدون تصنيف"}</td>
-                        <td>${Math.round(data.sales).toLocaleString("ar-EG")} ${currency}</td>
-                        <td>${data.percentage}%</td>
-                        <td>${Math.round(data.bonus).toLocaleString("ar-EG")} ${currency}</td>
-                    </tr>
-                `).join("");
-
-            const totalCatSales = Object.values(bonus.byCategorySales).reduce((s, d) => s + d.sales, 0);
-            const totalCatBonus = Object.values(bonus.byCategorySales).reduce((s, d) => s + d.bonus, 0);
-
-            categoryTableHtml = `
-                <h3 style="margin: 20px 0 10px;">📦 تفصيل المبيعات حسب الأقسام</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>القسم</th>
-                            <th>المبيعات</th>
-                            <th>نسبة البونص</th>
-                            <th>البونص</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${catRows}
-                        <tr style="font-weight: bold; background: #e2e8f0;">
-                            <td colspan="2">الإجمالي</td>
-                            <td>${Math.round(totalCatSales).toLocaleString("ar-EG")} ${currency}</td>
-                            <td></td>
-                            <td>${Math.round(totalCatBonus).toLocaleString("ar-EG")} ${currency}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            `;
-        }
-
-        const storeName = getSetting("storeName") || "المتجر";
 
         printWindow.document.write(`
             <!DOCTYPE html>
             <html dir="rtl" lang="ar">
             <head>
                 <meta charset="UTF-8">
-                <title>تقرير بونص المشرف - ${bonus.supervisorName}</title>
+                <title>تقرير بونص ${bonus.supervisorName}</title>
                 <style>
                     * { margin: 0; padding: 0; box-sizing: border-box; }
-                    body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; padding: 30px; color: #333; direction: rtl; }
-                    .header { text-align: center; border-bottom: 3px solid #2563eb; padding-bottom: 15px; margin-bottom: 25px; }
-                    .header h1 { font-size: 22px; color: #2563eb; margin-bottom: 5px; }
-                    .header h2 { font-size: 16px; color: #666; }
-                    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; background: #f8f9fa; padding: 15px; border-radius: 8px; }
-                    .info-item { display: flex; gap: 8px; }
-                    .info-label { font-weight: bold; color: #555; }
-                    .info-value { color: #333; }
-                    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-                    th { background: #2563eb; color: white; padding: 10px; text-align: right; }
-                    td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }
-                    tr:nth-child(even) { background: #f8fafc; }
-                    .summary { background: #f0fdf4; border: 2px solid #22c55e; border-radius: 8px; padding: 20px; margin-top: 20px; }
-                    .summary-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 18px; }
-                    .summary-label { font-weight: bold; }
-                    .summary-value { font-size: 20px; color: #16a34a; font-weight: bold; }
-                    .deposits-section { background: #eff6ff; border: 2px solid #3b82f6; border-radius: 8px; padding: 15px; margin-top: 15px; }
-                    .deposits-label { font-weight: bold; color: #1d4ed8; }
-                    .footer { text-align: center; margin-top: 30px; padding-top: 15px; border-top: 1px solid #e2e8f0; color: #999; font-size: 12px; }
-                    .notes { background: #fffbeb; border: 1px solid #f59e0b; border-radius: 8px; padding: 10px; margin-top: 15px; }
-                    @media print { body { padding: 15px; } }
+                    body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; padding: 40px; color: #000; direction: rtl; font-size: 14px; }
+                    .title { text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 20px; }
+                    .store-name { text-align: center; font-size: 14px; margin-bottom: 5px; }
+                    .divider { border-bottom: 1px solid #000; margin: 15px 0; }
+                    .info-row { display: flex; justify-content: space-between; margin-bottom: 8px; }
+                    .info-label { font-weight: bold; }
+                    .info-value { flex: 1; border-bottom: 1px solid #999; margin: 0 10px; text-align: center; min-width: 100px; }
+                    .section-title { font-weight: bold; margin: 20px 0 10px; text-decoration: underline; }
+                    table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+                    th, td { border: 1px solid #000; padding: 8px 12px; text-align: center; }
+                    th { background: #f0f0f0; font-weight: bold; }
+                    .two-col-table td { width: 50%; text-align: right; padding-right: 20px; }
+                    .three-col-table td { width: 33.33%; }
+                    .total-box { border: 2px solid #000; padding: 15px; margin-top: 20px; display: flex; justify-content: space-between; font-weight: bold; font-size: 16px; }
+                    .footer { margin-top: 40px; text-align: center; font-size: 12px; color: #555; }
+                    @media print { body { padding: 20px; } }
                 </style>
             </head>
             <body>
-                <div class="header">
-                    <h1>${storeName}</h1>
-                    <h2>تقرير بونص المشرف</h2>
+                <div class="store-name">${storeName}</div>
+                <div class="title">تقرير بونص شهر (${monthName})</div>
+                <div class="divider"></div>
+
+                <div class="info-row">
+                    <span class="info-label">التاريخ:</span>
+                    <span class="info-value">${formatDate(bonus.createdAt)}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">الفترة:</span>
+                    <span>من</span>
+                    <span class="info-value">${formatDate(bonus.periodStart)}</span>
+                    <span>إلى</span>
+                    <span class="info-value">${formatDate(bonus.periodEnd)}</span>
                 </div>
 
-                <div class="info-grid">
-                    <div class="info-item"><span class="info-label">المشرف:</span><span class="info-value">${bonus.supervisorName}</span></div>
-                    <div class="info-item"><span class="info-label">تاريخ التسجيل:</span><span class="info-value">${formatDate(bonus.createdAt)}</span></div>
-                    <div class="info-item"><span class="info-label">من:</span><span class="info-value">${formatDate(bonus.periodStart)}</span></div>
-                    <div class="info-item"><span class="info-label">إلى:</span><span class="info-value">${formatDate(bonus.periodEnd)}</span></div>
-                </div>
-
-                <h3 style="margin-bottom: 10px;">📊 مبيعات المندوبين</h3>
-                <table>
-                    <thead><tr><th>#</th><th>المندوب</th><th>المبيعات</th></tr></thead>
+                <div class="section-title">المدفوعات</div>
+                <table style="width: 100%; border-collapse: collapse; margin: 10px 0;">
+                    <thead>
+                        <tr style="background: #f0f0f0;">
+                            <th style="border: 1px solid #000; padding: 8px; width: 50%;">المدفوعات</th>
+                            <th style="border: 1px solid #000; padding: 8px; width: 50%;">البونص</th>
+                        </tr>
+                    </thead>
                     <tbody>
-                        ${repRows}
-                        <tr style="font-weight: bold; background: #e2e8f0;">
-                            <td colspan="2">الإجمالي</td>
-                            <td>${Math.round(bonus.totalTeamSales).toLocaleString("ar-EG")} ${currency}</td>
+                        <tr>
+                            <td style="border: 1px solid #000; padding: 8px;"><strong>مبيعات الأقسام:</strong> ${Math.round(lightingTotal).toLocaleString("ar-EG")} ${currency}</td>
+                            <td style="border: 1px solid #000; padding: 8px;"><strong>بونص الإضاءة:</strong> ${Math.round(lightingBonus).toLocaleString("ar-EG")} ${currency}</td>
+                        </tr>
+                        <tr>
+                            <td style="border: 1px solid #000; padding: 8px;"><strong>الإضاءة:</strong> ${Math.round(lightingTotal).toLocaleString("ar-EG")} ${currency}</td>
+                            <td style="border: 1px solid #000; padding: 8px;"><strong>بونص باقي الأقسام:</strong> ${Math.round(otherBonus).toLocaleString("ar-EG")} ${currency}</td>
+                        </tr>
+                        <tr>
+                            <td style="border: 1px solid #000; padding: 8px;"><strong>باقي الأقسام:</strong> ${Math.round(otherVal).toLocaleString("ar-EG")} ${currency}</td>
+                            <td style="border: 1px solid #000; padding: 8px;"><strong>الإجمالي:</strong> ${Math.round(bonus.bonusAmount).toLocaleString("ar-EG")} ${currency}</td>
                         </tr>
                     </tbody>
                 </table>
 
-                ${categoryTableHtml}
+                <div class="section-title">بيان المندوبين</div>
+                <table style="width: 100%; border-collapse: collapse; margin: 10px 0;">
+                    <thead>
+                        <tr style="background: #f0f0f0;">
+                            <th style="border: 1px solid #000; padding: 8px;">المندوب</th>
+                            <th style="border: 1px solid #000; padding: 8px;">الإضاءة</th>
+                            <th style="border: 1px solid #000; padding: 8px;">باقي الأقسام</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${repRows}
+                        <tr style="font-weight: bold; background: #f0f0f0;">
+                            <td style="border: 1px solid #000; padding: 8px;">الإجمالي</td>
+                            <td style="border: 1px solid #000; padding: 8px;">${Math.round(lightingTotal).toLocaleString("ar-EG")} ${currency}</td>
+                            <td style="border: 1px solid #000; padding: 8px;">${Math.round(otherVal).toLocaleString("ar-EG")} ${currency}</td>
+                        </tr>
+                    </tbody>
+                </table>
 
-                <div class="summary">
-                    <h3 style="margin-bottom: 10px;">💰 ملخص البونص</h3>
-                    <div class="summary-row">
-                        <span class="summary-label">البونص:</span>
-                        <span class="summary-value">${Math.round(bonus.bonusAmount).toLocaleString("ar-EG")} ${currency}</span>
-                    </div>
-                    <div class="summary-row" style="border-top: 2px solid #22c55e; padding-top: 12px; margin-top: 8px;">
-                        <span class="summary-label">إجمالي المبيعات خلال الفترة:</span>
-                        <span>${Math.round(bonus.totalTeamSales).toLocaleString("ar-EG")} ${currency}</span>
-                    </div>
+                <div class="total-box">
+                    <span>الملاحظات:</span>
+                    <span>${bonus.notes || "____________________"}</span>
                 </div>
 
-                ${bonus.totalDeposits ? `
-                <div class="deposits-section">
-                    <div class="summary-row">
-                        <span class="deposits-label">إيداعات الفريق خلال الفترة:</span>
-                        <span>${Math.round(bonus.totalDeposits).toLocaleString("ar-EG")} ${currency}</span>
-                    </div>
-                    <div class="summary-row">
-                        <span class="deposits-label">الحد الأقصى (10%):</span>
-                        <span>${Math.round(bonus.totalDeposits * 0.10).toLocaleString("ar-EG")} ${currency}</span>
-                    </div>
-                </div>` : ""}
-
-                ${bonus.notes ? `<div class="notes"><strong>ملاحظات:</strong> ${bonus.notes}</div>` : ""}
-
                 <div class="footer">
-                    طُبع بتاريخ ${new Date().toLocaleDateString("ar-EG")} ${new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}
+                    <div>طُبع بتاريخ ${new Date().toLocaleDateString("ar-EG")} ${new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}</div>
                 </div>
             </body>
             </html>
@@ -725,18 +635,11 @@ const SupervisorBonus = () => {
                             {/* Supervisor Selection */}
                             <div className="space-y-2">
                                 <Label>اختر المشرف</Label>
-                                <Select
-                                    value={selectedSupervisorId}
-                                    onValueChange={setSelectedSupervisorId}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="اختر المشرف..." />
-                                    </SelectTrigger>
+                                <Select value={selectedSupervisorId} onValueChange={setSelectedSupervisorId}>
+                                    <SelectTrigger><SelectValue placeholder="اختر المشرف..." /></SelectTrigger>
                                     <SelectContent>
                                         {supervisors.map((sup) => (
-                                            <SelectItem key={sup.id} value={sup.id}>
-                                                {sup.name}
-                                            </SelectItem>
+                                            <SelectItem key={sup.id} value={sup.id}>{sup.name}</SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
@@ -745,26 +648,12 @@ const SupervisorBonus = () => {
                             {/* Period Selection */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
-                                    <Label className="flex items-center gap-2">
-                                        <Calendar className="h-4 w-4" />
-                                        من تاريخ
-                                    </Label>
-                                    <Input
-                                        type="date"
-                                        value={dateFrom}
-                                        onChange={(e) => setDateFrom(e.target.value)}
-                                    />
+                                    <Label className="flex items-center gap-2"><Calendar className="h-4 w-4" />من تاريخ</Label>
+                                    <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label className="flex items-center gap-2">
-                                        <Calendar className="h-4 w-4" />
-                                        إلى تاريخ
-                                    </Label>
-                                    <Input
-                                        type="date"
-                                        value={dateTo}
-                                        onChange={(e) => setDateTo(e.target.value)}
-                                    />
+                                    <Label className="flex items-center gap-2"><Calendar className="h-4 w-4" />إلى تاريخ</Label>
+                                    <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
                                 </div>
                             </div>
 
@@ -778,164 +667,153 @@ const SupervisorBonus = () => {
                                     {teamMembers.length > 0 ? (
                                         <div className="flex flex-wrap gap-2">
                                             {teamMembers.map((rep) => (
-                                                <Badge key={rep.id} variant="secondary">
-                                                    {rep.name}
-                                                </Badge>
+                                                <Badge key={rep.id} variant="secondary">{rep.name}</Badge>
                                             ))}
                                         </div>
                                     ) : (
-                                        <p className="text-sm text-muted-foreground">
-                                            لا يوجد مندوبين تابعين لهذا المشرف
-                                        </p>
+                                        <p className="text-sm text-muted-foreground">لا يوجد مندوبين تابعين لهذا المشرف</p>
                                     )}
                                 </div>
                             )}
 
-                            {/* Sales Summary */}
-                            {selectedSupervisorId && dateFrom && dateTo && (
+                            {/* Payments Summary */}
+                            {selectedSupervisorId && dateFrom && dateTo && teamSalesData.totalPayments > 0 && (
                                 <div className="space-y-3">
+                                    {/* Total Payments */}
                                     <div className="p-4 bg-blue-50 dark:bg-blue-950 rounded-lg">
                                         <div className="flex items-center justify-between">
                                             <div className="flex items-center gap-2">
-                                                <TrendingUp className="h-5 w-5 text-blue-600" />
-                                                <span className="font-semibold">إجمالي مبيعات الفريق</span>
+                                                <DollarSign className="h-5 w-5 text-blue-600" />
+                                                <span className="font-semibold">إجمالي التحصيلات</span>
                                             </div>
-                                            <span className="text-2xl font-bold text-blue-600">
-                                                {formatCurrency(teamSalesData.total)}
-                                            </span>
+                                            <span className="text-2xl font-bold text-blue-600">{formatCurrency(teamSalesData.totalPayments)}</span>
                                         </div>
                                     </div>
 
-                                    {/* Sales by Rep */}
+                                    {/* Condition Status */}
+                                    <div className={`p-3 rounded-lg border ${teamSalesData.conditionMet ? "bg-green-50 dark:bg-green-950 border-green-300" : "bg-red-50 dark:bg-red-950 border-red-300"}`}>
+                                        <div className="flex items-center gap-2">
+                                            {teamSalesData.conditionMet ? (
+                                                <CheckCircle className="h-5 w-5 text-green-600" />
+                                            ) : (
+                                                <XCircle className="h-5 w-5 text-red-600" />
+                                            )}
+                                            <span className={`font-semibold text-sm ${teamSalesData.conditionMet ? "text-green-700" : "text-red-700"}`}>
+                                                {teamSalesData.conditionMet
+                                                    ? "الشرط محقق: إجمالي فواتير الأقسام أقل من التحصيلات → حساب تلقائي"
+                                                    : "الشرط غير محقق: إجمالي فواتير الأقسام ≥ التحصيلات → يجب إدخال البونص يدوياً"}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            فواتير الأقسام: {formatCurrency(teamSalesData.bonusEligibleInvoicesTotal)} | التحصيلات: {formatCurrency(teamSalesData.totalPayments)}
+                                        </p>
+                                    </div>
+
+                                    {/* Per-Category Breakdown */}
+                                    {Object.keys(teamSalesData.byCategorySales).length > 0 && (
+                                        <div className="space-y-2">
+                                            <Label>تفصيل البونص حسب الأقسام</Label>
+                                            <Table>
+                                                <TableHeader>
+                                                    <TableRow>
+                                                        <TableHead>القسم</TableHead>
+                                                        <TableHead className="text-center">النسبة</TableHead>
+                                                        <TableHead className="text-left">المبيعات</TableHead>
+                                                        <TableHead className="text-left">البونص</TableHead>
+                                                    </TableRow>
+                                                </TableHeader>
+                                                <TableBody>
+                                                    {Object.entries(teamSalesData.byCategorySales).map(([catName, data]) => (
+                                                        <TableRow key={catName}>
+                                                            <TableCell>{catName}</TableCell>
+                                                            <TableCell className="text-center">
+                                                                <Badge variant={data.percentage > 0 ? "default" : "secondary"}>
+                                                                    {data.percentage > 0 ? `${data.percentage}%` : "—"}
+                                                                </Badge>
+                                                            </TableCell>
+                                                            <TableCell className="text-left">{formatCurrency(data.sales)}</TableCell>
+                                                            <TableCell className="text-left font-medium text-green-600">
+                                                                {data.percentage > 0 ? formatCurrency(data.bonus) : "—"}
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))}
+                                                    <TableRow className="font-bold border-t-2">
+                                                        <TableCell colSpan={2}>الإجمالي</TableCell>
+                                                        <TableCell className="text-left">{formatCurrency(teamSalesData.bonusEligibleInvoicesTotal)}</TableCell>
+                                                        <TableCell className="text-left text-green-600">{formatCurrency(teamSalesData.totalAutoBonus)}</TableCell>
+                                                    </TableRow>
+                                                </TableBody>
+                                            </Table>
+                                        </div>
+                                    )}
+
+                                    {/* Rep Table */}
                                     {teamSalesData.byRep.length > 0 && (
                                         <Table>
                                             <TableHeader>
                                                 <TableRow>
                                                     <TableHead>المندوب</TableHead>
-                                                    <TableHead className="text-left">المبيعات</TableHead>
+                                                    <TableHead className="text-left">التحصيلات</TableHead>
+                                                    <TableHead className="text-left">أقسام بونص</TableHead>
+                                                    <TableHead className="text-left">أقسام بدون بونص</TableHead>
                                                 </TableRow>
                                             </TableHeader>
                                             <TableBody>
                                                 {teamSalesData.byRep.map((rep) => (
                                                     <TableRow key={rep.id}>
                                                         <TableCell>{rep.name}</TableCell>
-                                                        <TableCell className="text-left font-medium">
-                                                            {formatCurrency(rep.sales)}
-                                                        </TableCell>
+                                                        <TableCell className="text-left font-medium">{formatCurrency(rep.payments)}</TableCell>
+                                                        <TableCell className="text-left">{formatCurrency(rep.bonusEligible)}</TableCell>
+                                                        <TableCell className="text-left">{formatCurrency(rep.nonEligible)}</TableCell>
                                                     </TableRow>
                                                 ))}
                                             </TableBody>
                                         </Table>
                                     )}
-                                </div>
-                            )}
 
-                            {/* Bonus Percentage */}
-                            <div className="space-y-2">
-                                <div className="flex items-center justify-between">
-                                    <Label className="flex items-center gap-2">
-                                        <Percent className="h-4 w-4" />
-                                        طريقة حساب البونص
-                                    </Label>
-                                    <div className="flex items-center gap-2">
-                                        <Badge variant={useCategoryBonus ? "default" : "secondary"}
-                                            className="cursor-pointer"
-                                            onClick={() => setUseCategoryBonus(true)}>
-                                            حسب القسم
-                                        </Badge>
-                                        <Badge variant={!useCategoryBonus ? "default" : "secondary"}
-                                            className="cursor-pointer"
-                                            onClick={() => setUseCategoryBonus(false)}>
-                                            نسبة ثابتة
-                                        </Badge>
-                                    </div>
-                                </div>
-
-                                {!useCategoryBonus && (
-                                    <Input
-                                        type="number"
-                                        min="0"
-                                        max="100"
-                                        step="0.5"
-                                        value={bonusPercentage}
-                                        onChange={(e) => setBonusPercentage(e.target.value)}
-                                        placeholder="نسبة البونص الثابتة"
-                                    />
-                                )}
-                            </div>
-
-                            {/* Deposits Cap Info */}
-                            {selectedSupervisorId && dateFrom && dateTo && (
-                                <div className={`p-3 rounded-lg border ${exceedsDepositCap ? "bg-red-50 dark:bg-red-950 border-red-300" : "bg-blue-50 dark:bg-blue-950 border-blue-200"}`}>
-                                    <div className="flex items-center gap-2 mb-1">
-                                        {exceedsDepositCap ? (
-                                            <AlertTriangle className="h-4 w-4 text-red-600" />
-                                        ) : (
-                                            <DollarSign className="h-4 w-4 text-blue-600" />
-                                        )}
-                                        <span className="font-semibold text-sm">
-                                            إيداعات الفريق (تحصيلات): {formatCurrency(supervisorDeposits)}
-                                        </span>
-                                    </div>
-                                    <p className="text-xs text-muted-foreground">
-                                        الحد الأقصى للبونص (10% من الإيداعات): {formatCurrency(depositsCap)}
-                                    </p>
-                                    {exceedsDepositCap && (
-                                        <p className="text-xs text-red-600 font-semibold mt-1">
-                                            ⚠️ البونص الحالي ({formatCurrency(bonusAmount)}) يتجاوز الحد المسموح!
-                                        </p>
-                                    )}
-                                </div>
-                            )}
-
-                            {/* Category Breakdown */}
-                            {useCategoryBonus && Object.keys(teamSalesData.byCategorySales || {}).length > 0 && (
-                                <div className="space-y-2">
-                                    <Label>تفصيل البونص حسب الأقسام</Label>
-                                    <Table>
-                                        <TableHeader>
-                                            <TableRow>
-                                                <TableHead>القسم</TableHead>
-                                                <TableHead className="text-center">النسبة</TableHead>
-                                                <TableHead className="text-left">المبيعات</TableHead>
-                                                <TableHead className="text-left">البونص</TableHead>
-                                            </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {Object.entries(teamSalesData.byCategorySales || {}).map(([catName, data]) => (
-                                                <TableRow key={catName}>
-                                                    <TableCell>{catName || "بدون تصنيف"}</TableCell>
-                                                    <TableCell className="text-center">
-                                                        <Badge variant="outline">{data.percentage}%</Badge>
-                                                    </TableCell>
-                                                    <TableCell className="text-left">{formatCurrency(data.sales)}</TableCell>
-                                                    <TableCell className="text-left font-medium text-green-600">
-                                                        {formatCurrency(data.bonus)}
-                                                    </TableCell>
-                                                </TableRow>
-                                            ))}
-                                        </TableBody>
-                                    </Table>
-                                </div>
-                            )}
-
-                            {/* Bonus Amount */}
-                            {teamSalesData.total > 0 && (
-                                <div className="p-4 bg-green-50 dark:bg-green-950 rounded-lg space-y-3">
-                                    <div className="flex items-center justify-between">
+                                    {/* Manual/Auto Mode Toggle */}
+                                    {teamSalesData.conditionMet && (
                                         <div className="flex items-center gap-2">
-                                            <DollarSign className="h-5 w-5 text-green-600" />
-                                            <span className="font-semibold">البونص</span>
+                                            <Badge
+                                                variant={!effectiveManualMode ? "default" : "secondary"}
+                                                className="cursor-pointer"
+                                                onClick={() => setIsManualMode(false)}
+                                            >
+                                                تلقائي
+                                            </Badge>
+                                            <Badge
+                                                variant={effectiveManualMode ? "default" : "secondary"}
+                                                className="cursor-pointer"
+                                                onClick={() => setIsManualMode(true)}
+                                            >
+                                                يدوي
+                                            </Badge>
                                         </div>
-                                        <span className="text-2xl font-bold text-green-600">
-                                            {formatCurrency(bonusAmount)}
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center justify-between border-t pt-2">
-                                        <span className="font-semibold text-sm">إجمالي المبيعات خلال الفترة</span>
-                                        <span className="font-bold">
-                                            {formatCurrency(teamSalesData.total)}
-                                        </span>
+                                    )}
+
+                                    {/* Manual Input */}
+                                    {effectiveManualMode && (
+                                        <div className="space-y-2">
+                                            <Label>مبلغ البونص (يدوي)</Label>
+                                            <Input
+                                                type="number"
+                                                min="0"
+                                                value={manualBonusAmount}
+                                                onChange={(e) => setManualBonusAmount(e.target.value)}
+                                                placeholder="أدخل مبلغ البونص يدوياً"
+                                            />
+                                        </div>
+                                    )}
+
+                                    {/* Bonus Amount */}
+                                    <div className="p-4 bg-green-50 dark:bg-green-950 rounded-lg space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <DollarSign className="h-5 w-5 text-green-600" />
+                                                <span className="font-semibold">البونص {effectiveManualMode ? "(يدوي)" : "(تلقائي)"}</span>
+                                            </div>
+                                            <span className="text-2xl font-bold text-green-600">{formatCurrency(bonusAmount)}</span>
+                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -943,17 +821,13 @@ const SupervisorBonus = () => {
                             {/* Notes */}
                             <div className="space-y-2">
                                 <Label>ملاحظات (اختياري)</Label>
-                                <Textarea
-                                    value={notes}
-                                    onChange={(e) => setNotes(e.target.value)}
-                                    placeholder="أي ملاحظات إضافية..."
-                                />
+                                <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="أي ملاحظات إضافية..." />
                             </div>
 
                             {/* Submit Button */}
                             <Button
                                 onClick={handleApplyBonus}
-                                disabled={isLoading || teamSalesData.total <= 0 || exceedsDepositCap}
+                                disabled={isLoading || teamSalesData.totalPayments <= 0 || (effectiveManualMode && bonusAmount <= 0)}
                                 className="w-full"
                                 size="lg"
                             >
@@ -973,9 +847,7 @@ const SupervisorBonus = () => {
                         </CardHeader>
                         <CardContent>
                             {recentBonuses.length === 0 ? (
-                                <div className="text-center py-8 text-muted-foreground">
-                                    لا توجد سجلات بونص سابقة
-                                </div>
+                                <div className="text-center py-8 text-muted-foreground">لا توجد سجلات بونص سابقة</div>
                             ) : (
                                 <div className="space-y-3 max-h-[500px] overflow-y-auto">
                                     {pagination.paginatedItems.map((bonus) => (
@@ -987,58 +859,28 @@ const SupervisorBonus = () => {
                                                         الفترة: {formatDate(bonus.periodStart)} - {formatDate(bonus.periodEnd)}
                                                     </p>
                                                     <p className="text-sm text-muted-foreground">
-                                                        إجمالي المبيعات: {formatCurrency(bonus.totalTeamSales)}
+                                                        التحصيلات: {formatCurrency(bonus.totalPayments || 0)}
                                                     </p>
                                                     <p className="text-sm text-muted-foreground">
-                                                        المندوبين: {bonus.salesReps.map(r => r.name).join("، ")}
+                                                        المندوبين: {bonus.salesReps.map((r: any) => r.name).join("، ")}
                                                     </p>
-                                                    {bonus.manualBonusAmount && bonus.manualBonusAmount > 0 && (
-                                                        <p className="text-sm text-blue-600">
-                                                            يشمل مبلغ يدوي: {formatCurrency(bonus.manualBonusAmount)}
-                                                        </p>
-                                                    )}
-                                                    {bonus.totalDeposits && bonus.totalDeposits > 0 && (
-                                                        <p className="text-sm text-muted-foreground">
-                                                            إيداعات الفريق: {formatCurrency(bonus.totalDeposits)}
-                                                        </p>
+                                                    {bonus.isManual && (
+                                                        <Badge variant="outline" className="mt-1">يدوي</Badge>
                                                     )}
                                                     {bonus.notes && (
-                                                        <p className="text-sm text-muted-foreground mt-1">
-                                                            {bonus.notes}
-                                                        </p>
+                                                        <p className="text-sm text-muted-foreground mt-1">{bonus.notes}</p>
                                                     )}
                                                 </div>
                                                 <div className="text-left space-y-2">
-                                                    <p className="text-xl font-bold text-green-600">
-                                                        {formatCurrency(bonus.bonusAmount)}
-                                                    </p>
-                                                    <Badge variant="outline">{bonus.bonusPercentage}%</Badge>
+                                                    <p className="text-xl font-bold text-green-600">{formatCurrency(bonus.bonusAmount)}</p>
                                                     <div className="flex gap-1 mt-2">
-                                                        <Button
-                                                            size="icon"
-                                                            variant="ghost"
-                                                            className="h-8 w-8"
-                                                            onClick={() => openEditDialog(bonus)}
-                                                            title="تعديل"
-                                                        >
+                                                        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEditDialog(bonus)} title="تعديل">
                                                             <Pencil className="h-4 w-4 text-blue-500" />
                                                         </Button>
-                                                        <Button
-                                                            size="icon"
-                                                            variant="ghost"
-                                                            className="h-8 w-8"
-                                                            onClick={() => handlePrintReport(bonus)}
-                                                            title="طباعة تقرير"
-                                                        >
+                                                        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => handlePrintReport(bonus)} title="طباعة تقرير">
                                                             <Printer className="h-4 w-4 text-gray-600" />
                                                         </Button>
-                                                        <Button
-                                                            size="icon"
-                                                            variant="ghost"
-                                                            className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50"
-                                                            onClick={() => setDeleteConfirmDialog(bonus.id)}
-                                                            title="حذف"
-                                                        >
+                                                        <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => setDeleteConfirmDialog(bonus.id)} title="حذف">
                                                             <Trash2 className="h-4 w-4" />
                                                         </Button>
                                                     </div>
@@ -1067,44 +909,35 @@ const SupervisorBonus = () => {
                         </DialogHeader>
                         <div className="space-y-4 py-4">
                             <div className="p-3 bg-muted rounded-lg text-sm space-y-1">
-                                <p>إجمالي المبيعات: <strong>{editingBonus && formatCurrency(editingBonus.totalTeamSales)}</strong></p>
-                                <p>بونص النسبة: <strong>{editingBonus && formatCurrency(editingBonus.bonusAmount - (editingBonus.manualBonusAmount || 0))}</strong></p>
-                                {editingBonus?.totalDeposits && editingBonus.totalDeposits > 0 && (
-                                    <p>الحد الأقصى (10% من الإيداعات): <strong>{formatCurrency(editingBonus.totalDeposits * 0.10)}</strong></p>
-                                )}
+                                <p>التحصيلات: <strong>{editingBonus && formatCurrency(editingBonus.totalPayments || 0)}</strong></p>
+                                <p>فواتير الإضاءة: <strong>{editingBonus && formatCurrency(editingBonus.lightingInvoicesTotal || 0)}</strong></p>
+                                <p>بونص الإضاءة: <strong>{editingBonus && formatCurrency(editingBonus.lightingBonus || 0)}</strong></p>
+                                <p>بونص الأقسام الأخرى: <strong>{editingBonus && formatCurrency(editingBonus.otherBonus || 0)}</strong></p>
                             </div>
                             <div className="space-y-2">
-                                <Label>مبلغ يدوي إضافي</Label>
+                                <Label>مبلغ البونص</Label>
                                 <Input
                                     type="number"
                                     min="0"
-                                    value={editManualAmount}
-                                    onChange={(e) => setEditManualAmount(e.target.value)}
-                                    placeholder="0"
+                                    value={editBonusAmount}
+                                    onChange={(e) => setEditBonusAmount(e.target.value)}
+                                    placeholder="مبلغ البونص"
                                 />
                             </div>
                             <div className="space-y-2">
                                 <Label>ملاحظات</Label>
-                                <Textarea
-                                    value={editNotes}
-                                    onChange={(e) => setEditNotes(e.target.value)}
-                                    placeholder="ملاحظات..."
-                                />
+                                <Textarea value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="ملاحظات..." />
                             </div>
                             {editingBonus && (
                                 <div className="p-3 bg-green-50 dark:bg-green-950 rounded-lg">
                                     <p className="font-semibold text-green-700 dark:text-green-400">
-                                        البونص الجديد: {formatCurrency(
-                                            (editingBonus.bonusAmount - (editingBonus.manualBonusAmount || 0)) + (parseFloat(editManualAmount) || 0)
-                                        )}
+                                        البونص الجديد: {formatCurrency(parseFloat(editBonusAmount) || 0)}
                                     </p>
                                 </div>
                             )}
                         </div>
                         <DialogFooter className="gap-2">
-                            <Button variant="outline" onClick={() => { setEditDialog(false); setEditingBonus(null); }}>
-                                إلغاء
-                            </Button>
+                            <Button variant="outline" onClick={() => { setEditDialog(false); setEditingBonus(null); }}>إلغاء</Button>
                             <Button onClick={handleSaveEdit}>
                                 <Pencil className="h-4 w-4 ml-2" />
                                 حفظ التعديلات
@@ -1125,18 +958,11 @@ const SupervisorBonus = () => {
                         <p className="text-center py-4">
                             هل أنت متأكد من حذف هذا البونص؟
                             <br />
-                            <span className="text-muted-foreground text-sm">
-                                لا يمكن التراجع عن هذا الإجراء
-                            </span>
+                            <span className="text-muted-foreground text-sm">لا يمكن التراجع عن هذا الإجراء</span>
                         </p>
                         <DialogFooter className="gap-2">
-                            <Button variant="outline" onClick={() => setDeleteConfirmDialog(null)}>
-                                لا، إلغاء
-                            </Button>
-                            <Button
-                                variant="destructive"
-                                onClick={() => deleteConfirmDialog && handleDeleteBonus(deleteConfirmDialog)}
-                            >
+                            <Button variant="outline" onClick={() => setDeleteConfirmDialog(null)}>لا، إلغاء</Button>
+                            <Button variant="destructive" onClick={() => deleteConfirmDialog && handleDeleteBonus(deleteConfirmDialog)}>
                                 <Trash2 className="h-4 w-4 ml-2" />
                                 نعم، احذف
                             </Button>

@@ -1,69 +1,39 @@
-import { db } from "@/shared/lib/indexedDB";
-
-// Check if running in Electron
-const isElectron = () => {
-  return typeof window !== "undefined" && window.electronAPI !== undefined;
-};
-
 /**
- * رسائل الأخطاء بالعربي للمستخدم
+ * WhatsApp Service (Frontend)
+ * الخدمة الرئيسية للواتساب - تعمل عبر API مع السيرفر
+ *
+ * التغيير الرئيسي: بدلاً من Electron IPC، نستخدم HTTP API + WebSocket
+ * - الاتصال والإرسال يتم عبر السيرفر
+ * - QR codes وتحديثات الحالة تصل عبر WebSocket
+ * - الحملات لازالت تعمل من الفرونت (لأنها تعتمد على بيانات محلية + PDF)
  */
-const ERROR_MESSAGES_AR = {
-  // بيئة التشغيل
-  NOT_ELECTRON: "⚠️ الواتساب يعمل فقط في تطبيق الكمبيوتر",
 
-  // أخطاء الحساب
+import { db } from "@/shared/lib/indexedDB";
+import { whatsappApi } from "./whatsappApiClient";
+import type {
+  AccountState,
+  MediaPayload,
+  MessageMetadata,
+} from "./whatsappApiClient";
+
+// ─── Error Messages ──────────────────────────────────────────────
+
+const ERROR_MESSAGES_AR = {
+  NOT_CONNECTED: "📵 السيرفر مش متصل - تأكد من الاتصال",
   ACCOUNT_NOT_FOUND: "❌ الحساب غير موجود",
   ACCOUNT_NOT_ACTIVE: "⚠️ الحساب غير نشط - فعّل الحساب الأول",
   ACCOUNT_NOT_CONNECTED: "📵 الحساب مش متصل - اربط الحساب الأول",
   NO_ACTIVE_ACCOUNT: "📵 مفيش حساب واتساب نشط - أضف حساب وفعّله",
-
-  // أخطاء إرسال الرسائل
-  DAILY_LIMIT_REACHED: "⏰ وصلت للحد الأقصى للرسائل اليوم - جرب بكره",
+  DAILY_LIMIT_REACHED: "⏰ وصلت للحد الأقصى للرسائل اليوم",
   SEND_FAILED: "❌ فشل إرسال الرسالة - جرب مرة تانية",
-  QUEUE_FAILED: "❌ فشل إضافة الرسالة للقائمة",
-
-  // أخطاء الحملات
-  CAMPAIGN_NOT_FOUND: "❌ الحملة غير موجودة",
-  CAMPAIGN_FAILED: "❌ فشل تشغيل الحملة",
-
-  // أخطاء العملاء
   CUSTOMER_NOT_FOUND: "❌ العميل غير موجود",
   NO_PHONE: "📱 العميل ده مسجلش رقم موبايل",
-
-  // أخطاء الفواتير
   INVOICE_NOT_FOUND: "❌ الفاتورة غير موجودة",
-
-  // أخطاء الشبكة
-  NO_INTERNET: "🌐 مفيش إنترنت - تأكد من الاتصال",
-
-  // أخطاء عامة
   UNKNOWN_ERROR: "⚠️ حصل خطأ - جرب مرة تانية",
 };
 
-/**
- * تحويل خطأ لرسالة عربية مفهومة
- */
-function getArabicError(error: any): string {
-  const msg = error?.message?.toLowerCase() || "";
+// ─── Types (re-exported for backward compatibility) ──────────────
 
-  if (msg.includes("electron")) return ERROR_MESSAGES_AR.NOT_ELECTRON;
-  if (msg.includes("not found") && msg.includes("account"))
-    return ERROR_MESSAGES_AR.ACCOUNT_NOT_FOUND;
-  if (msg.includes("not active")) return ERROR_MESSAGES_AR.ACCOUNT_NOT_ACTIVE;
-  if (msg.includes("not connected"))
-    return ERROR_MESSAGES_AR.ACCOUNT_NOT_CONNECTED;
-  if (msg.includes("daily limit")) return ERROR_MESSAGES_AR.DAILY_LIMIT_REACHED;
-  if (msg.includes("campaign")) return ERROR_MESSAGES_AR.CAMPAIGN_NOT_FOUND;
-  if (msg.includes("customer")) return ERROR_MESSAGES_AR.CUSTOMER_NOT_FOUND;
-  if (msg.includes("invoice")) return ERROR_MESSAGES_AR.INVOICE_NOT_FOUND;
-  if (msg.includes("network") || msg.includes("offline"))
-    return ERROR_MESSAGES_AR.NO_INTERNET;
-
-  return ERROR_MESSAGES_AR.UNKNOWN_ERROR;
-}
-
-// Queue System for Messages
 export interface WhatsAppMessage {
   id: string;
   accountId: string;
@@ -80,7 +50,7 @@ export interface WhatsAppMessage {
   scheduledAt?: string;
   sentAt?: string;
   error?: string;
-  errorAr?: string; // رسالة الخطأ بالعربي
+  errorAr?: string;
   metadata?: {
     invoiceId?: string;
     customerId?: string;
@@ -99,7 +69,7 @@ export interface WhatsAppAccount {
   dailyLimit: number;
   dailySent: number;
   lastResetDate: string;
-  antiSpamDelay: number; // ms between messages
+  antiSpamDelay: number;
   isActive: boolean;
   createdAt: string;
   lastConnectedAt?: string;
@@ -111,9 +81,9 @@ export interface Campaign {
   accountId: string;
   template: string;
   templateId?: string;
-  variables: string[]; // e.g., ["customerName", "amount", "dueDate"]
+  variables: string[];
   targetType: "credit" | "installment" | "all" | "custom";
-  sendTo?: "customer" | "salesRep" | "both"; // من يستلم الرسالة
+  sendTo?: "customer" | "salesRep" | "both";
   filters?: {
     minAmount?: number;
     maxAmount?: number;
@@ -147,151 +117,49 @@ export interface TaskState {
   updatedAt: string;
 }
 
+// ─── Status Listener ─────────────────────────────────────────────
+
+type StatusListener = (accountId: string, state: AccountState) => void;
+
+// ─── Service ─────────────────────────────────────────────────────
+
 class WhatsAppService {
-  private messageQueue: WhatsAppMessage[] = [];
-  private isProcessing: boolean = false;
-  private isOnline: boolean = navigator.onLine;
-  private processingInterval?: any;
-  private schedulerInterval?: any;
+  private statusListeners: StatusListener[] = [];
+  private statusPollIntervals = new Map<string, ReturnType<typeof setInterval>>();
+  private isOnline = navigator.onLine;
+  private schedulerInterval?: ReturnType<typeof setInterval>;
 
   constructor() {
     this.setupNetworkListener();
-    this.loadQueue();
-    this.startQueueProcessor();
-    // إعادة ربط الحسابات المتصلة تلقائياً عند بدء التطبيق
-    this.autoReconnectAccounts();
-    // بدء مراقبة الجدولة التلقائية
     this.startScheduleChecker();
   }
 
-  /**
-   * Auto-reconnect WhatsApp accounts on app startup.
-   * Tries each account one by one:
-   * - If it connects immediately (has saved session) → stop, we're done
-   * - If it shows QR code (needs re-auth) → disconnect and try next account
-   */
-  private async autoReconnectAccounts() {
-    if (!isElectron()) return;
+  // ── Status Listeners ────────────────────────────────────────
 
-    // Wait for IndexedDB and Electron IPC to be ready
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    try {
-      const accounts = await db.getAll<WhatsAppAccount>("whatsappAccounts");
-      if (accounts.length === 0) return;
-
-      console.log(`🔄 Auto-reconnect: checking ${accounts.length} WhatsApp account(s)...`);
-
-      for (const account of accounts) {
-        try {
-          console.log(`🔄 Trying to connect WhatsApp: ${account.phone} (${account.id})`);
-          await window.electronAPI.whatsapp.initAccount(account.id, account.phone);
-
-          // Poll state for up to 15 seconds to see if it connects or shows QR
-          const connected = await this.waitForConnectionResult(account.id, 15000);
-
-          if (connected) {
-            console.log(`✅ WhatsApp auto-connected: ${account.phone}`);
-            // Update status in DB
-            account.status = "connected";
-            account.isActive = true;
-            await db.update("whatsappAccounts", account);
-            return; // Done - one account connected successfully
-          } else {
-            // Got QR or timed out - close socket without logout (preserve session)
-            console.log(`⏭️ WhatsApp ${account.phone} needs QR scan, skipping to next...`);
-            try {
-              await window.electronAPI.whatsapp.closeSocket(account.id);
-            } catch (e) {
-              // Ignore close errors
-            }
-            // Update status in DB
-            account.status = "disconnected";
-            await db.update("whatsappAccounts", account);
-          }
-        } catch (err) {
-          console.error(`❌ Failed to connect WhatsApp ${account.phone}:`, err);
-        }
-      }
-
-      console.log("⚠️ No WhatsApp account could auto-connect. Manual QR scan needed.");
-    } catch (error) {
-      console.error("❌ Auto-reconnect failed:", error);
-    }
+  onStatusChange(listener: StatusListener): () => void {
+    this.statusListeners.push(listener);
+    return () => {
+      this.statusListeners = this.statusListeners.filter((l) => l !== listener);
+    };
   }
 
-  /**
-   * Poll getState to check if account connected or needs QR.
-   * Returns true if connected, false if QR appeared or timed out.
-   */
-  private async waitForConnectionResult(accountId: string, timeoutMs: number): Promise<boolean> {
-    const pollInterval = 1000; // Check every 1 second
-    const maxAttempts = Math.ceil(timeoutMs / pollInterval);
-
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise(resolve => setTimeout(resolve, pollInterval));
-
-      try {
-        const state = await window.electronAPI.whatsapp.getState(accountId);
-
-        if (state.status === "connected") {
-          return true;
-        }
-
-        if (state.status === "qr") {
-          // Needs QR scan - this account can't auto-connect
-          return false;
-        }
-
-        if (state.status === "disconnected" && state.error) {
-          // Failed with error
-          return false;
-        }
-
-        // Still "connecting" - keep waiting
-      } catch (e) {
-        console.error(`Error polling state for ${accountId}:`, e);
-        return false;
-      }
-    }
-
-    // Timed out while still connecting
-    return false;
+  private notifyStatusChange(accountId: string, state: AccountState): void {
+    this.statusListeners.forEach((l) => l(accountId, state));
   }
 
-  // Network Monitoring
-  private setupNetworkListener() {
-    window.addEventListener("online", () => {
-      console.log("🌐 Internet connected");
-      this.isOnline = true;
-      this.resumeAllTasks();
-    });
+  // ── Account Management ──────────────────────────────────────
 
-    window.addEventListener("offline", () => {
-      console.log("🌐 Internet disconnected");
-      this.isOnline = false;
-      this.pauseAllTasks();
-    });
-  }
-
-  // Initialize WhatsApp Account (Electron IPC)
   async initAccount(accountId: string): Promise<WhatsAppAccount> {
-    if (!isElectron()) {
-      throw new Error("WhatsApp requires Electron environment");
-    }
-
     const account = await this.getAccount(accountId);
     if (!account) throw new Error("Account not found");
 
     try {
-      // Call Electron main process via IPC
-      const result = await window.electronAPI.whatsapp.initAccount(
-        accountId,
-        account.phone
-      );
+      const result = await whatsappApi.connect(accountId, account.phone);
 
       if (result.success) {
-        await this.updateAccountStatus(accountId, result.status as any);
+        // بدء مراقبة الحالة عبر polling
+        this.startStatusPolling(accountId);
+        await this.updateAccountStatus(accountId, "connecting");
       } else {
         await this.updateAccountStatus(accountId, "failed");
       }
@@ -303,227 +171,112 @@ class WhatsAppService {
     }
   }
 
-  // Get Account State (QR Code) from Electron
-  async getAccountState(accountId: string) {
-    if (!isElectron()) {
-      return { status: "disconnected" };
-    }
-
+  async getAccountState(accountId: string): Promise<AccountState> {
     try {
-      return await window.electronAPI.whatsapp.getState(accountId);
-    } catch (error) {
-      console.error("Failed to get account state:", error);
-      return { status: "failed" };
+      return await whatsappApi.getStatus(accountId);
+    } catch {
+      return { status: "disconnected", message: "📵 فشل الاتصال بالسيرفر" };
     }
   }
 
-  // Get Groups from WhatsApp (Electron IPC)
   async getGroups(accountId: string): Promise<{ id: string; name: string }[]> {
-    if (!isElectron()) {
-      console.warn("WhatsApp getGroups requires Electron environment");
-      return [];
-    }
-
     try {
-      // Assuming window.electronAPI.whatsapp.getGroups exists or will continue to fail gracefully
-      // If the backend isn't updated yet, this might fail, so we catch errors
-      if (window.electronAPI.whatsapp.getGroups) {
-        const result = await window.electronAPI.whatsapp.getGroups(accountId);
-        if (result.success && Array.isArray(result.groups)) {
-          return result.groups;
-        }
-      }
-      return [];
-    } catch (error) {
-      console.error("Failed to get groups:", error);
+      return await whatsappApi.getGroups(accountId);
+    } catch {
       return [];
     }
   }
 
-  // Send Message
+  async disconnectAccount(accountId: string): Promise<void> {
+    this.stopStatusPolling(accountId);
+    try {
+      await whatsappApi.disconnect(accountId);
+    } catch {
+      // تجاهل
+    }
+    await this.updateAccountStatus(accountId, "disconnected");
+  }
+
+  // ── Status Polling ──────────────────────────────────────────
+
+  private startStatusPolling(accountId: string): void {
+    this.stopStatusPolling(accountId);
+
+    const interval = setInterval(async () => {
+      try {
+        const state = await whatsappApi.getStatus(accountId);
+        this.notifyStatusChange(accountId, state);
+
+        // تحديث DB المحلية
+        const account = await this.getAccount(accountId);
+        if (account && account.status !== state.status) {
+          account.status = state.status;
+          if (state.qrCode) account.qrCode = state.qrCode;
+          if (state.status === "connected") {
+            account.lastConnectedAt = new Date().toISOString();
+            account.isActive = true;
+          }
+          await db.update("whatsappAccounts", account);
+        }
+
+        // إيقاف الاستطلاع إذا اتصل بنجاح أو فشل
+        if (state.status === "connected" || state.status === "disconnected" || state.status === "failed") {
+          // Keep polling for connected accounts to detect disconnection
+          if (state.status !== "connected") {
+            this.stopStatusPolling(accountId);
+          }
+        }
+      } catch {
+        // سيكتمل في المرة التالية
+      }
+    }, 2000);
+
+    this.statusPollIntervals.set(accountId, interval);
+  }
+
+  private stopStatusPolling(accountId: string): void {
+    const existing = this.statusPollIntervals.get(accountId);
+    if (existing) {
+      clearInterval(existing);
+      this.statusPollIntervals.delete(accountId);
+    }
+  }
+
+  // ── Send Message (via Server API) ───────────────────────────
+
   async sendMessage(
     accountId: string,
     to: string,
     message: string,
     media?: WhatsAppMessage["media"],
-    metadata?: WhatsAppMessage["metadata"]
+    metadata?: WhatsAppMessage["metadata"],
   ): Promise<string> {
-    const messageId = Date.now().toString();
+    // تحويل media format من القديم للجديد
+    let apiMedia: MediaPayload | undefined;
+    if (media) {
+      apiMedia = {
+        type: media.type,
+        data: media.url, // في الكود القديم كان url يحمل base64
+        filename: media.filename,
+        caption: media.caption,
+      };
+    }
 
-    const formattedTo = this.formatPhoneNumber(to);
-    console.log(`📤 [WhatsApp] Queueing message - original to: "${to}", formatted: "${formattedTo}"`);
-
-    const queueItem: WhatsAppMessage = {
-      id: messageId,
+    const result = await whatsappApi.sendMessage({
       accountId,
-      to: formattedTo,
+      to,
       message,
-      media,
-      status: "pending",
-      retries: 0,
-      metadata,
-      createdAt: new Date().toISOString(),
-    };
+      media: apiMedia,
+      metadata: metadata as MessageMetadata,
+    });
 
-    this.messageQueue.push(queueItem);
-    await this.saveQueue();
-
-    return messageId;
+    return result.data.messageId;
   }
 
-  // Process Queue
-  private async startQueueProcessor() {
-    this.processingInterval = setInterval(async () => {
-      if (!this.isProcessing && this.isOnline && this.messageQueue.length > 0) {
-        await this.processNextMessage();
-      }
-    }, 1000);
-  }
+  // ── Campaign Management ─────────────────────────────────────
 
-  private async processNextMessage() {
-    if (!this.isOnline) {
-      console.log("📵 [WhatsApp] Offline - waiting for connection...");
-      return;
-    }
-
-    this.isProcessing = true;
-
-    const message = this.messageQueue.find((m) => m.status === "pending");
-    if (!message) {
-      this.isProcessing = false;
-      return;
-    }
-
-    try {
-      const account = await this.getAccount(message.accountId);
-      if (!account) {
-        message.status = "failed";
-        message.error = "Account not found";
-        message.errorAr = ERROR_MESSAGES_AR.ACCOUNT_NOT_FOUND;
-        await this.saveQueue();
-        this.isProcessing = false;
-        return;
-      }
-
-      if (!account.isActive) {
-        message.status = "failed";
-        message.error = "Account not active";
-        message.errorAr = ERROR_MESSAGES_AR.ACCOUNT_NOT_ACTIVE;
-        await this.saveQueue();
-        this.isProcessing = false;
-        return;
-      }
-
-      // Check daily limit
-      if (this.shouldResetDailyCount(account)) {
-        await this.resetDailyCount(message.accountId);
-      }
-
-      if (account.dailySent >= account.dailyLimit) {
-        message.status = "failed";
-        message.error = "Daily limit reached";
-        message.errorAr = ERROR_MESSAGES_AR.DAILY_LIMIT_REACHED;
-        await this.saveQueue();
-        this.isProcessing = false;
-        return;
-      }
-
-      // Anti-spam delay
-      await this.delay(account.antiSpamDelay);
-
-      message.status = "sending";
-      await this.saveQueue();
-
-      // Check if account is connected via Electron IPC
-      if (isElectron()) {
-        const isConnected = await window.electronAPI!.whatsapp.isConnected(
-          message.accountId
-        );
-        if (!isConnected) {
-          console.log(
-            "🔄 [WhatsApp] Account not connected, trying to reconnect..."
-          );
-          message.status = "pending"; // Reset to pending for retry
-          message.errorAr = ERROR_MESSAGES_AR.ACCOUNT_NOT_CONNECTED;
-          await this.saveQueue();
-          await this.initAccount(message.accountId);
-          this.isProcessing = false;
-          return;
-        }
-
-        // Send message via Electron IPC
-        let result;
-        if (message.media) {
-          result = await window.electronAPI!.whatsapp.sendMedia(
-            message.accountId,
-            message.to,
-            message.media.url,
-            message.media.type,
-            message.media.caption || message.message,
-            message.media.filename
-          );
-        } else {
-          result = await window.electronAPI!.whatsapp.sendText(
-            message.accountId,
-            message.to,
-            message.message
-          );
-        }
-
-        if (!result.success) {
-          // Use Arabic error message from backend if available
-          const errorMsg =
-            result.messageAr || result.message || ERROR_MESSAGES_AR.SEND_FAILED;
-          throw new Error(errorMsg);
-        }
-      } else {
-        throw new Error(ERROR_MESSAGES_AR.NOT_ELECTRON);
-      }
-
-      message.status = "sent";
-      message.sentAt = new Date().toISOString();
-      message.errorAr = undefined; // Clear any previous error
-      await this.incrementDailySent(message.accountId);
-      await this.saveQueue();
-
-      console.log("✅ [WhatsApp] Message sent successfully to:", message.to);
-
-      // Remove from queue after 24 hours
-      setTimeout(() => {
-        this.messageQueue = this.messageQueue.filter(
-          (m) => m.id !== message.id
-        );
-        this.saveQueue();
-      }, 24 * 60 * 60 * 1000);
-    } catch (error: any) {
-      console.error("❌ [WhatsApp] Failed to send message:", error.message);
-
-      message.retries++;
-      message.error = error.message;
-      message.errorAr = getArabicError(error) || error.message;
-
-      if (message.retries >= 3) {
-        message.status = "failed";
-        console.error(
-          "❌ [WhatsApp] Message failed after 3 retries:",
-          message.to
-        );
-      } else {
-        message.status = "pending";
-        console.log(
-          `🔄 [WhatsApp] Will retry (${message.retries}/3):`,
-          message.to
-        );
-      }
-      await this.saveQueue();
-    }
-
-    this.isProcessing = false;
-  }
-
-  // Campaign Management
   async createCampaign(
-    campaign: Omit<Campaign, "id" | "createdAt">
+    campaign: Omit<Campaign, "id" | "createdAt">,
   ): Promise<Campaign> {
     const newCampaign: Campaign = {
       ...campaign,
@@ -541,12 +294,10 @@ class WhatsAppService {
     const campaign = await db.get<Campaign>("whatsappCampaigns", campaignId);
     if (!campaign) throw new Error("Campaign not found");
 
-    // If this is a statement campaign, run the special statement flow
     if (campaign.templateId === "account_statement") {
       return this.runStatementCampaign(campaign);
     }
 
-    // Create task state
     const taskState: TaskState = {
       id: `campaign_${campaignId}`,
       type: "send_campaign",
@@ -562,7 +313,6 @@ class WhatsAppService {
 
     await db.add("whatsappTasks", taskState);
 
-    // Load recipients based on filters
     const recipients = await this.loadCampaignRecipients(campaign);
     const salesRepsMap = await this.loadSalesRepsMap();
 
@@ -573,30 +323,17 @@ class WhatsAppService {
       }
 
       const recipient = recipients[i];
-      const message = this.fillTemplate(
-        campaign.template,
-        campaign.variables,
-        recipient
-      );
-
-      // Resolve send targets based on sendTo setting
+      const message = this.fillTemplate(campaign.template, campaign.variables, recipient);
       const targets = this.resolveSendTargets(recipient, campaign.sendTo || "customer", salesRepsMap);
 
       for (const target of targets) {
-        await this.sendMessage(
-          campaign.accountId,
-          target,
-          message,
-          undefined,
-          {
-            campaignId,
-            customerId: recipient.id,
-            type: "campaign",
-          }
-        );
+        await this.sendMessage(campaign.accountId, target, message, undefined, {
+          campaignId,
+          customerId: recipient.id,
+          type: "campaign",
+        });
       }
 
-      // Update task progress
       taskState.currentIndex = i + 1;
       taskState.updatedAt = new Date().toISOString();
       await db.update("whatsappTasks", taskState);
@@ -614,7 +351,6 @@ class WhatsAppService {
     await db.update("whatsappTasks", taskState);
   }
 
-  // Statement Campaign - sends PDF statement to each customer
   private async runStatementCampaign(campaign: Campaign): Promise<void> {
     const campaignId = campaign.id;
 
@@ -635,11 +371,8 @@ class WhatsAppService {
 
     const recipients = await this.loadCampaignRecipients(campaign);
     const salesRepsMap = await this.loadSalesRepsMap();
-
-    // Dynamically import the PDF generator
     const { generateStatementPDF } = await import("@/services/statementPdfService");
 
-    // Date range: from start of year to today
     const fromDate = new Date(new Date().getFullYear(), 0, 1);
     const toDate = new Date();
 
@@ -650,8 +383,6 @@ class WhatsAppService {
       }
 
       const recipient = recipients[i];
-
-      // Resolve send targets based on sendTo setting
       const targets = this.resolveSendTargets(recipient, campaign.sendTo || "customer", salesRepsMap);
 
       if (targets.length === 0) {
@@ -661,17 +392,13 @@ class WhatsAppService {
       }
 
       try {
-        // Generate PDF for this customer
         const pdfBlob = await generateStatementPDF(recipient.id, fromDate, toDate);
-
         if (!pdfBlob) {
-          console.warn(`⚠️ [Campaign] No statement data for customer: ${recipient.name}`);
           campaign.failedCount++;
           await db.update("whatsappCampaigns", campaign);
           continue;
         }
 
-        // Convert blob to base64
         const base64data = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onloadend = () => resolve(reader.result as string);
@@ -679,31 +406,19 @@ class WhatsAppService {
           reader.readAsDataURL(pdfBlob);
         });
 
-        // Fill the caption template with customer data
-        const caption = this.fillTemplate(
-          campaign.template,
-          campaign.variables,
-          recipient
-        );
+        const caption = this.fillTemplate(campaign.template, campaign.variables, recipient);
 
-        // Send to all resolved targets
         for (const target of targets) {
-          await this.sendMessage(
-            campaign.accountId,
-            target,
+          await this.sendMessage(campaign.accountId, target, caption, {
+            type: "document",
+            url: base64data,
             caption,
-            {
-              type: "document",
-              url: base64data,
-              caption: caption,
-              filename: `كشف حساب ${recipient.name || "عميل"}.pdf`,
-            },
-            {
-              campaignId,
-              customerId: recipient.id,
-              type: "statement",
-            }
-          );
+            filename: `كشف حساب ${recipient.name || "عميل"}.pdf`,
+          }, {
+            campaignId,
+            customerId: recipient.id,
+            type: "statement",
+          });
         }
 
         campaign.sentCount++;
@@ -712,13 +427,11 @@ class WhatsAppService {
         campaign.failedCount++;
       }
 
-      // Update task progress
       taskState.currentIndex = i + 1;
       taskState.updatedAt = new Date().toISOString();
       await db.update("whatsappTasks", taskState);
       await db.update("whatsappCampaigns", campaign);
 
-      // Small delay between PDF generations to avoid overwhelming the system
       await this.delay(2000);
     }
 
@@ -731,116 +444,76 @@ class WhatsAppService {
     await db.update("whatsappTasks", taskState);
   }
 
-  // Auto Reminders
+  // ── Reminders ───────────────────────────────────────────────
+
   async sendInstallmentReminder(
     customerId: string,
-    installmentId: string
+    _installmentId: string,
   ): Promise<{ success: boolean; message: string }> {
     try {
-      // Get customer and installment details
       const customer = await db.get("customers", customerId);
-      if (!customer) {
-        return {
-          success: false,
-          message: ERROR_MESSAGES_AR.CUSTOMER_NOT_FOUND,
-        };
-      }
+      if (!customer) return { success: false, message: ERROR_MESSAGES_AR.CUSTOMER_NOT_FOUND };
 
       const sendTarget = (customer as any).collectionGroupId || (customer as any).whatsappGroupId || (customer as any).phone;
-      if (!sendTarget) {
-        return { success: false, message: ERROR_MESSAGES_AR.NO_PHONE };
-      }
+      if (!sendTarget) return { success: false, message: ERROR_MESSAGES_AR.NO_PHONE };
 
-      // Get active WhatsApp account
       const accounts = await db.getAll<WhatsAppAccount>("whatsappAccounts");
-      const activeAccount = accounts.find(
-        (a) => a.isActive && a.status === "connected"
-      );
+      const activeAccount = accounts.find((a) => a.isActive && a.status === "connected");
+      if (!activeAccount) return { success: false, message: ERROR_MESSAGES_AR.NO_ACTIVE_ACCOUNT };
 
-      if (!activeAccount) {
-        return { success: false, message: ERROR_MESSAGES_AR.NO_ACTIVE_ACCOUNT };
-      }
+      const message = `مرحباً ${(customer as any).name}،\n\nتذكير بموعد دفع القسط المستحق.\nيرجى التواصل معنا لإتمام الدفع.\n\nشكراً لتعاملكم معنا 🙏`;
 
-      const message = `مرحباً ${(customer as any).name
-        }،\n\nتذكير بموعد دفع القسط المستحق.\nيرجى التواصل معنا لإتمام الدفع.\n\nشكراً لتعاملكم معنا 🙏`;
-
-      await this.sendMessage(
-        activeAccount.id,
-        sendTarget,
-        message,
-        undefined,
-        {
-          customerId,
-          type: "reminder",
-        }
-      );
+      await this.sendMessage(activeAccount.id, sendTarget, message, undefined, {
+        customerId,
+        type: "reminder",
+      });
 
       return { success: true, message: "✅ تم إرسال التذكير بنجاح" };
     } catch (error: any) {
       console.error("❌ [WhatsApp] Failed to send reminder:", error);
-      return { success: false, message: getArabicError(error) };
+      return { success: false, message: ERROR_MESSAGES_AR.UNKNOWN_ERROR };
     }
   }
 
   async sendInvoiceWhatsApp(
     invoiceId: string,
-    pdfUrl: string
+    pdfUrl: string,
   ): Promise<{ success: boolean; message: string }> {
     try {
       const invoice = await db.get("invoices", invoiceId);
-      if (!invoice) {
-        return { success: false, message: ERROR_MESSAGES_AR.INVOICE_NOT_FOUND };
-      }
+      if (!invoice) return { success: false, message: ERROR_MESSAGES_AR.INVOICE_NOT_FOUND };
 
       const customer = await db.get("customers", (invoice as any).customerId);
-      if (!customer) {
-        return {
-          success: false,
-          message: ERROR_MESSAGES_AR.CUSTOMER_NOT_FOUND,
-        };
-      }
+      if (!customer) return { success: false, message: ERROR_MESSAGES_AR.CUSTOMER_NOT_FOUND };
 
       const sendTarget = (customer as any).invoiceGroupId || (customer as any).whatsappGroupId || (customer as any).phone;
-      if (!sendTarget) {
-        return { success: false, message: ERROR_MESSAGES_AR.NO_PHONE };
-      }
+      if (!sendTarget) return { success: false, message: ERROR_MESSAGES_AR.NO_PHONE };
 
       const accounts = await db.getAll<WhatsAppAccount>("whatsappAccounts");
-      const activeAccount = accounts.find(
-        (a) => a.isActive && a.status === "connected"
-      );
+      const activeAccount = accounts.find((a) => a.isActive && a.status === "connected");
+      if (!activeAccount) return { success: false, message: ERROR_MESSAGES_AR.NO_ACTIVE_ACCOUNT };
 
-      if (!activeAccount) {
-        return { success: false, message: ERROR_MESSAGES_AR.NO_ACTIVE_ACCOUNT };
-      }
+      const message = `فاتورة رقم: ${(invoice as any).id}\nالمبلغ الإجمالي: ${(invoice as any).total}\nشركة لونج تايم للصناعات الكهربائية`;
 
-      const message = `فاتورة رقم: ${(invoice as any).id}\nالمبلغ الإجمالي: ${(invoice as any).total
-        }\nشركة لونج تايم للصناعات الكهربائية`;
-
-      await this.sendMessage(
-        activeAccount.id,
-        sendTarget,
-        message,
-        {
-          type: "document",
-          url: pdfUrl,
-          filename: `${(customer as any).name || (invoice as any).customerName || 'عميل'} - ${(invoice as any).invoiceNumber || (invoice as any).id}.pdf`,
-        },
-        {
-          invoiceId,
-          customerId: (customer as any).id,
-          type: "invoice",
-        }
-      );
+      await this.sendMessage(activeAccount.id, sendTarget, message, {
+        type: "document",
+        url: pdfUrl,
+        filename: `${(customer as any).name || (invoice as any).customerName || "عميل"} - ${(invoice as any).invoiceNumber || (invoice as any).id}.pdf`,
+      }, {
+        invoiceId,
+        customerId: (customer as any).id,
+        type: "invoice",
+      });
 
       return { success: true, message: "✅ تم إرسال الفاتورة بنجاح" };
     } catch (error: any) {
       console.error("❌ [WhatsApp] Failed to send invoice:", error);
-      return { success: false, message: getArabicError(error) };
+      return { success: false, message: ERROR_MESSAGES_AR.UNKNOWN_ERROR };
     }
   }
 
-  // Task Management
+  // ── Task Management ─────────────────────────────────────────
+
   async pauseTask(taskId: string): Promise<void> {
     const task = await db.get<TaskState>("whatsappTasks", taskId);
     if (task) {
@@ -859,87 +532,89 @@ class WhatsAppService {
       task.updatedAt = new Date().toISOString();
       await db.update("whatsappTasks", task);
 
-      // Resume based on task type
       if (task.type === "send_campaign") {
         await this.runCampaign(task.data.campaignId);
       }
     }
   }
 
-  private async pauseAllTasks(): Promise<void> {
-    const tasks = await db.getAll<TaskState>("whatsappTasks");
-    for (const task of tasks) {
-      if (task.status === "running") {
-        await this.pauseTask(task.id);
+  // ── Wait for message ────────────────────────────────────────
+
+  async waitForMessage(messageId: string, timeoutMs: number = 60000): Promise<boolean> {
+    // في الوضع الجديد، الرسائل ترسل عبر السيرفر
+    // يمكن مراقبة الحالة عبر polling للقائمة
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      try {
+        const status = await whatsappApi.getQueueStatus();
+        const msg = status.messages.find((m: any) => m.id === messageId);
+        if (msg?.status === "sent") return true;
+        if (msg?.status === "failed") return false;
+      } catch {
+        // continue
       }
+      await this.delay(1000);
+    }
+    return false;
+  }
+
+  // ── Cleanup ─────────────────────────────────────────────────
+
+  cleanup(): void {
+    for (const interval of this.statusPollIntervals.values()) {
+      clearInterval(interval);
+    }
+    this.statusPollIntervals.clear();
+    if (this.schedulerInterval) {
+      clearInterval(this.schedulerInterval);
     }
   }
 
-  private async resumeAllTasks(): Promise<void> {
-    const tasks = await db.getAll<TaskState>("whatsappTasks");
-    for (const task of tasks) {
-      if (task.status === "paused") {
-        await this.resumeTask(task.id);
-      }
-    }
+  // ─── Private Helpers ──────────────────────────────────────────
+
+  private setupNetworkListener(): void {
+    window.addEventListener("online", () => {
+      this.isOnline = true;
+    });
+    window.addEventListener("offline", () => {
+      this.isOnline = false;
+    });
   }
 
-  // Helper Methods
   private formatPhoneNumber(phone: string): string {
-    // If it's a group JID, keep it as-is
-    if (phone.includes("@g.us")) {
-      console.log("📱 [WhatsApp] Group JID detected, sending as-is:", phone);
+    if (phone.includes("@g.us") || phone.includes("@s.whatsapp.net")) {
       return phone;
     }
-
-    // If it already has @s.whatsapp.net, keep it
-    if (phone.includes("@s.whatsapp.net")) {
-      return phone;
-    }
-
-    // Remove all non-digit characters
     let cleaned = phone.replace(/\D/g, "");
-
-    // Handle Egyptian numbers - remove leading 0 if present
     if (cleaned.startsWith("0") && !cleaned.startsWith("00")) {
       cleaned = cleaned.substring(1);
     }
-
-    // Add country code if not present (Egypt = 20)
     if (!cleaned.startsWith("20")) {
       cleaned = "20" + cleaned;
     }
-
     return cleaned + "@s.whatsapp.net";
   }
 
-  private fillTemplate(
-    template: string,
-    variables: string[],
-    data: any
-  ): string {
+  private fillTemplate(template: string, variables: string[], data: any): string {
     let message = template;
 
-    // Mapping للمتغيرات: الـ template بيستخدم أسماء معينة والـ data ممكن يكون فيها أسماء مختلفة
     const variableMapping: Record<string, string> = {
-      "name": data.name || data.customerName || "",
-      "customerName": data.name || data.customerName || "",
-      "phone": data.phone || "",
-      "amount": (data.currentBalance || data.amount || 0).toLocaleString("ar-EG"),
-      "currentBalance": (data.currentBalance || 0).toLocaleString("ar-EG"),
-      "storeName": data.storeName || localStorage.getItem("storeName") || "متجرنا",
-      "installmentAmount": (data.installmentAmount || data.nextInstallment || 0).toLocaleString("ar-EG"),
-      "remainingAmount": (data.remainingAmount || data.currentBalance || 0).toLocaleString("ar-EG"),
-      "dueDate": data.dueDate || data.nextDueDate || "",
+      name: data.name || data.customerName || "",
+      customerName: data.name || data.customerName || "",
+      phone: data.phone || "",
+      amount: (data.currentBalance || data.amount || 0).toLocaleString("ar-EG"),
+      currentBalance: (data.currentBalance || 0).toLocaleString("ar-EG"),
+      storeName: data.storeName || localStorage.getItem("storeName") || "متجرنا",
+      installmentAmount: (data.installmentAmount || data.nextInstallment || 0).toLocaleString("ar-EG"),
+      remainingAmount: (data.remainingAmount || data.currentBalance || 0).toLocaleString("ar-EG"),
+      dueDate: data.dueDate || data.nextDueDate || "",
     };
 
-    // استبدال كل المتغيرات في الرسالة
     Object.entries(variableMapping).forEach(([key, value]) => {
       const regex = new RegExp(`{{${key}}}`, "g");
       message = message.replace(regex, String(value));
     });
 
-    // لو في متغيرات تانية مش في الـ mapping، نحاول نجيبها من الـ data مباشرة
     variables.forEach((variable) => {
       if (!variableMapping[variable]) {
         const value = data[variable] || "";
@@ -954,74 +629,52 @@ class WhatsAppService {
   private async loadCampaignRecipients(campaign: Campaign): Promise<any[]> {
     let customers = await db.getAll("customers");
 
-    // حساب الأرصدة الفعلية من الحركات (فواتير + مدفوعات + مرتجعات + بونص)
-    // بدلاً من الاعتماد على currentBalance المخزن في IndexedDB الذي قد يكون قديماً
     const { calculateAllCustomerBalances } = await import("@/hooks/useCustomerBalances");
     const balanceMap = await calculateAllCustomerBalances();
 
-    // Helper to get accurate balance
-    const getBalance = (customerId: string, fallback: number = 0) => {
-      return balanceMap[String(customerId)] ?? fallback;
-    };
+    const getBalance = (customerId: string, fallback = 0) =>
+      balanceMap[String(customerId)] ?? fallback;
 
     if (campaign.targetType === "credit") {
-      // Filter customers with credit (using real calculated balance)
-      customers = customers.filter((c: any) => getBalance(c.id, Number(c.currentBalance) || 0) > 0);
-    } else if (campaign.targetType === "installment") {
-      // Filter customers with installments
-      // Implementation depends on your data structure
+      customers = customers.filter(
+        (c: any) => getBalance(c.id, Number(c.currentBalance) || 0) > 0,
+      );
     }
 
     if (campaign.filters) {
       if (campaign.filters.minAmount) {
         customers = customers.filter(
-          (c: any) => getBalance(c.id, Number(c.currentBalance) || 0) >= campaign.filters!.minAmount!
+          (c: any) => getBalance(c.id, Number(c.currentBalance) || 0) >= campaign.filters!.minAmount!,
         );
       }
       if (campaign.filters.maxAmount) {
         customers = customers.filter(
-          (c: any) => getBalance(c.id, Number(c.currentBalance) || 0) <= campaign.filters!.maxAmount!
+          (c: any) => getBalance(c.id, Number(c.currentBalance) || 0) <= campaign.filters!.maxAmount!,
         );
       }
-
-      // Filter by Class
       if (campaign.filters.class && campaign.filters.class !== "all") {
-        customers = customers.filter(
-          (c: any) => c.class === campaign.filters?.class
-        );
+        customers = customers.filter((c: any) => c.class === campaign.filters?.class);
       }
-
-      // Filter by Sales Rep
       if (campaign.filters.salesRepId) {
-        customers = customers.filter(
-          (c: any) => c.salesRepId === campaign.filters?.salesRepId
-        );
+        customers = customers.filter((c: any) => c.salesRepId === campaign.filters?.salesRepId);
       }
-
-      // Filter by Supervisor
       if (campaign.filters.supervisorId) {
-        // We need to fetch reps for this supervisor properly, but since we are in a service 
-        // that might not have direct access to "salesReps" easily unless we fetch them.
-        // Let's fetch all salesReps first.
-
         try {
-          // Assuming db.getAll is available and works for 'salesReps'
           const reps = await db.getAll("salesReps");
           const supervisorRepIds = reps
             .filter((r: any) => r.supervisorId === campaign.filters?.supervisorId)
             .map((r: any) => r.id);
-
           customers = customers.filter((c: any) => supervisorRepIds.includes(c.salesRepId));
-        } catch (e) {
-          console.error("Error filtering by supervisor", e);
+        } catch {
+          // تجاهل
         }
       }
     }
 
-    // فلترة العملاء اللي عندهم وسيلة تواصل (هاتف أو جروب واتساب)
-    customers = customers.filter((c: any) => c.phone || c.whatsappGroupId || c.invoiceGroupId || c.collectionGroupId);
+    customers = customers.filter(
+      (c: any) => c.phone || c.whatsappGroupId || c.invoiceGroupId || c.collectionGroupId,
+    );
 
-    // إضافة storeName و الرصيد الفعلي لكل customer عشان يتعوض في الـ template
     const storeName = localStorage.getItem("storeName") || "متجرنا";
     return customers.map((c: any) => ({
       ...c,
@@ -1030,166 +683,19 @@ class WhatsAppService {
     }));
   }
 
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  private shouldResetDailyCount(account: WhatsAppAccount): boolean {
-    const lastReset = new Date(account.lastResetDate);
-    const now = new Date();
-    return (
-      now.getDate() !== lastReset.getDate() ||
-      now.getMonth() !== lastReset.getMonth() ||
-      now.getFullYear() !== lastReset.getFullYear()
-    );
-  }
-
-  private async resetDailyCount(accountId: string): Promise<void> {
-    const account = await this.getAccount(accountId);
-    if (account) {
-      account.dailySent = 0;
-      account.lastResetDate = new Date().toISOString();
-      await db.update("whatsappAccounts", account);
-    }
-  }
-
-  private async incrementDailySent(accountId: string): Promise<void> {
-    const account = await this.getAccount(accountId);
-    if (account) {
-      account.dailySent++;
-      await db.update("whatsappAccounts", account);
-    }
-  }
-
-  private async updateAccountStatus(
-    accountId: string,
-    status: WhatsAppAccount["status"],
-    qrCode?: string
-  ): Promise<void> {
-    const account = await this.getAccount(accountId);
-    if (account) {
-      account.status = status;
-      if (qrCode) account.qrCode = qrCode;
-      if (status === "connected")
-        account.lastConnectedAt = new Date().toISOString();
-      await db.update("whatsappAccounts", account);
-    }
-  }
-
-  private async getAccount(accountId: string): Promise<WhatsAppAccount | null> {
-    return await db.get<WhatsAppAccount>("whatsappAccounts", accountId);
-  }
-
-  private async saveQueue(): Promise<void> {
-    try {
-      // Clean up before saving: remove old sent/failed messages to prevent quota issues
-      const now = Date.now();
-      const ONE_HOUR = 60 * 60 * 1000;
-      const MAX_QUEUE_SIZE = 500;
-
-      // Keep: pending/sending messages always, sent/failed only if < 2 hours old
-      let queueToSave = this.messageQueue.filter(m => {
-        if (m.status === 'pending' || m.status === 'sending') return true;
-        const age = now - new Date(m.sentAt || m.createdAt).getTime();
-        return age < 2 * ONE_HOUR;
-      });
-
-      // If still too large, keep only pending/sending + most recent completed
-      if (queueToSave.length > MAX_QUEUE_SIZE) {
-        const active = queueToSave.filter(m => m.status === 'pending' || m.status === 'sending');
-        const completed = queueToSave
-          .filter(m => m.status !== 'pending' && m.status !== 'sending')
-          .slice(-(MAX_QUEUE_SIZE - active.length));
-        queueToSave = [...active, ...completed];
-      }
-
-      // Strip media data from sent/failed messages to save space
-      const lightweight = queueToSave.map(m => {
-        if ((m.status === 'sent' || m.status === 'failed') && m.media) {
-          const { media, ...rest } = m;
-          return rest;
-        }
-        return m;
-      });
-
-      localStorage.setItem("whatsappQueue", JSON.stringify(lightweight));
-    } catch (error) {
-      console.warn("⚠️ Failed to save WhatsApp queue to localStorage (Quota exceeded). Operations will continue in-memory.", error);
-
-      // Last resort: save only pending/sending messages
-      try {
-        const essentialQueue = this.messageQueue.filter(m => m.status === 'pending' || m.status === 'sending');
-        localStorage.setItem("whatsappQueue", JSON.stringify(essentialQueue));
-        console.log("✅ Recovered storage by clearing completed messages.");
-      } catch (e) {
-        // Clear the key entirely to free space for other operations
-        try { localStorage.removeItem("whatsappQueue"); } catch {}
-        console.error("❌ Critical: Secondary save attempt failed. Queue cleared from storage.", e);
-      }
-    }
-  }
-
-  private async loadQueue(): Promise<void> {
-    const saved = localStorage.getItem("whatsappQueue");
-    if (saved) {
-      try {
-        this.messageQueue = JSON.parse(saved);
-      } catch (e) {
-        console.error("Failed to parse queue", e);
-        this.messageQueue = [];
-      }
-    }
-  }
-
-  // Helper method to wait for message completion
-  async waitForMessage(messageId: string, timeoutMs: number = 60000): Promise<boolean> {
-    return new Promise((resolve) => {
-      const startTime = Date.now();
-
-      const checkInterval = setInterval(() => {
-        const msg = this.messageQueue.find(m => m.id === messageId);
-
-        if (!msg) {
-          // Message removed or lost?
-          // If we can't find it, it might have been cleared. Assume failed if too soon, or check if we tracked it differently.
-          // For now, if lost from queue, stop waiting.
-          clearInterval(checkInterval);
-          resolve(false);
-          return;
-        }
-
-        if (msg.status === 'sent') {
-          clearInterval(checkInterval);
-          resolve(true);
-        } else if (msg.status === 'failed') {
-          clearInterval(checkInterval);
-          resolve(false);
-        } else if (Date.now() - startTime > timeoutMs) {
-          clearInterval(checkInterval);
-          resolve(false); // Timeout
-        }
-      }, 500);
-    });
-  }
-
-  /**
-   * Resolve send targets based on sendTo configuration
-   * @returns array of phone/JID strings to send to
-   */
   private resolveSendTargets(
     customer: any,
     sendTo: "customer" | "salesRep" | "both",
-    salesRepsMap: Map<string, any>
+    salesRepsMap: Map<string, any>,
   ): string[] {
     const targets: string[] = [];
 
-    // Customer target
     if (sendTo === "customer" || sendTo === "both") {
-      const customerTarget = customer.collectionGroupId || customer.whatsappGroupId || customer.phone;
+      const customerTarget =
+        customer.collectionGroupId || customer.whatsappGroupId || customer.phone;
       if (customerTarget) targets.push(customerTarget);
     }
 
-    // Sales rep target
     if (sendTo === "salesRep" || sendTo === "both") {
       if (customer.salesRepId) {
         const rep = salesRepsMap.get(customer.salesRepId);
@@ -1205,9 +711,6 @@ class WhatsAppService {
     return targets;
   }
 
-  /**
-   * Load sales reps into a Map for quick lookup
-   */
   private async loadSalesRepsMap(): Promise<Map<string, any>> {
     const reps = await db.getAll("salesReps");
     const map = new Map<string, any>();
@@ -1215,23 +718,34 @@ class WhatsAppService {
     return map;
   }
 
-  /**
-   * Start checking scheduled statements every 60 seconds
-   */
-  private startScheduleChecker() {
-    // Initial check after 10 seconds (give time for WhatsApp to connect)
-    setTimeout(() => this.checkScheduledStatements(), 10000);
-
-    // Then check every 60 seconds
-    this.schedulerInterval = setInterval(() => {
-      this.checkScheduledStatements();
-    }, 60 * 1000);
+  private async getAccount(accountId: string): Promise<WhatsAppAccount | null> {
+    return await db.get<WhatsAppAccount>("whatsappAccounts", accountId);
   }
 
-  /**
-   * Check and execute scheduled statements that are due
-   */
-  private async checkScheduledStatements() {
+  private async updateAccountStatus(
+    accountId: string,
+    status: WhatsAppAccount["status"],
+  ): Promise<void> {
+    const account = await this.getAccount(accountId);
+    if (account) {
+      account.status = status;
+      if (status === "connected") account.lastConnectedAt = new Date().toISOString();
+      await db.update("whatsappAccounts", account);
+    }
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // ── Scheduled Statements ────────────────────────────────────
+
+  private startScheduleChecker(): void {
+    setTimeout(() => this.checkScheduledStatements(), 10000);
+    this.schedulerInterval = setInterval(() => this.checkScheduledStatements(), 60 * 1000);
+  }
+
+  private async checkScheduledStatements(): Promise<void> {
     try {
       const saved = localStorage.getItem("scheduledStatements");
       if (!saved) return;
@@ -1242,96 +756,63 @@ class WhatsAppService {
       const now = new Date();
       const currentHour = now.getHours();
       const currentMinute = now.getMinutes();
-      const currentDay = now.getDay(); // 0=Sunday
-      const currentDate = now.getDate(); // 1-31
-      const currentTimeStr = `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`;
+      const currentDay = now.getDay();
+      const currentDate = now.getDate();
+      const currentTimeStr = `${String(currentHour).padStart(2, "0")}:${String(currentMinute).padStart(2, "0")}`;
 
       for (const statement of statements) {
         if (!statement.isActive) continue;
 
-        // Check if already ran in the last 2 hours (prevent double execution)
         if (statement.lastRunAt) {
           const lastRun = new Date(statement.lastRunAt);
           const hoursSinceLastRun = (now.getTime() - lastRun.getTime()) / (1000 * 60 * 60);
           if (hoursSinceLastRun < 2) continue;
         }
 
-        // Check if it's the right time (within 1-minute window)
         if (statement.scheduleTime !== currentTimeStr) continue;
 
-        // Check schedule type
         let shouldRun = false;
-
-        if (statement.scheduleType === "daily") {
-          shouldRun = true;
-        } else if (statement.scheduleType === "weekly") {
-          shouldRun = (statement.scheduleDay === currentDay);
-        } else if (statement.scheduleType === "monthly") {
-          shouldRun = (statement.scheduleDay === currentDate);
-        }
+        if (statement.scheduleType === "daily") shouldRun = true;
+        else if (statement.scheduleType === "weekly") shouldRun = statement.scheduleDay === currentDay;
+        else if (statement.scheduleType === "monthly") shouldRun = statement.scheduleDay === currentDate;
 
         if (!shouldRun) continue;
 
-        console.log(`📅 [Scheduler] Running scheduled statement: ${statement.name}`);
-
         try {
           await this.executeScheduledStatement(statement);
-
-          // Update lastRunAt
           statement.lastRunAt = now.toISOString();
-
-          // Calculate next run
           statement.nextRunAt = this.calculateNextRun(statement);
-
-          // Save back to localStorage
           localStorage.setItem("scheduledStatements", JSON.stringify(statements));
-
-          console.log(`✅ [Scheduler] Completed: ${statement.name}`);
         } catch (error) {
           console.error(`❌ [Scheduler] Failed: ${statement.name}`, error);
         }
       }
     } catch (error) {
-      console.error("❌ [Scheduler] Error checking scheduled statements:", error);
+      console.error("❌ [Scheduler] Error:", error);
     }
   }
 
-  /**
-   * Execute a scheduled statement - send PDF statements to all customers with balance
-   */
-  private async executeScheduledStatement(statement: any) {
-    // Get active WhatsApp account
+  private async executeScheduledStatement(statement: any): Promise<void> {
     const accounts = await db.getAll<WhatsAppAccount>("whatsappAccounts");
-    const activeAccount = accounts.find(a => a.isActive && a.status === "connected");
-
-    if (!activeAccount) {
-      console.warn("⚠️ [Scheduler] No active WhatsApp account");
-      return;
-    }
+    const activeAccount = accounts.find((a) => a.isActive && a.status === "connected");
+    if (!activeAccount) return;
 
     const accountId = statement.accountId !== "default" ? statement.accountId : activeAccount.id;
 
-    // Get all customers with balance > 0
     const allCustomers = await db.getAll("customers");
-    let recipients = allCustomers.filter((c: any) =>
-      (Number(c.currentBalance) || 0) > 0 &&
-      (c.phone || c.whatsappGroupId || c.collectionGroupId)
+    let recipients = allCustomers.filter(
+      (c: any) =>
+        (Number(c.currentBalance) || 0) > 0 &&
+        (c.phone || c.whatsappGroupId || c.collectionGroupId),
     );
 
-    // If targetIds specified, filter to those
-    if (statement.targetIds && statement.targetIds.length > 0) {
+    if (statement.targetIds?.length > 0) {
       const targetSet = new Set(statement.targetIds);
       recipients = recipients.filter((c: any) => targetSet.has(c.id));
     }
 
-    if (recipients.length === 0) {
-      console.log("📭 [Scheduler] No recipients with balance");
-      return;
-    }
+    if (recipients.length === 0) return;
 
-    console.log(`📤 [Scheduler] Sending statements to ${recipients.length} customers`);
-
-    // Dynamically import the PDF generator
     const { generateStatementPDF } = await import("@/services/statementPdfService");
     const fromDate = new Date(new Date().getFullYear(), 0, 1);
     const toDate = new Date();
@@ -1342,11 +823,7 @@ class WhatsAppService {
         if (!recipientTarget) continue;
 
         const pdfBlob = await generateStatementPDF((customer as any).id, fromDate, toDate);
-        if (!pdfBlob) {
-          console.warn(`⚠️ [Scheduler] PDF generation returned null for ${(customer as any).name}`);
-          continue;
-        }
-        console.log(`📄 [Scheduler] PDF generated for ${(customer as any).name}, size: ${pdfBlob.size} bytes`);
+        if (!pdfBlob) continue;
 
         const base64data = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
@@ -1355,30 +832,22 @@ class WhatsAppService {
           reader.readAsDataURL(pdfBlob);
         });
 
-        // Fill template
         let message = statement.template || "كشف حساب";
         message = message.replace(/{customer_name}/g, (customer as any).name || "");
         message = message.replace(/{balance}/g, String(Number((customer as any).currentBalance) || 0));
         message = message.replace(/{date_from}/g, fromDate.toLocaleDateString("ar-EG"));
         message = message.replace(/{date_to}/g, toDate.toLocaleDateString("ar-EG"));
 
-        await this.sendMessage(
-          accountId,
-          recipientTarget,
-          message,
-          {
-            type: "document",
-            url: base64data,
-            caption: message,
-            filename: `كشف حساب ${(customer as any).name || "عميل"}.pdf`,
-          },
-          {
-            customerId: (customer as any).id,
-            type: "statement",
-          }
-        );
+        await this.sendMessage(accountId, recipientTarget, message, {
+          type: "document",
+          url: base64data,
+          caption: message,
+          filename: `كشف حساب ${(customer as any).name || "عميل"}.pdf`,
+        }, {
+          customerId: (customer as any).id,
+          type: "statement",
+        });
 
-        // Delay between sends
         await this.delay(3000);
       } catch (error) {
         console.error(`❌ [Scheduler] Failed for ${(customer as any).name}:`, error);
@@ -1386,9 +855,6 @@ class WhatsAppService {
     }
   }
 
-  /**
-   * Calculate next run time for a scheduled statement
-   */
   private calculateNextRun(statement: any): string {
     const now = new Date();
     const [hours, minutes] = (statement.scheduleTime || "09:00").split(":").map(Number);
@@ -1409,17 +875,6 @@ class WhatsAppService {
     }
 
     return next.toISOString();
-  }
-
-  // Cleanup
-  cleanup(): void {
-    if (this.processingInterval) {
-      clearInterval(this.processingInterval);
-    }
-    if (this.schedulerInterval) {
-      clearInterval(this.schedulerInterval);
-    }
-    // Sockets are managed in Electron main process
   }
 }
 
