@@ -3,6 +3,12 @@ export interface Customer {
   name: string;
   phone: string;
   address: string;
+  // Location fields (Phase 1 - WhatsApp Bot v2)
+  latitude?: number;
+  longitude?: number;
+  addressText?: string;
+  customerType: 'registered' | 'casual';
+  // Existing fields
   nationalId?: string;
   creditLimit: number;
   currentBalance: number;

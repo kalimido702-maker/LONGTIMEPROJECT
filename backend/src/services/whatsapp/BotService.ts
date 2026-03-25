@@ -2,7 +2,10 @@
  * WhatsApp Bot Service (Server-Side)
  * بوت الواتساب - يعمل على السيرفر مع اتصال مباشر بقاعدة البيانات
  *
- * الأوامر:
+ * Phase 2: Multi-phone lookup + enhanced customer search
+ * Phase 3: AI intent detection with regex fallback
+ *
+ * الأوامر (Regex):
  * - مساعدة / help → قائمة الأوامر
  * - فاتورة رقم XXXX → تفاصيل فاتورة
  * - آخر فاتورة → آخر فاتورة للمرسل
@@ -10,11 +13,29 @@
  * - المدفوعات → كشف المدفوعات
  * - كشف حساب → كشف حساب كامل
  * - المديونية / الرصيد → الرصيد الحالي
+ *
+ * AI Intents (when regex doesn't match):
+ * - invoice_query → asks about invoices
+ * - debt_query → asks about balance/debt
+ * - payment_query → asks about payments
+ * - statement_query → asks for account statement
+ * - nearest_trader → asks about nearest trader
+ * - location_info → shares location/area
+ * - general_inquiry → other questions
  */
 
 import { query } from "../../config/database-factory.js";
 import { logger } from "../../config/logger.js";
-import { BotReply, BotSettings } from "./types.js";
+import { BotReply, BotSettings, IntentResult } from "./types.js";
+import {
+  detectIntent,
+  findCustomerByPhoneEnhanced,
+  findCustomerByIdNumber,
+  findNearestTraders,
+  calculateDistance,
+  normalizePhoneNumber,
+} from "./IntentDetectionService.js";
+import { GeocodingService, CustomerWithDistance, Customer } from "../GeocodingService.js";
 
 // ─── Bot Settings Storage (per client) ───────────────────────────
 
@@ -39,6 +60,7 @@ export function saveBotSettings(clientId: string, settings: BotSettings): void {
 
 /**
  * معالجة رسالة واردة واستخراج الرد المناسب
+ * Phase 2+3: Tries regex first (backward compatibility), then AI intent detection
  */
 export async function handleBotMessage(
   clientId: string,
@@ -46,42 +68,293 @@ export async function handleBotMessage(
   senderPhone: string,
   messageText: string,
 ): Promise<BotReply | null> {
+  logger.info({ clientId, senderPhone, messageText }, "BOTSERVICE_DEBUG: handleBotMessage called");
+
   const settings = getBotSettings(clientId);
-  if (!settings.enabled) return null;
+  logger.info({ clientId, settings }, "BOTSERVICE_DEBUG: Bot settings");
+  
+  if (!settings.enabled) {
+    logger.warn({ clientId }, "BOTSERVICE_DEBUG: Bot is DISABLED");
+    return null;
+  }
 
   const message = messageText.trim();
-  if (!message || message.length > 200) return null;
+  if (!message || message.length > 500) {
+    logger.warn({ clientId, messageLength: messageText.length }, "BOTSERVICE_DEBUG: Message empty or too long (>500)");
+    return null;
+  }
 
+  // Try regex-based command parsing first (backward compatibility)
   const command = parseCommand(message);
+  logger.info({ clientId, command }, "BOTSERVICE_DEBUG: Parsed command");
 
-  try {
-    switch (command.type) {
-      case "help":
-        return { text: getHelpText() };
-      case "invoice_by_number":
-        return await handleInvoiceByNumber(clientId, branchId, command.params!.invoiceNumber);
-      case "last_invoice":
-        return await handleLastInvoice(clientId, branchId, senderPhone);
-      case "last_invoice_for_customer":
-        return await handleLastInvoiceForCustomer(clientId, branchId, command.params!.customerName);
-      case "payments":
-        return await handlePayments(clientId, branchId, senderPhone);
-      case "statement":
-        return await handleStatement(clientId, branchId, senderPhone);
-      case "debt":
-        return await handleDebt(clientId, branchId, senderPhone);
-      case "unknown":
-        return { text: settings.unknownCommandMessage };
-      default:
-        return null;
+  if (command.type !== "unknown") {
+    // Handle via regex (existing logic)
+    try {
+      logger.info({ clientId, commandType: command.type }, "BOTSERVICE_DEBUG: Handling regex command");
+      switch (command.type) {
+        case "help":
+          return { text: getHelpText() };
+        case "invoice_by_number":
+          return await handleInvoiceByNumber(clientId, branchId, command.params!.invoiceNumber);
+        case "last_invoice":
+          return await handleLastInvoice(clientId, branchId, senderPhone);
+        case "last_invoice_for_customer":
+          return await handleLastInvoiceForCustomer(clientId, branchId, command.params!.customerName);
+        case "payments":
+          return await handlePayments(clientId, branchId, senderPhone);
+        case "statement":
+          return await handleStatement(clientId, branchId, senderPhone);
+        case "debt":
+          return await handleDebt(clientId, branchId, senderPhone);
+        default:
+          return null;
+      }
+    } catch (error) {
+      logger.error({ error, clientId, senderPhone, messageText, command }, "Bot command error");
+      return { text: "⚠️ حصل خطأ أثناء معالجة طلبك. جرب مرة تانية." };
     }
+  }
+
+  // Fallback to AI intent detection (Phase 3)
+  logger.info({ clientId, message }, "BOTSERVICE_DEBUG: No regex match, falling back to AI intent detection");
+  try {
+    const intent = await detectIntent(message);
+    logger.info({ intent, senderPhone, clientId }, "AI intent detected");
+    return await handleAIIntent(clientId, branchId, senderPhone, intent);
   } catch (error) {
-    logger.error({ error, clientId, senderPhone, messageText }, "Bot error");
-    return { text: "⚠️ حصل خطأ أثناء معالجة طلبك. جرب مرة تانية." };
+    logger.error({ error }, "AI intent detection failed");
+    return { text: settings.unknownCommandMessage };
   }
 }
 
-// ─── Command Parser ──────────────────────────────────────────────
+// ─── AI Intent Handler ───────────────────────────────────────────
+
+async function handleAIIntent(
+  clientId: string,
+  branchId: string | null,
+  senderPhone: string,
+  intent: IntentResult,
+): Promise<BotReply> {
+  const { intent: intentType, entities, confidence } = intent;
+
+  // If confidence is low, use general fallback
+  if (confidence < 0.5) {
+    return {
+      text: `🤔 لم أفهم طلبك بشكل واضح.\nاكتب *مساعدة* لمعرفة الأوامر المتاحة`,
+    };
+  }
+
+  switch (intentType) {
+    case "invoice_query":
+      // Try to find invoice by number from entities
+      if (entities.invoiceNumber) {
+        return await handleInvoiceByNumber(clientId, branchId, entities.invoiceNumber);
+      }
+      // Try by customer ID number
+      if (entities.customerIdNumber) {
+        const customer = await findCustomerByIdNumber(clientId, entities.customerIdNumber);
+        if (customer) {
+          return await getLastInvoiceForCustomer(clientId, branchId, customer);
+        }
+        return { text: `❌ لم يتم العثور على عميل بالرقم الوطني "${entities.customerIdNumber}"` };
+      }
+      // Default to last invoice for sender
+      return await handleLastInvoice(clientId, branchId, senderPhone);
+
+    case "debt_query":
+      // Try by customer ID number first
+      if (entities.customerIdNumber) {
+        const customer = await findCustomerByIdNumber(clientId, entities.customerIdNumber);
+        if (customer) {
+          return await handleDebtForCustomer(clientId, branchId, customer);
+        }
+      }
+      // Default to sender's debt
+      return await handleDebt(clientId, branchId, senderPhone);
+
+    case "payment_query":
+      if (entities.customerIdNumber) {
+        const customer = await findCustomerByIdNumber(clientId, entities.customerIdNumber);
+        if (customer) {
+          return await handlePaymentsForCustomer(clientId, branchId, customer);
+        }
+      }
+      return await handlePayments(clientId, branchId, senderPhone);
+
+    case "statement_query":
+      if (entities.customerIdNumber) {
+        const customer = await findCustomerByIdNumber(clientId, entities.customerIdNumber);
+        if (customer) {
+          return await handleStatementForCustomer(clientId, branchId, customer);
+        }
+      }
+      return await handleStatement(clientId, branchId, senderPhone);
+
+    case "nearest_trader":
+      // This requires location data - user must provide area name or lat/long
+      if (entities.areaName) {
+        return await handleNearestTraderByArea(clientId, entities.areaName);
+      }
+      return {
+        text: `📍 لمعرفة أقرب تاجر:\nاكتب اسم منطقتك\nمثال: "اقرب تاجر في الهرم"`,
+      };
+
+    case "location_info":
+      if (entities.areaName) {
+        // Store location preference for this customer
+        await handleLocationInfo(clientId, branchId, senderPhone, entities.areaName);
+        return {
+          text: `📍 تم تسجيل موقعك: *${entities.areaName}*\n\nاكتب "اقرب تاجر" لمعرفة أقرب التجار`,
+        };
+      }
+      return {
+        text: `📍 أرسل اسم منطقتك لمعرفة أقرب تاجر\nمثال: "أنا من الهرم" أو "في مدينة نصر"`,
+      };
+
+    case "general_inquiry":
+      return {
+        text: `🤔 للاستفسارات:\n• اكتب *مساعدة* للأوامر المتاحة\n• فاتورة رقم XXXX لعرض فاتورة\n• المديونية لعرض الرصيد`,
+      };
+
+    case "unknown":
+    default:
+      return {
+        text: `❌ لم أفهم طلبك\nاكتب *مساعدة* لمعرفة الأوامر المتاحة`,
+      };
+  }
+}
+
+// ─── Location & Nearest Trader Handlers ─────────────────────────
+
+async function handleNearestTraderByArea(
+  clientId: string,
+  areaName: string,
+): Promise<BotReply> {
+  try {
+    // Step 1: Geocode the provided address to get coordinates
+    const coords = await GeocodingService.geocodeAddress(areaName);
+    if (!coords) {
+      return {
+        text: `❌ لم نتمكن من تحديد موقع "${areaName}"\nجرب كتابة اسم منطقة أوضح مثل:\n• "الهرم، الجيزة"\n• "مدينة نصر، القاهرة"\n• "المعادي"`,
+      };
+    }
+
+    // Step 2: Fetch all customers (traders) with latitude/longitude
+    const customersWithLocation: Array<{
+      id: string;
+      name: string;
+      phone: string;
+      address: string;
+      latitude: number | null;
+      longitude: number | null;
+      address_text: string | null;
+      customer_type: 'registered' | 'casual';
+      credit_limit: number;
+      current_balance: number;
+      sales_rep_id: string | null;
+      class: 'A' | 'B' | 'C' | null;
+    }> = await query(
+      `SELECT id, name, phone, address, latitude, longitude, address_text,
+              customer_type, credit_limit, current_balance, sales_rep_id, class
+       FROM customers
+       WHERE client_id = ?
+         AND is_deleted = 0
+         AND is_active = 1
+         AND latitude IS NOT NULL
+         AND longitude IS NOT NULL`,
+      [clientId]
+    );
+
+    if (customersWithLocation.length === 0) {
+      return {
+        text: `📍 لم يتم العثور على تجار لديهم بيانات موقع مسجلة في النظام.\nيرجى التواصل مع خدمة العملاء للمساعدة.`,
+      };
+    }
+
+    // Step 3: Convert to GeocodingService.Customer format
+    const customersForGeocoding = customersWithLocation.map((c) => ({
+      id: c.id,
+      name: c.name,
+      phone: c.phone || '',
+      address: c.address || '',
+      latitude: c.latitude ?? undefined,
+      longitude: c.longitude ?? undefined,
+      addressText: c.address_text ?? undefined,
+      customerType: c.customer_type as 'registered' | 'casual',
+      creditLimit: c.credit_limit,
+      currentBalance: c.current_balance,
+      bonusBalance: 0,
+      salesRepId: c.sales_rep_id ?? undefined,
+      class: c.class ?? undefined,
+      loyaltyPoints: 0,
+      createdAt: '',
+    } as Customer));
+
+    // Step 4: Find nearest customers (up to 3)
+    const limit = 3;
+    const nearestCustomers = GeocodingService.findNearestCustomers(
+      coords.lat,
+      coords.lon,
+      customersForGeocoding,
+      limit
+    );
+
+    if (nearestCustomers.length === 0) {
+      return {
+        text: `📍 لم يتم العثور على تجار بالقرب من "${areaName}"\nجرب منطقة أخرى.`,
+      };
+    }
+
+    // Step 5: Format Arabic response with top 3 nearest traders
+    let responseText = `🏪 *أقرب تجار ليك في ${areaName}:*\n`;
+    responseText += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+    nearestCustomers.forEach((customer: CustomerWithDistance, index: number) => {
+      responseText += `${index + 1}. *${customer.name}*\n`;
+      responseText += `   🏪 اسم: ${customer.name}\n`;
+      responseText += `   📍 العنوان: ${customer.address || customer.addressText || 'غير محدد'}\n`;
+      if (customer.phone) {
+        responseText += `   📞 الهاتف: ${customer.phone}\n`;
+      }
+      responseText += `   📏 المسافة: ${GeocodingService.formatDistance(customer.distanceKm)}\n`;
+      responseText += `\n`;
+    });
+
+    responseText += `━━━━━━━━━━━━━━━━━━━━\n`;
+    responseText += `💡 للبحث عن منطقة أخرى اكتب: "اقرب تاجر في [اسم المنطقه]"`;
+
+    return { text: responseText };
+  } catch (error) {
+    logger.error({ error, clientId, areaName }, "Error finding nearest traders");
+    return {
+      text: `⚠️ حصل خطأ أثناء البحث عن أقرب تاجر.\nجرب مرة تانية أو تواصل مع خدمة العملاء.`,
+    };
+  }
+}
+
+async function handleLocationInfo(
+  clientId: string,
+  branchId: string | null,
+  senderPhone: string,
+  areaName: string,
+): Promise<void> {
+  // Store customer's preferred area for future reference
+  // This could be stored in a session or customer_phones table
+  const normalized = normalizePhoneNumber(senderPhone);
+  
+  // Update or note the customer's area preference
+  await query(
+    `UPDATE customer_phones SET notes = ? 
+     WHERE phone LIKE ? AND is_active = 1
+     LIMIT 1`,
+    [JSON.stringify({ area: areaName, updatedAt: new Date().toISOString() }), `%${normalized}%`],
+  ).catch(() => {
+    // Ignore errors - this is a best-effort update
+  });
+}
+
+// ─── Command Parser (Regex-based) ────────────────────────────────
 
 interface ParsedCommand {
   type:
@@ -144,14 +417,6 @@ function parseCommand(msg: string): ParsedCommand {
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
-function normalizePhone(phone: string): string {
-  if (!phone) return "";
-  let clean = phone.replace(/\D/g, "");
-  if (clean.startsWith("20") && clean.length > 10) clean = clean.slice(2);
-  if (clean.startsWith("0")) clean = clean.slice(1);
-  return clean;
-}
-
 function fmt(num: number | string | null | undefined): string {
   if (num === undefined || num === null || num === "") return "0";
   const n = Number(num);
@@ -159,52 +424,8 @@ function fmt(num: number | string | null | undefined): string {
   return n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
-async function findCustomerByPhone(
-  clientId: string,
-  branchId: string | null,
-  senderPhone: string,
-): Promise<any | null> {
-  const normalized = normalizePhone(senderPhone);
-  if (!normalized) return null;
-
-  // البحث عن عميل بالرقم (بأشكال مختلفة)
-  const patterns = [normalized, `0${normalized}`, `20${normalized}`, `+20${normalized}`];
-  const placeholders = patterns.map(() => "phone LIKE ?").join(" OR ");
-  const params = patterns.map((p) => `%${p}%`);
-
-  const conditions = branchId
-    ? `client_id = ? AND branch_id = ? AND is_deleted = 0 AND (${placeholders})`
-    : `client_id = ? AND is_deleted = 0 AND (${placeholders})`;
-
-  const values = branchId ? [clientId, branchId, ...params] : [clientId, ...params];
-
-  const rows = await query<any>(
-    `SELECT * FROM customers WHERE ${conditions} LIMIT 1`,
-    values,
-  );
-
-  return rows[0] ?? null;
-}
-
-async function findCustomerByName(
-  clientId: string,
-  branchId: string | null,
-  name: string,
-): Promise<any | null> {
-  const searchName = name.trim();
-  const conditions = branchId
-    ? "client_id = ? AND branch_id = ? AND is_deleted = 0 AND name LIKE ?"
-    : "client_id = ? AND is_deleted = 0 AND name LIKE ?";
-  const values = branchId
-    ? [clientId, branchId, `%${searchName}%`]
-    : [clientId, `%${searchName}%`];
-
-  const rows = await query<any>(
-    `SELECT * FROM customers WHERE ${conditions} LIMIT 1`,
-    values,
-  );
-
-  return rows[0] ?? null;
+function normalizePhone(phone: string): string {
+  return normalizePhoneNumber(phone);
 }
 
 // ─── Command Handlers ────────────────────────────────────────────
@@ -231,7 +452,11 @@ function getHelpText(): string {
    يعرض الرصيد الحالي
 
 7️⃣ *مساعدة*
-   عرض هذه القائمة`;
+   عرض هذه القائمة
+
+━━━━━━━━━━━━━━━━━━━━
+
+💡 *ملحوظة:* يمكنك أيضاً كتابة سؤالك بشكل طبيعي!`;
 }
 
 async function handleInvoiceByNumber(
@@ -263,7 +488,7 @@ async function handleLastInvoice(
   branchId: string | null,
   senderPhone: string,
 ): Promise<BotReply> {
-  const customer = await findCustomerByPhone(clientId, branchId, senderPhone);
+  const customer = await findCustomerByPhoneEnhanced(clientId, branchId, senderPhone);
   if (!customer) {
     return {
       text: `❌ لم يتم العثور على عميل مرتبط برقم ${senderPhone}\nجرب: *آخر فاتورة للعميل [اسم العميل]*`,
@@ -284,6 +509,27 @@ async function handleLastInvoiceForCustomer(
   }
 
   return await getLastInvoiceForCustomer(clientId, branchId, customer);
+}
+
+async function findCustomerByName(
+  clientId: string,
+  branchId: string | null,
+  name: string,
+): Promise<any | null> {
+  const searchName = name.trim();
+  const conditions = branchId
+    ? "client_id = ? AND branch_id = ? AND is_deleted = 0 AND name LIKE ?"
+    : "client_id = ? AND is_deleted = 0 AND name LIKE ?";
+  const values = branchId
+    ? [clientId, branchId, `%${searchName}%`]
+    : [clientId, `%${searchName}%`];
+
+  const rows = await query<any>(
+    `SELECT * FROM customers WHERE ${conditions} LIMIT 1`,
+    values,
+  );
+
+  return rows[0] ?? null;
 }
 
 async function getLastInvoiceForCustomer(
@@ -360,11 +606,19 @@ async function handlePayments(
   branchId: string | null,
   senderPhone: string,
 ): Promise<BotReply> {
-  const customer = await findCustomerByPhone(clientId, branchId, senderPhone);
+  const customer = await findCustomerByPhoneEnhanced(clientId, branchId, senderPhone);
   if (!customer) {
     return { text: `❌ لم يتم العثور على عميل مرتبط برقم ${senderPhone}` };
   }
 
+  return await handlePaymentsForCustomer(clientId, branchId, customer);
+}
+
+async function handlePaymentsForCustomer(
+  clientId: string,
+  branchId: string | null,
+  customer: any,
+): Promise<BotReply> {
   const conditions = branchId
     ? "client_id = ? AND branch_id = ? AND customer_id = ? AND is_deleted = 0"
     : "client_id = ? AND customer_id = ? AND is_deleted = 0";
@@ -406,11 +660,19 @@ async function handleStatement(
   branchId: string | null,
   senderPhone: string,
 ): Promise<BotReply> {
-  const customer = await findCustomerByPhone(clientId, branchId, senderPhone);
+  const customer = await findCustomerByPhoneEnhanced(clientId, branchId, senderPhone);
   if (!customer) {
     return { text: `❌ لم يتم العثور على عميل مرتبط برقم ${senderPhone}` };
   }
 
+  return await handleStatementForCustomer(clientId, branchId, customer);
+}
+
+async function handleStatementForCustomer(
+  clientId: string,
+  branchId: string | null,
+  customer: any,
+): Promise<BotReply> {
   // آخر 30 يوم
   const dateTo = new Date();
   const dateFrom = new Date();
@@ -498,11 +760,19 @@ async function handleDebt(
   branchId: string | null,
   senderPhone: string,
 ): Promise<BotReply> {
-  const customer = await findCustomerByPhone(clientId, branchId, senderPhone);
+  const customer = await findCustomerByPhoneEnhanced(clientId, branchId, senderPhone);
   if (!customer) {
     return { text: `❌ لم يتم العثور على عميل مرتبط برقم ${senderPhone}` };
   }
 
+  return await handleDebtForCustomer(clientId, branchId, customer);
+}
+
+async function handleDebtForCustomer(
+  clientId: string,
+  branchId: string | null,
+  customer: any,
+): Promise<BotReply> {
   // حساب الرصيد الفعلي: فواتير - مدفوعات - مرتجعات + رصيد سابق
   const conditions = branchId
     ? "client_id = ? AND branch_id = ? AND customer_id = ? AND is_deleted = 0"

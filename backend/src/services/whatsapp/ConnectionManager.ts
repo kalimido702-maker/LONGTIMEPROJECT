@@ -299,24 +299,48 @@ class WhatsAppConnectionManager {
     sock.ev.on("messages.upsert", async (m) => {
       for (const msg of m.messages) {
         try {
-          if (msg.key.fromMe) continue;
-          if (msg.key.remoteJid === "status@broadcast") continue;
-          if (msg.key.remoteJid?.endsWith("@g.us")) continue;
+          // DEBUG: Log ALL messages received by Baileys
+          logger.info(
+            { clientId: entry.clientId, accountId: entry.accountId, fromMe: msg.key.fromMe, remoteJid: msg.key.remoteJid, msgType: Object.keys(msg.message || {}) },
+            "BAILEYS_DEBUG: Raw incoming message received",
+          );
+
+          if (msg.key.fromMe) {
+            logger.debug({ clientId: entry.clientId }, "Skipping - own message");
+            continue;
+          }
+          if (msg.key.remoteJid === "status@broadcast") {
+            logger.debug({ clientId: entry.clientId }, "Skipping - status broadcast");
+            continue;
+          }
+          if (msg.key.remoteJid?.endsWith("@g.us")) {
+            logger.debug({ clientId: entry.clientId }, "Skipping - group message");
+            continue;
+          }
 
           const messageText =
             msg.message?.conversation ||
             msg.message?.extendedTextMessage?.text ||
             "";
 
-          if (!messageText.trim()) continue;
+          if (!messageText.trim()) {
+            logger.debug({ clientId: entry.clientId }, "Skipping - empty message");
+            continue;
+          }
 
           const senderJid = msg.key.remoteJid || "";
           const senderPhone = senderJid.replace("@s.whatsapp.net", "");
 
           logger.info(
-            { clientId: entry.clientId, accountId: entry.accountId, from: senderPhone },
+            { clientId: entry.clientId, accountId: entry.accountId, from: senderPhone, messageLength: messageText.length },
             "Incoming WhatsApp message",
           );
+
+          // DEBUG: Check if callback is set before calling
+          if (!this.onIncomingMessage) {
+            logger.error({ clientId: entry.clientId, accountId: entry.accountId }, "FATAL: onIncomingMessage callback is NOT set!");
+            continue;
+          }
 
           this.onIncomingMessage?.(
             entry.clientId,

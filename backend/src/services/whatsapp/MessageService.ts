@@ -350,6 +350,12 @@ class WhatsAppMessageService {
       return phone;
     }
 
+    // تحويل @lid إلى @s.whatsapp.net (LID هو شكل مجهول الهوية من واتساب)
+    if (phone.includes("@lid")) {
+      const cleaned = phone.replace("@lid", "@s.whatsapp.net");
+      return cleaned;
+    }
+
     let cleaned = phone.replace(/\D/g, "");
 
     // إزالة الصفر من الأول (أرقام مصرية)

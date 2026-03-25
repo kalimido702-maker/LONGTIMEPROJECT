@@ -14,7 +14,10 @@ import { messageService } from "./MessageService.js";
 import { handleBotMessage, getBotSettings, saveBotSettings } from "./BotService.js";
 import { logger } from "../../config/logger.js";
 import { query } from "../../config/database-factory.js";
-import type { AccountState, BotSettings } from "./types.js";
+import type { AccountState, BotSettings, IntentType, IntentResult } from "./types.js";
+
+// Re-export AI intent types
+export type { IntentType, IntentResult };
 
 // ─── WebSocket Broadcaster ───────────────────────────────────────
 
@@ -84,7 +87,7 @@ export function initializeWhatsAppService(): void {
     ) => {
       logger.info(
         { clientId, accountId, from: senderPhone, text: messageText.slice(0, 50) },
-        "WhatsApp incoming message",
+        "INDEX_DEBUG: Incoming message handler called",
       );
 
       // بث الرسالة الواردة للعميل
@@ -98,8 +101,16 @@ export function initializeWhatsAppService(): void {
 
       // معالجة البوت
       try {
+        logger.info({ clientId, senderPhone, messageText }, "INDEX_DEBUG: Calling handleBotMessage");
+        
         const reply = await handleBotMessage(clientId, null, senderPhone, messageText);
-        if (!reply) return;
+        
+        logger.info({ clientId, senderPhone, reply }, "INDEX_DEBUG: handleBotMessage returned");
+
+        if (!reply) {
+          logger.warn({ clientId, senderPhone }, "INDEX_DEBUG: handleBotMessage returned null - no reply will be sent");
+          return;
+        }
 
         // إرسال الرد
         if (reply.media) {
@@ -112,6 +123,7 @@ export function initializeWhatsAppService(): void {
             caption: reply.media.caption,
           });
         } else {
+          logger.info({ clientId, accountId, to: senderJid, text: reply.text }, "INDEX_DEBUG: Sending reply via messageService.sendDirect");
           await messageService.sendDirect(clientId, accountId, senderJid, reply.text);
         }
 

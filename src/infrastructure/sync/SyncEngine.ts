@@ -25,6 +25,7 @@ const TABLE_TO_STORE: Record<string, string> = {
     'sales_reps': 'salesReps',
     'supervisor_bonuses': 'supervisorBonuses',
     'customer_bonuses': 'customerBonuses',
+    'whatsapp_accounts': 'whatsappAccounts',
 };
 
 export enum SyncStatus {

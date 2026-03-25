@@ -105,6 +105,8 @@ const SYNCABLE_TABLES = [
     // Settings & Audit
     'settings',
     'audit_logs',
+    // WhatsApp
+    'whatsapp_accounts',
 ];
 
 // Mapping from snake_case table names to camelCase IndexedDB store names
@@ -124,6 +126,7 @@ const TABLE_TO_STORE_MAP: Record<string, string> = {
     'sales_reps': 'salesReps',    // Added
     'supervisor_bonuses': 'supervisorBonuses',  // Added
     'customer_bonuses': 'customerBonuses',  // Added
+    'whatsapp_accounts': 'whatsappAccounts',  // Added
 };
 
 // Helper function to get the store name from table name

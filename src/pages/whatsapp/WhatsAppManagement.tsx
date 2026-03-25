@@ -26,6 +26,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { db, WhatsAppAccount } from "@/shared/lib/indexedDB";
 import { whatsappService } from "@/services/whatsapp/whatsappService";
+import { whatsappApi } from "@/services/whatsapp/whatsappApiClient";
 import { getBotSettings, saveBotSettings, type BotSettings } from "@/services/whatsapp/whatsappBotService";
 import {
   MessageSquare,
@@ -219,10 +220,66 @@ const WhatsAppManagement = () => {
     setIsLoading(true);
     try {
       await db.init();
-      const data = await db.getAll<WhatsAppAccount>("whatsappAccounts");
+      
+      // 1. جلب الحسابات من السيرفر أولاً (المصدر الرئيسي)
+      let serverAccounts: WhatsAppAccount[] = [];
+      try {
+        const serverData = await whatsappApi.getAccounts();
+        serverAccounts = serverData.map((sa) => ({
+          id: sa.id,
+          name: sa.name,
+          phone: sa.phone || "",
+          status: (sa.liveStatus?.status || sa.status || "disconnected") as WhatsAppAccount["status"],
+          dailyLimit: sa.daily_limit || 100,
+          dailySent: sa.daily_sent || 0,
+          lastResetDate: sa.last_reset_date || new Date().toISOString(),
+          antiSpamDelay: sa.anti_spam_delay || 3000,
+          isActive: sa.is_active ?? false,
+          createdAt: sa.created_at || new Date().toISOString(),
+          lastConnectedAt: sa.last_connected_at,
+        }));
+      } catch {
+        // السيرفر مش متاح - هنستخدم البيانات المحلية
+        console.warn("[WhatsApp] Server unreachable, using local data only");
+      }
 
-      // Sync status from server API
-      for (const account of data) {
+      // 2. جلب الحسابات المحلية
+      const localAccounts = await db.getAll<WhatsAppAccount>("whatsappAccounts");
+
+      // 3. دمج: الحسابات من السيرفر لها الأولوية
+      let mergedAccounts: WhatsAppAccount[];
+
+      if (serverAccounts.length > 0) {
+        const localMap = new Map(localAccounts.map((a) => [a.id, a]));
+        mergedAccounts = [];
+
+        for (const serverAcc of serverAccounts) {
+          const localAcc = localMap.get(serverAcc.id);
+          const merged = localAcc
+            ? { ...localAcc, ...serverAcc, isActive: localAcc.isActive }
+            : serverAcc;
+          mergedAccounts.push(merged);
+
+          // حفظ/تحديث في IndexedDB المحلي
+          if (localAcc) {
+            await db.update("whatsappAccounts", merged);
+          } else {
+            await db.add("whatsappAccounts", merged);
+          }
+          localMap.delete(serverAcc.id);
+        }
+
+        // إضافة الحسابات المحلية الغير موجودة على السيرفر (لسا ما اتعمل لها sync)
+        for (const [, localOnly] of localMap) {
+          mergedAccounts.push(localOnly);
+        }
+      } else {
+        // السيرفر مش متاح - استخدام البيانات المحلية فقط
+        mergedAccounts = localAccounts;
+      }
+
+      // 4. تحديث حالة كل حساب من السيرفر
+      for (const account of mergedAccounts) {
         try {
           const state = await whatsappService.getAccountState(account.id);
           if (state.status && state.status !== account.status) {
@@ -238,7 +295,7 @@ const WhatsAppManagement = () => {
         }
       }
 
-      setAccounts(data);
+      setAccounts(mergedAccounts);
     } catch (error: any) {
       console.error("Error loading accounts:", error);
       if (error.message?.includes("not found")) {

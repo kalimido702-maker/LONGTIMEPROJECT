@@ -37,7 +37,7 @@ import {
   Loader2,
   RefreshCw,
 } from "lucide-react";
-import { db, Customer, Invoice, PaymentMethod, Supervisor, SalesRep } from "@/shared/lib/indexedDB";
+import { db, Customer, Invoice, PaymentMethod, Supervisor, SalesRep, CustomerPhone, CustomerIdentification } from "@/shared/lib/indexedDB";
 import { toast } from "sonner";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -93,6 +93,12 @@ const Customers = () => {
     whatsappGroupId: "",
     invoiceGroupId: "",
     collectionGroupId: "",
+    // WhatsApp Bot v2 fields
+    customerType: "registered" as "registered" | "casual",
+    additionalPhones: [] as string[],
+    idNumbers: [] as { number: string; label: string }[],
+    latitude: null as number | null,
+    longitude: null as number | null,
   });
 
   useEffect(() => {
@@ -167,6 +173,8 @@ const Customers = () => {
     }
 
     try {
+      let customerId: string;
+
       if (editingCustomer) {
         const updatedCustomer: Customer = {
           ...editingCustomer,
@@ -176,6 +184,7 @@ const Customers = () => {
           collectionGroupId: formData.collectionGroupId?.trim() || undefined,
         };
         await db.update("customers", updatedCustomer);
+        customerId = editingCustomer.id;
         toast.success("تم تحديث بيانات العميل");
       } else {
         const newCustomer: Customer = {
@@ -190,6 +199,7 @@ const Customers = () => {
           createdAt: new Date().toISOString(),
         };
         await db.add("customers", newCustomer);
+        customerId = newCustomer.id;
 
         // إنشاء فاتورة آجلة للرصيد الافتتاحي إذا كان المبلغ أكبر من صفر
         if (formData.initialCreditBalance > 0) {
@@ -247,10 +257,57 @@ const Customers = () => {
         }
       }
 
+      // Save additional phones to customerPhones store
+      if (formData.additionalPhones.length > 0) {
+        // Delete existing additional phones for this customer (keep main phone in customer record)
+        const existingPhones = await db.getByIndex<CustomerPhone>("customerPhones", "customerId", customerId);
+        for (const phone of existingPhones) {
+          await db.delete("customerPhones", phone.id);
+        }
+        // Add new additional phones
+        for (const phone of formData.additionalPhones) {
+          if (phone.trim()) {
+            const customerPhone: CustomerPhone = {
+              id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+              customerId,
+              phone: phone.trim(),
+              label: "additional",
+              isActive: true,
+              createdAt: new Date().toISOString(),
+            };
+            await db.add("customerPhones", customerPhone);
+          }
+        }
+      }
+
+      // Save ID numbers to customerIdentifications store
+      if (formData.idNumbers.length > 0) {
+        // Delete existing identifications for this customer
+        const existingIds = await db.getByIndex<CustomerIdentification>("customerIdentifications", "customerId", customerId);
+        for (const id of existingIds) {
+          await db.delete("customerIdentifications", id.id);
+        }
+        // Add new ID numbers
+        for (const idObj of formData.idNumbers) {
+          if (idObj.number.trim()) {
+            const customerIdRecord: CustomerIdentification = {
+              id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+              customerId,
+              idNumber: idObj.number.trim(),
+              label: idObj.label || "primary",
+              isActive: true,
+              createdAt: new Date().toISOString(),
+            };
+            await db.add("customerIdentifications", customerIdRecord);
+          }
+        }
+      }
+
       setIsDialogOpen(false);
       resetForm();
       loadCustomers();
     } catch (error) {
+      console.error("Error saving customer:", error);
       toast.error("حدث خطأ أثناء حفظ البيانات");
     }
   };
@@ -271,8 +328,32 @@ const Customers = () => {
       whatsappGroupId: customer.whatsappGroupId || "",
       invoiceGroupId: customer.invoiceGroupId || "",
       collectionGroupId: customer.collectionGroupId || "",
+      // WhatsApp Bot v2 fields
+      customerType: customer.customerType || "registered",
+      additionalPhones: [],
+      idNumbers: [],
+      latitude: customer.latitude || null,
+      longitude: customer.longitude || null,
     });
+    // Load additional phones and ID numbers from IndexedDB
+    loadCustomerAdditionalData(customer.id);
     setIsDialogOpen(true);
+  };
+
+  const loadCustomerAdditionalData = async (customerId: string) => {
+    try {
+      // Load additional phones
+      const phones = await db.getByIndex<CustomerPhone>("customerPhones", "customerId", customerId);
+      const additionalPhonesList = phones.filter(p => p.isActive).map(p => p.phone);
+      setFormData(prev => ({ ...prev, additionalPhones: additionalPhonesList }));
+
+      // Load ID numbers
+      const ids = await db.getByIndex<CustomerIdentification>("customerIdentifications", "customerId", customerId);
+      const idNumbersList = ids.filter(id => id.isActive).map(id => ({ number: id.idNumber, label: id.label }));
+      setFormData(prev => ({ ...prev, idNumbers: idNumbersList }));
+    } catch (error) {
+      console.error("Error loading customer additional data:", error);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -302,6 +383,12 @@ const Customers = () => {
       whatsappGroupId: "",
       invoiceGroupId: "",
       collectionGroupId: "",
+      // WhatsApp Bot v2 fields
+      customerType: "registered",
+      additionalPhones: [],
+      idNumbers: [],
+      latitude: null,
+      longitude: null,
     });
     setEditingCustomer(null);
     setWhatsappGroups([]);
@@ -620,6 +707,116 @@ const Customers = () => {
                       />
                     </div>
                   </div>
+
+                  {/* WhatsApp Bot v2: Customer Type Selector */}
+                  <div className="space-y-2">
+                    <Label htmlFor="customerType">نوع العميل</Label>
+                    <Select
+                      value={formData.customerType}
+                      onValueChange={(v) => setFormData({ ...formData, customerType: v as "registered" | "casual" })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="registered">مسجل (Long-Time) - له رقم تعريفي</SelectItem>
+                        <SelectItem value="casual">عادي - بدون رقم تعريفي</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* WhatsApp Bot v2: Additional Phone Numbers */}
+                  <div className="space-y-2">
+                    <Label>أرقام تليفونات إضافية</Label>
+                    {formData.additionalPhones.map((phone, idx) => (
+                      <div key={idx} className="flex gap-2">
+                        <Input
+                          value={phone}
+                          onChange={(e) => {
+                            const newPhones = [...formData.additionalPhones];
+                            newPhones[idx] = e.target.value;
+                            setFormData({ ...formData, additionalPhones: newPhones });
+                          }}
+                          placeholder={`تليفون ${idx + 2}`}
+                        />
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          onClick={() => {
+                            const newPhones = formData.additionalPhones.filter((_, i) => i !== idx);
+                            setFormData({ ...formData, additionalPhones: newPhones });
+                          }}
+                        >
+                          حذف
+                        </Button>
+                      </div>
+                    ))}
+                    {formData.additionalPhones.length < 2 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setFormData({ ...formData, additionalPhones: [...formData.additionalPhones, ""] })}
+                      >
+                        + إضافة رقم تليفون آخر
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* WhatsApp Bot v2: Customer ID Numbers (for registered customers) */}
+                  {formData.customerType === "registered" && (
+                    <div className="space-y-2">
+                      <Label>أرقام التعريف (لعملاء Long-Time)</Label>
+                      {formData.idNumbers.map((idObj, idx) => (
+                        <div key={idx} className="flex gap-2">
+                          <Input
+                            value={idObj.number}
+                            onChange={(e) => {
+                              const newIds = [...formData.idNumbers];
+                              newIds[idx].number = e.target.value;
+                              setFormData({ ...formData, idNumbers: newIds });
+                            }}
+                            placeholder="رقم التعريف"
+                          />
+                          <Select
+                            value={idObj.label}
+                            onValueChange={(v) => {
+                              const newIds = [...formData.idNumbers];
+                              newIds[idx].label = v;
+                              setFormData({ ...formData, idNumbers: newIds });
+                            }}
+                          >
+                            <SelectTrigger className="w-32">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="primary">أساسي</SelectItem>
+                              <SelectItem value="secondary">ثانوي</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            onClick={() => {
+                              const newIds = formData.idNumbers.filter((_, i) => i !== idx);
+                              setFormData({ ...formData, idNumbers: newIds });
+                            }}
+                          >
+                            حذف
+                          </Button>
+                        </div>
+                      ))}
+                      {formData.idNumbers.length < 2 && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setFormData({ ...formData, idNumbers: [...formData.idNumbers, { number: "", label: "primary" }] })}
+                        >
+                          + إضافة رقم تعريف آخر
+                        </Button>
+                      )}
+                    </div>
+                  )}
+
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label className="flex items-center gap-2">
@@ -848,6 +1045,56 @@ const Customers = () => {
                       }
                     />
                   </div>
+
+                  {/* WhatsApp Bot v2: Location Fields */}
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                      <MapPin className="h-4 w-4" />
+                      الموقع على الخريطة
+                    </Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input
+                        type="number"
+                        step="any"
+                        value={formData.latitude || ""}
+                        onChange={(e) => setFormData({ ...formData, latitude: parseFloat(e.target.value) || null })}
+                        placeholder="خط العرض (Latitude)"
+                      />
+                      <Input
+                        type="number"
+                        step="any"
+                        value={formData.longitude || ""}
+                        onChange={(e) => setFormData({ ...formData, longitude: parseFloat(e.target.value) || null })}
+                        placeholder="خط الطول (Longitude)"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        if (navigator.geolocation) {
+                          navigator.geolocation.getCurrentPosition(
+                            (position) => {
+                              setFormData({
+                                ...formData,
+                                latitude: position.coords.latitude,
+                                longitude: position.coords.longitude,
+                              });
+                              toast.success("تم تحديد الموقع بنجاح");
+                            },
+                            () => {
+                              toast.error("فشل في تحديد الموقع");
+                            }
+                          );
+                        } else {
+                          toast.error("المتصفح لا يدعم تحديد الموقع");
+                        }
+                      }}
+                    >
+                      📍 تحديد موقعي الحالي
+                    </Button>
+                  </div>
+
                   <div className="space-y-2">
                     <Label htmlFor="notes">ملاحظات</Label>
                     <Textarea

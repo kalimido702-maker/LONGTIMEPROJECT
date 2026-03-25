@@ -246,6 +246,8 @@ export type {
   PendingOrder,
   Supervisor,
   SalesRep,
+  CustomerPhone,
+  CustomerIdentification,
 } from "@/domain/entities/Index";
 
 

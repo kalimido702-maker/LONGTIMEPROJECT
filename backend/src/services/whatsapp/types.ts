@@ -155,6 +155,31 @@ export interface WhatsAppWsEvent {
   data: Record<string, unknown>;
 }
 
+// ─── AI Intent Detection Types ───────────────────────────────────
+
+export type IntentType =
+  | 'invoice_query'
+  | 'debt_query'
+  | 'payment_query'
+  | 'statement_query'
+  | 'nearest_trader'
+  | 'location_info'
+  | 'general_inquiry'
+  | 'unknown';
+
+export interface IntentResult {
+  intent: IntentType;
+  confidence: number;
+  entities: {
+    invoiceNumber?: string;
+    customerIdNumber?: string;
+    month?: string;
+    areaName?: string;
+    customerName?: string;
+  };
+  rawMessage: string;
+}
+
 // ─── Error Messages ──────────────────────────────────────────────
 
 export const ERROR_MESSAGES = {

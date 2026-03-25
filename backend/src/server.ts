@@ -24,6 +24,7 @@ import licenseRoutes from "./routes/license.js";
 import { syncRoutes } from "./routes/sync.js";
 import productRoutes from "./routes/products.js";
 import customerRoutes from "./routes/customers.js";
+import nearestTraderRoutes from "./routes/nearestTrader.js";
 import invoiceRoutes from "./routes/invoices.js";
 import categoryRoutes from "./routes/categories.js";
 import supplierRoutes from "./routes/suppliers.js";
@@ -138,6 +139,9 @@ async function registerRoutes() {
   });
   await fastify.register(customerRoutes, {
     prefix: `${env.API_PREFIX}/customers`,
+  });
+  await fastify.register(nearestTraderRoutes, {
+    prefix: `${env.API_PREFIX}/nearest-trader`,
   });
   await fastify.register(invoiceRoutes, {
     prefix: `${env.API_PREFIX}/invoices`,

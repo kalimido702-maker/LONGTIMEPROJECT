@@ -1,7 +1,7 @@
 import { StoreConfig } from "../types";
 
 // DB Version
-export const DB_VERSION = 23;
+export const DB_VERSION = 24;
 export const DB_NAME = "MyPOS_DB";
 
 // تعريف كل الـ Object Stores بشكل منظم
@@ -14,7 +14,12 @@ export const STORES_SCHEMA: StoreConfig[] = [
   {
     name: "customers",
     keyPath: "id",
-    indexes: [{ name: "phone", keyPath: "phone", unique: false }],
+    indexes: [
+      { name: "phone", keyPath: "phone", unique: false },
+      // Location indexes for proximity queries (WhatsApp Bot v2)
+      { name: "latitude", keyPath: "latitude", unique: false },
+      { name: "longitude", keyPath: "longitude", unique: false },
+    ],
   },
   {
     name: "products",
@@ -403,6 +408,29 @@ export const STORES_SCHEMA: StoreConfig[] = [
       { name: "storeName", keyPath: "storeName", unique: false },
       { name: "tableName", keyPath: "tableName", unique: false },
       { name: "recordId", keyPath: "recordId", unique: false },
+      { name: "createdAt", keyPath: "createdAt", unique: false },
+    ],
+  },
+  // WhatsApp Bot v2 - Customer phones for multi-phone lookup
+  {
+    name: "customerPhones",
+    keyPath: "id",
+    indexes: [
+      { name: "customerId", keyPath: "customerId", unique: false },
+      { name: "phone", keyPath: "phone", unique: false },
+      { name: "isActive", keyPath: "isActive", unique: false },
+      { name: "createdAt", keyPath: "createdAt", unique: false },
+    ],
+  },
+  // WhatsApp Bot v2 - Customer identification numbers for Long-Time customers
+  {
+    name: "customerIdentifications",
+    keyPath: "id",
+    indexes: [
+      { name: "customerId", keyPath: "customerId", unique: false },
+      { name: "idNumber", keyPath: "idNumber", unique: false },
+      { name: "label", keyPath: "label", unique: false },
+      { name: "isActive", keyPath: "isActive", unique: false },
       { name: "createdAt", keyPath: "createdAt", unique: false },
     ],
   },
