@@ -7,12 +7,12 @@ import {
   JWTAccessPayload,
   JWTRefreshPayload,
 } from "../config/jwt.js";
-import { randomUUID } from "crypto";
+import { createHash } from "crypto";
 
 // Validation schemas
 const loginSchema = z.object({
-  username: z.string().min(3),
-  password: z.string().min(6),
+  username: z.string().min(1),
+  password: z.string().min(1),
   deviceId: z.string().optional(),
 });
 
@@ -33,6 +33,10 @@ interface User {
 
 interface Role {
   permissions: string[];
+}
+
+function getPasswordVersion(passwordHash: string): string {
+  return createHash("sha256").update(passwordHash).digest("hex").slice(0, 24);
 }
 
 export default async function authRoutes(fastify: FastifyInstance) {
@@ -78,18 +82,56 @@ export default async function authRoutes(fastify: FastifyInstance) {
           });
         }
 
-        // Get user permissions from role
-        const roles = await query<Role>(
-          "SELECT permissions FROM roles WHERE client_id = ? AND name = ? AND is_deleted = FALSE LIMIT 1",
-          [user.client_id, user.role]
+        // Get user permissions from role (role field may contain role name OR role ID)
+        const roles = await query<any>(
+          "SELECT name, name_en, permissions FROM roles WHERE client_id = ? AND (id = ? OR name = ?) AND is_deleted = 0 LIMIT 1",
+          [user.client_id, user.role, user.role]
         );
 
-        const permissions =
-          roles.length > 0 && roles[0].permissions
-            ? typeof roles[0].permissions === 'string'
+        let parsedPermissions: any = [];
+        if (roles.length > 0 && roles[0].permissions) {
+          try {
+            const rawPerms = typeof roles[0].permissions === 'string'
               ? JSON.parse(roles[0].permissions)
-              : roles[0].permissions
-            : [];
+              : roles[0].permissions;
+
+            if (Array.isArray(rawPerms)) {
+              parsedPermissions = rawPerms;
+            } else if (typeof rawPerms === 'object' && rawPerms !== null) {
+              parsedPermissions = [];
+              for (const [resource, actions] of Object.entries(rawPerms)) {
+                if (Array.isArray(actions)) {
+                  actions.forEach((action: string) => {
+                    parsedPermissions.push(`${resource}.${action}`);
+                  });
+                }
+              }
+            }
+          } catch (e) {
+            parsedPermissions = [];
+          }
+        }
+
+        // Resolve actual role name from the role record (prefer name_en to avoid localization issues in mobile app)
+        let rawRoleName = user.role;
+        if (roles.length > 0) {
+          rawRoleName = roles[0].name_en || roles[0].name || user.role;
+        }
+
+        let resolvedRoleName = rawRoleName.toLowerCase();
+        
+        // Normalize Arabic or display English names to the slugs expected by mobile
+        if (resolvedRoleName === 'مدير النظام' || resolvedRoleName === 'system administrator' || resolvedRoleName === 'admin') {
+          resolvedRoleName = 'admin';
+        } else if (resolvedRoleName === 'مشرف' || resolvedRoleName === 'supervisor') {
+          resolvedRoleName = 'supervisor';
+        } else if (resolvedRoleName === 'مندوب مبيعات' || resolvedRoleName === 'sales rep' || resolvedRoleName === 'sales representative') {
+          resolvedRoleName = 'sales_rep';
+        } else if (resolvedRoleName === 'مدير عام' || resolvedRoleName === 'general manager') {
+          resolvedRoleName = 'general_manager';
+        } else if (resolvedRoleName === 'مسؤول مبيعات' || resolvedRoleName === 'sales manager') {
+          resolvedRoleName = 'sales_manager';
+        }
 
         // Generate tokens
         const tokenId = crypto.randomUUID();
@@ -97,8 +139,9 @@ export default async function authRoutes(fastify: FastifyInstance) {
           userId: user.id,
           clientId: user.client_id,
           branchId: user.branch_id,
-          role: user.role,
-          permissions: Array.isArray(permissions) ? permissions : [],
+          role: resolvedRoleName,
+          permissions: parsedPermissions,
+          pwdv: getPasswordVersion(user.password_hash),
           type: "access",
         };
 
@@ -106,7 +149,8 @@ export default async function authRoutes(fastify: FastifyInstance) {
           userId: user.id,
           clientId: user.client_id,
           branchId: user.branch_id,
-          role: user.role,
+          role: resolvedRoleName,
+          pwdv: getPasswordVersion(user.password_hash),
           type: "refresh",
           tokenId,
         };
@@ -142,9 +186,10 @@ export default async function authRoutes(fastify: FastifyInstance) {
             id: user.id,
             username: user.username,
             fullName: user.full_name,
-            role: user.role,
+            role: resolvedRoleName,
             clientId: user.client_id,
             branchId: user.branch_id,
+            permissions: parsedPermissions,
           },
         });
       } catch (error) {
@@ -223,27 +268,57 @@ export default async function authRoutes(fastify: FastifyInstance) {
         }
 
         const user = users[0];
+        const currentPwdv = getPasswordVersion(user.password_hash);
 
-        // Get permissions
-        const roles = await query<Role>(
-          "SELECT permissions FROM roles WHERE client_id = ? AND name = ? AND is_deleted = FALSE LIMIT 1",
-          [user.client_id, user.role]
+        if (payload.pwdv && payload.pwdv !== currentPwdv) {
+          await query("DELETE FROM refresh_tokens WHERE id = ?", [payload.tokenId]);
+          return reply.code(401).send({
+            error: "Unauthorized",
+            message: "Session expired, please login again",
+          });
+        }
+
+        // Get permissions (role field may contain role name OR role ID)
+        const roles = await query<Role & { name: string }>(
+          "SELECT name, permissions FROM roles WHERE client_id = ? AND (id = ? OR name = ?) AND is_deleted = FALSE LIMIT 1",
+          [user.client_id, user.role, user.role]
         );
 
-        const permissions =
-          roles.length > 0 && roles[0].permissions
-            ? typeof roles[0].permissions === 'string'
+        let parsedPermissions: any = [];
+        if (roles.length > 0 && roles[0].permissions) {
+          try {
+            const rawPerms = typeof roles[0].permissions === 'string'
               ? JSON.parse(roles[0].permissions)
-              : roles[0].permissions
-            : [];
+              : roles[0].permissions;
+
+            if (Array.isArray(rawPerms)) {
+              parsedPermissions = rawPerms;
+            } else if (typeof rawPerms === 'object' && rawPerms !== null) {
+              parsedPermissions = [];
+              for (const [resource, actions] of Object.entries(rawPerms)) {
+                if (Array.isArray(actions)) {
+                  actions.forEach((action: string) => {
+                    parsedPermissions.push(`${resource}.${action}`);
+                  });
+                }
+              }
+            }
+          } catch (e) {
+            parsedPermissions = [];
+          }
+        }
+
+        // Resolve actual role name
+        const resolvedRoleName = (roles.length > 0 && roles[0].name) ? roles[0].name : user.role;
 
         // Generate new access token
         const accessPayload: JWTAccessPayload = {
           userId: user.id,
           clientId: user.client_id,
           branchId: user.branch_id,
-          role: user.role,
-          permissions: Array.isArray(permissions) ? permissions : [],
+          role: resolvedRoleName,
+          permissions: parsedPermissions,
+          pwdv: currentPwdv,
           type: "access",
         };
 
@@ -302,6 +377,169 @@ export default async function authRoutes(fastify: FastifyInstance) {
             error: "Validation Error",
             details: error.errors,
           });
+        }
+        throw error;
+      }
+    }
+  );
+
+  // ============================================================
+  // POST /switch-profile
+  // Switch to a linked profile without re-authentication
+  // ============================================================
+  fastify.post(
+    "/switch-profile",
+    { preValidation: [fastify.authenticate] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { targetUserId } = request.body as { targetUserId: string };
+        const currentUser = request.user!;
+
+        if (!targetUserId) {
+          return reply.code(400).send({ error: "targetUserId is required" });
+        }
+
+        if (targetUserId === currentUser.userId) {
+          return reply.code(400).send({ error: "Cannot switch to current profile" });
+        }
+
+        // Verify current user exists
+        const selfRows = await query(
+          "SELECT id, parent_user_id, client_id FROM users WHERE id = ? AND client_id = ? AND is_deleted = 0",
+          [currentUser.userId, currentUser.clientId]
+        );
+        if (selfRows.length === 0) {
+          return reply.code(404).send({ error: "Current user not found" });
+        }
+        const self = selfRows[0];
+
+        // Determine the family root (parent_id)
+        const familyRootId = self.parent_user_id || self.id;
+
+        // Verify target user is in the same family
+        const targetRows = await query(
+          `SELECT u.id, u.client_id, u.branch_id, u.username, u.full_name, u.password_hash,
+                  u.role, u.is_active, u.parent_user_id,
+                  u.linked_customer_id, u.linked_sales_rep_id, u.linked_supervisor_id
+           FROM users u
+           WHERE u.id = ? AND u.client_id = ? AND u.is_deleted = 0 AND u.is_active = 1
+             AND (u.id = ? OR u.parent_user_id = ?)`,
+          [targetUserId, currentUser.clientId, familyRootId, familyRootId]
+        );
+
+        if (targetRows.length === 0) {
+          return reply.code(403).send({
+            error: "Forbidden",
+            message: "Target user is not in your linked profiles family",
+          });
+        }
+
+        const targetUser = targetRows[0];
+
+        // Resolve role and permissions (same logic as login)
+        const roles = await query(
+          "SELECT name, name_en, permissions FROM roles WHERE client_id = ? AND (id = ? OR name = ?) AND is_deleted = 0 LIMIT 1",
+          [targetUser.client_id, targetUser.role, targetUser.role]
+        );
+
+        let parsedPermissions: any = [];
+        if (roles.length > 0 && roles[0].permissions) {
+          try {
+            const rawPerms = typeof roles[0].permissions === 'string'
+              ? JSON.parse(roles[0].permissions)
+              : roles[0].permissions;
+            if (Array.isArray(rawPerms)) {
+              parsedPermissions = rawPerms;
+            } else if (typeof rawPerms === 'object' && rawPerms !== null) {
+              parsedPermissions = [];
+              for (const [resource, actions] of Object.entries(rawPerms)) {
+                if (Array.isArray(actions)) {
+                  actions.forEach((action: string) => {
+                    parsedPermissions.push(`${resource}.${action}`);
+                  });
+                }
+              }
+            }
+          } catch { parsedPermissions = []; }
+        }
+
+        // Resolve role name
+        let rawRoleName = targetUser.role;
+        if (roles.length > 0) {
+          rawRoleName = roles[0].name_en || roles[0].name || targetUser.role;
+        }
+        let resolvedRoleName = rawRoleName.toLowerCase();
+        if (resolvedRoleName === 'مدير النظام' || resolvedRoleName === 'system administrator' || resolvedRoleName === 'admin') {
+          resolvedRoleName = 'admin';
+        } else if (resolvedRoleName === 'مشرف' || resolvedRoleName === 'supervisor') {
+          resolvedRoleName = 'supervisor';
+        } else if (resolvedRoleName === 'مندوب مبيعات' || resolvedRoleName === 'sales rep' || resolvedRoleName === 'sales representative') {
+          resolvedRoleName = 'sales_rep';
+        } else if (resolvedRoleName === 'مدير عام' || resolvedRoleName === 'general manager') {
+          resolvedRoleName = 'general_manager';
+        } else if (resolvedRoleName === 'مسؤول مبيعات' || resolvedRoleName === 'sales manager') {
+          resolvedRoleName = 'sales_manager';
+        }
+
+        // Generate fresh tokens for target user
+        const tokenId = crypto.randomUUID();
+        const accessPayload: JWTAccessPayload = {
+          userId: targetUser.id,
+          clientId: targetUser.client_id,
+          branchId: targetUser.branch_id,
+          role: resolvedRoleName,
+          permissions: parsedPermissions,
+          pwdv: getPasswordVersion(targetUser.password_hash),
+          type: "access",
+        };
+        const refreshPayload: JWTRefreshPayload = {
+          userId: targetUser.id,
+          clientId: targetUser.client_id,
+          branchId: targetUser.branch_id,
+          role: resolvedRoleName,
+          pwdv: getPasswordVersion(targetUser.password_hash),
+          type: "refresh",
+          tokenId,
+        };
+
+        const accessToken = fastify.jwt.sign(accessPayload, {
+          expiresIn: jwtConfig.accessExpiry,
+        });
+        const refreshToken = fastify.jwt.sign(refreshPayload, {
+          expiresIn: jwtConfig.refreshExpiry,
+        });
+
+        // Store refresh token
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + 7);
+        await query(
+          "INSERT INTO refresh_tokens (id, user_id, token, device_id, expires_at) VALUES (?, ?, ?, ?, ?)",
+          [tokenId, targetUser.id, refreshToken, null, expiresAt.toISOString()]
+        );
+
+        // Update last login
+        await query("UPDATE users SET last_login_at = ? WHERE id = ?", [
+          new Date().toISOString(),
+          targetUser.id,
+        ]);
+
+        return reply.send({
+          accessToken,
+          refreshToken,
+          expiresIn: jwtConfig.accessExpiry,
+          user: {
+            id: targetUser.id,
+            username: targetUser.username,
+            fullName: targetUser.full_name,
+            role: resolvedRoleName,
+            clientId: targetUser.client_id,
+            branchId: targetUser.branch_id,
+            permissions: parsedPermissions,
+          },
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return reply.code(400).send({ error: "Validation Error", details: error.errors });
         }
         throw error;
       }

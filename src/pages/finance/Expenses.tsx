@@ -26,10 +26,91 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Filter } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
+import { Plus, Filter, RotateCcw, Trash2, CalendarClock } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { ExcelExportButton } from "@/components/common/ExcelExportButton";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
+
+// مصروف متكرر شهرياً
+interface RecurringExpense {
+  id: string;
+  description: string;
+  amount: number;
+  categoryId: string;
+  categoryName: string;
+  dayOfMonth: number; // 1-28
+  active: boolean;
+  createdAt: string;
+  lastGeneratedMonth?: string; // "YYYY-MM" آخر شهر تم توليد مصروف فيه
+}
+
+const RECURRING_KEY = "pos-recurring-expenses";
+
+const getRecurringExpenses = (): RecurringExpense[] => {
+  try {
+    const saved = localStorage.getItem(RECURRING_KEY);
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveRecurringExpenses = (list: RecurringExpense[]) => {
+  localStorage.setItem(RECURRING_KEY, JSON.stringify(list));
+};
+
+// توليد المصاريف المتكررة تلقائياً للشهر الحالي
+const processRecurringExpenses = async (userId: string, userName: string) => {
+  const list = getRecurringExpenses();
+  const now = new Date();
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  let generated = 0;
+
+  for (const item of list) {
+    if (!item.active) continue;
+    if (item.lastGeneratedMonth === currentMonthKey) continue;
+
+    // نتحقق هل اليوم >= يوم الاستحقاق؟
+    if (now.getDate() < item.dayOfMonth) continue;
+
+    // الحصول على وردية نشطة
+    const shifts = await db.getAll<any>("shifts");
+    const currentShift = shifts.find((s: any) => s.status === "active");
+    if (!currentShift) continue; // يجب أن تكون فيه وردية مفتوحة
+
+    const newExpense: ExpenseItem = {
+      id: `recurring_${item.id}_${currentMonthKey}`,
+      amount: item.amount,
+      categoryId: item.categoryId,
+      categoryName: item.categoryName,
+      description: `${item.description} (متكرر شهري)`,
+      userId,
+      userName,
+      shiftId: currentShift.id,
+      notes: `مصروف متكرر - ${now.toLocaleDateString("ar-EG", { month: "long", year: "numeric" })}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      await db.add("expenseItems", newExpense);
+      item.lastGeneratedMonth = currentMonthKey;
+      generated++;
+    } catch (error) {
+      console.error(`Error generating recurring expense ${item.id}:`, error);
+    }
+  }
+
+  if (generated > 0) {
+    saveRecurringExpenses(list);
+    console.log(`✅ Generated ${generated} recurring expenses for ${currentMonthKey}`);
+  }
+
+  return generated;
+};
 
 const Expenses = () => {
   const { can, user } = useAuth();
@@ -52,8 +133,19 @@ const Expenses = () => {
     dateTo: "",
   });
 
+  // Recurring expenses state
+  const [recurringList, setRecurringList] = useState<RecurringExpense[]>([]);
+  const [showRecurringDialog, setShowRecurringDialog] = useState(false);
+  const [recurringForm, setRecurringForm] = useState({
+    description: "",
+    amount: "",
+    categoryId: "",
+    dayOfMonth: "1",
+  });
+
   useEffect(() => {
     loadData();
+    loadRecurring();
   }, []);
 
   useEffect(() => {
@@ -61,19 +153,78 @@ const Expenses = () => {
   }, [expenses, filters]);
 
   const loadData = async () => {
-    await db.init();
-    const [expensesData, categoriesData] = await Promise.all([
-      db.getAll<ExpenseItem>("expenseItems"),
-      db.getAll<ExpenseCategory>("expenseCategories"),
-    ]);
+    try {
+      await db.init();
+      const [expensesData, categoriesData] = await Promise.all([
+        db.getAll<ExpenseItem>("expenseItems").catch(() => []),
+        db.getAll<ExpenseCategory>("expenseCategories").catch(() => []),
+      ]);
 
-    setExpenses(
-      expensesData.sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      )
+      setExpenses(
+        (expensesData || []).sort(
+          (a, b) =>
+            new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        )
+      );
+      setCategories((categoriesData || []).filter((c) => c?.active));
+    } catch (error) {
+      console.error("❌ [Expenses] Error loading data:", error);
+    }
+  };
+
+  const loadRecurring = async () => {
+    setRecurringList(getRecurringExpenses());
+    // معالجة المصاريف المتكررة تلقائياً
+    const generated = await processRecurringExpenses(user?.id || "", user?.username || "");
+    if (generated > 0) {
+      toast({ title: `تم إنشاء ${generated} مصروف متكرر تلقائياً` });
+      await loadData();
+    }
+  };
+
+  const handleAddRecurring = () => {
+    const amount = parseFloat(recurringForm.amount);
+    if (!amount || amount <= 0 || !recurringForm.categoryId || !recurringForm.description.trim()) {
+      toast({ title: "الرجاء ملء جميع الحقول", variant: "destructive" });
+      return;
+    }
+
+    const category = categories.find((c) => c.id === recurringForm.categoryId);
+    if (!category) return;
+
+    const newRecurring: RecurringExpense = {
+      id: Date.now().toString(),
+      description: recurringForm.description.trim(),
+      amount,
+      categoryId: category.id,
+      categoryName: category.name,
+      dayOfMonth: parseInt(recurringForm.dayOfMonth) || 1,
+      active: true,
+      createdAt: new Date().toISOString(),
+    };
+
+    const updated = [...recurringList, newRecurring];
+    saveRecurringExpenses(updated);
+    setRecurringList(updated);
+    setRecurringForm({ description: "", amount: "", categoryId: "", dayOfMonth: "1" });
+    setShowRecurringDialog(false);
+    toast({ title: "تم إضافة المصروف المتكرر" });
+  };
+
+  const handleToggleRecurring = (id: string) => {
+    const updated = recurringList.map((r) =>
+      r.id === id ? { ...r, active: !r.active } : r
     );
-    setCategories(categoriesData.filter((c) => c.active));
+    saveRecurringExpenses(updated);
+    setRecurringList(updated);
+  };
+
+  const handleDeleteRecurring = (id: string) => {
+    if (!confirm("هل تريد حذف هذا المصروف المتكرر؟")) return;
+    const updated = recurringList.filter((r) => r.id !== id);
+    saveRecurringExpenses(updated);
+    setRecurringList(updated);
+    toast({ title: "تم حذف المصروف المتكرر" });
   };
 
   const filterExpenses = () => {
@@ -97,6 +248,10 @@ const Expenses = () => {
 
     setFilteredExpenses(filtered);
   };
+
+  const pagination = usePagination(filteredExpenses, {
+    resetDeps: [filters],
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -176,7 +331,7 @@ const Expenses = () => {
   };
 
   const getTotalAmount = () => {
-    return filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+    return filteredExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
   };
 
   const getCategoryBreakdown = () => {
@@ -329,6 +484,83 @@ const Expenses = () => {
           </div>
         </div>
 
+        {/* Recurring Expenses Section */}
+        {can("expenses", "create") && (
+          <div className="mb-6 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-4 rounded-lg">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <CalendarClock className="h-5 w-5 text-blue-600" />
+                <span className="font-semibold text-blue-800 dark:text-blue-200">
+                  مصروفات متكررة شهرياً
+                </span>
+                <Badge variant="secondary">{recurringList.filter((r) => r.active).length} نشط</Badge>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowRecurringDialog(true)}
+                className="gap-1"
+              >
+                <Plus className="h-3 w-3" />
+                إضافة
+              </Button>
+            </div>
+
+            {recurringList.length > 0 ? (
+              <div className="space-y-2">
+                {recurringList.map((item) => (
+                  <div
+                    key={item.id}
+                    className={`flex items-center justify-between p-2 rounded border ${
+                      item.active
+                        ? "bg-white dark:bg-background border-blue-100 dark:border-blue-800"
+                        : "bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 opacity-60"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Switch
+                        checked={item.active}
+                        onCheckedChange={() => handleToggleRecurring(item.id)}
+                      />
+                      <div>
+                        <span className="font-medium">{item.description}</span>
+                        <span className="text-sm text-muted-foreground mr-2">
+                          ({item.categoryName})
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="font-bold text-red-600">
+                        {item.amount.toFixed(2)} ج.م
+                      </span>
+                      <Badge variant="outline" className="text-xs">
+                        يوم {item.dayOfMonth}
+                      </Badge>
+                      {item.lastGeneratedMonth && (
+                        <Badge variant="secondary" className="text-xs">
+                          آخر: {item.lastGeneratedMonth}
+                        </Badge>
+                      )}
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-red-500"
+                        onClick={() => handleDeleteRecurring(item.id)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-2">
+                لا توجد مصروفات متكررة — أضف إيجار أو اشتراكات ثابتة
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Expenses Table */}
         <div className="rounded-md border">
           <Table>
@@ -353,16 +585,16 @@ const Expenses = () => {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredExpenses.map((expense) => (
+                pagination.paginatedItems.map((expense) => (
                   <TableRow key={expense.id}>
                     <TableCell>
-                      {new Date(expense.createdAt).toLocaleString("ar-EG", {
+                      {expense.createdAt ? new Date(expense.createdAt).toLocaleString("ar-EG", {
                         dateStyle: "medium",
                         timeStyle: "short",
-                      })}
+                      }) : "-"}
                     </TableCell>
                     <TableCell className="font-bold text-red-600">
-                      {expense.amount.toFixed(2)} ج.م
+                      {(Number(expense.amount) || 0).toFixed(2)} ج.م
                     </TableCell>
                     <TableCell>
                       <span className="inline-block px-2 py-1 bg-muted rounded text-sm">
@@ -384,6 +616,7 @@ const Expenses = () => {
             </TableBody>
           </Table>
         </div>
+        <DataPagination {...pagination} entityName="مصروف" />
 
         {/* Add Dialog */}
         <Dialog open={showDialog} onOpenChange={handleCloseDialog}>
@@ -473,6 +706,99 @@ const Expenses = () => {
                 <Button type="submit">إضافة المصروف</Button>
               </div>
             </form>
+          </DialogContent>
+        </Dialog>
+        {/* Add Recurring Expense Dialog */}
+        <Dialog open={showRecurringDialog} onOpenChange={setShowRecurringDialog}>
+          <DialogContent dir="rtl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <CalendarClock className="h-5 w-5" />
+                إضافة مصروف متكرر شهرياً
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>الوصف *</Label>
+                <Input
+                  value={recurringForm.description}
+                  onChange={(e) =>
+                    setRecurringForm({ ...recurringForm, description: e.target.value })
+                  }
+                  placeholder="مثال: إيجار المحل"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>المبلغ الشهري *</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  value={recurringForm.amount}
+                  onChange={(e) =>
+                    setRecurringForm({ ...recurringForm, amount: e.target.value })
+                  }
+                  placeholder="0.00"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>الفئة *</Label>
+                <Select
+                  value={recurringForm.categoryId}
+                  onValueChange={(value) =>
+                    setRecurringForm({ ...recurringForm, categoryId: value })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="اختر الفئة" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categories.map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>يوم الاستحقاق من كل شهر</Label>
+                <Select
+                  value={recurringForm.dayOfMonth}
+                  onValueChange={(value) =>
+                    setRecurringForm({ ...recurringForm, dayOfMonth: value })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 28 }, (_, i) => i + 1).map((day) => (
+                      <SelectItem key={day} value={day.toString()}>
+                        اليوم {day}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  سيتم إنشاء المصروف تلقائياً عند فتح الصفحة بعد هذا اليوم
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowRecurringDialog(false)}
+                >
+                  إلغاء
+                </Button>
+                <Button onClick={handleAddRecurring}>إضافة</Button>
+              </div>
+            </div>
           </DialogContent>
         </Dialog>
       </div>

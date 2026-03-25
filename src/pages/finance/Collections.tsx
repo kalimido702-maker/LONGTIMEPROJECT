@@ -63,14 +63,17 @@ import {
     Edit,
     ShieldAlert,
     MessageCircle,
+    Send,
 } from "lucide-react";
-import { db, Customer, PaymentMethod, SalesRep, Supervisor } from "@/shared/lib/indexedDB";
+import { db, Customer, PaymentMethod, SalesRep, Supervisor, Invoice } from "@/shared/lib/indexedDB";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { cn, getLocalDateString } from "@/lib/utils";
 import { exportToExcel } from "@/lib/reportExport";
 import { useCustomerBalances } from "@/hooks/useCustomerBalances";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 // نوع سجل القبض
 interface CollectionRecord {
@@ -102,6 +105,7 @@ export default function Collections() {
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
     const [recentCollections, setRecentCollections] = useState<CollectionRecord[]>([]);
+    const [allInvoices, setAllInvoices] = useState<Invoice[]>([]);
 
     const { getBalance, refresh: refreshBalances } = useCustomerBalances([customers]);
 
@@ -116,8 +120,8 @@ export default function Collections() {
     const [isLoading, setIsLoading] = useState(false);
 
     // Advanced filters
-    const [filterDateFrom, setFilterDateFrom] = useState<string>(new Date().toISOString().split('T')[0]);
-    const [filterDateTo, setFilterDateTo] = useState<string>(new Date().toISOString().split('T')[0]);
+    const [filterDateFrom, setFilterDateFrom] = useState<string>(getLocalDateString());
+    const [filterDateTo, setFilterDateTo] = useState<string>(getLocalDateString());
     const [filterPaymentMethodId, setFilterPaymentMethodId] = useState<string>("all");
     const [filterSupervisorId, setFilterSupervisorId] = useState<string>("all");
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
@@ -132,6 +136,7 @@ export default function Collections() {
     const [editAmount, setEditAmount] = useState("");
     const [editNotes, setEditNotes] = useState("");
     const [editPaymentMethodId, setEditPaymentMethodId] = useState("");
+    const [editDate, setEditDate] = useState("");
 
     useEffect(() => {
         loadData();
@@ -156,6 +161,10 @@ export default function Collections() {
         setSalesReps(allReps);
         const allSupervisors = await db.getAll<Supervisor>("supervisors");
         setSupervisors(allSupervisors.filter(s => s.isActive));
+
+        // تحميل الفواتير
+        const invoices = await db.getAll<Invoice>("invoices");
+        setAllInvoices(invoices);
 
         // تحميل آخر عمليات القبض
         await loadRecentCollections();
@@ -247,40 +256,55 @@ export default function Collections() {
     useEffect(() => {
         if (paymentMethods.length > 0 && !selectedPaymentMethodId) {
             const selectDefaultMethod = async () => {
-                let creditMethod = paymentMethods.find((m) => m.type === "credit") ||
-                    paymentMethods.find((m) => m.name.includes("آجل")) ||
-                    paymentMethods.find((m) => m.name.includes("اجل"));
+                // let creditMethod = paymentMethods.find((m) => m.type === "credit") ||
+                    // paymentMethods.find((m) => m.name.includes("آجل")) ||
+                    // paymentMethods.find((m) => m.name.includes("اجل"));
 
                 // إذا لم توجد طريقة دفع "آجل"، قم بإنشائها تلقائياً
-                if (!creditMethod) {
-                    try {
-                        const newCreditMethod: PaymentMethod = {
-                            id: `pm_${Date.now()}`,
-                            name: "آجل",
-                            type: "credit",
-                            isActive: true,
-                            createdAt: new Date().toISOString()
-                        };
-                        await db.add("paymentMethods", newCreditMethod);
-                        creditMethod = newCreditMethod;
+                // if (!creditMethod) {
+                //     try {
+                //         // Re-check from DB directly to avoid race conditions with other components
+                //         const allMethods = await db.getAll<PaymentMethod>("paymentMethods");
+                //         creditMethod = allMethods.find((m) => m.type === "credit") ||
+                //             allMethods.find((m) => m.name.includes("آجل")) ||
+                //             allMethods.find((m) => m.name.includes("اجل"));
 
-                        // تحديث القائمة
-                        setPaymentMethods(prev => [...prev, newCreditMethod]);
-                    } catch (error) {
-                        console.error("Failed to auto-create credit payment method:", error);
-                    }
-                }
+                //         if (!creditMethod) {
+                //             const newCreditMethod: PaymentMethod = {
+                //                 id: `pm_${Date.now()}`,
+                //                 name: "آجل",
+                //                 type: "credit",
+                //                 isActive: true,
+                //                 createdAt: new Date().toISOString()
+                //             };
+                //             await db.add("paymentMethods", newCreditMethod);
+                //             creditMethod = newCreditMethod;
 
-                if (creditMethod) {
-                    setSelectedPaymentMethodId(creditMethod.id);
-                } else {
-                    const cashMethod = paymentMethods.find((m) => m.type === "cash");
-                    if (cashMethod) {
-                        setSelectedPaymentMethodId(cashMethod.id);
-                    } else {
-                        setSelectedPaymentMethodId(paymentMethods[0].id);
-                    }
-                }
+                //             // تحديث القائمة
+                //             setPaymentMethods(prev => [...prev, newCreditMethod]);
+                //         }
+                //     } catch (error) {
+                //         console.error("Failed to auto-create credit payment method:", error);
+                //         // If creation failed (e.g., uniqueness), try to find existing one from DB
+                //         try {
+                //             const allMethods = await db.getAll<PaymentMethod>("paymentMethods");
+                //             creditMethod = allMethods.find((m) => m.type === "credit") ||
+                //                 allMethods.find((m) => m.name.includes("آجل")) ||
+                //                 allMethods.find((m) => m.name.includes("اجل"));
+                //         } catch {}
+                //     }
+                // }
+
+                // if (creditMethod) {
+                //     setSelectedPaymentMethodId(creditMethod.id);
+                // } else {
+                //     const cashMethod = paymentMethods.find((m) => m.type === "cash");
+                //     if (cashMethod) {
+                //         setSelectedPaymentMethodId(cashMethod.id);
+                //     } else {
+                //         setSelectedPaymentMethodId(paymentMethods[0].id);
+                //     }
+                // }
             };
 
             selectDefaultMethod();
@@ -349,6 +373,10 @@ export default function Collections() {
         return filtered;
     }, [recentCollections, globalSearchQuery, filterDateFrom, filterDateTo, filterPaymentMethodId, filterSupervisorId, salesReps, customers]);
 
+    const pagination = usePagination(filteredCollections, {
+        resetDeps: [globalSearchQuery, filterDateFrom, filterDateTo, filterPaymentMethodId, filterSupervisorId],
+    });
+
     // العميل المختار
     const selectedCustomer = useMemo(() => {
         return customers.find((c) => c.id === selectedCustomerId);
@@ -375,19 +403,25 @@ export default function Collections() {
         exportToExcel({
             title: "تقرير عمليات القبض",
             fileName: `تقرير_القبض_${filterDateFrom || 'all'}_${filterDateTo || 'all'}`,
-            data: filteredCollections.map((c) => ({
-                customerName: c.customerName,
-                date: new Date(c.createdAt).toLocaleDateString("ar-EG"),
-                amount: c.amount,
-                transactionId: c.id,
-                paymentMethod: c.paymentMethodName,
-                user: c.userName,
-                notes: c.notes || "",
-            })),
+            data: filteredCollections.map((c) => {
+                const customer = customers.find(cust => cust.id === c.customerId);
+                const customerBalance = customer ? getBalance(customer.id, Number(customer.currentBalance || 0)) : 0;
+                return {
+                    customerName: c.customerName,
+                    date: new Date(c.createdAt).toLocaleDateString("ar-EG"),
+                    amount: c.amount,
+                    customerBalance,
+                    transactionId: c.id,
+                    paymentMethod: c.paymentMethodName,
+                    user: c.userName,
+                    notes: c.notes || "",
+                };
+            }),
             columns: [
                 { header: "اسم العميل", dataKey: "customerName" },
                 { header: "التاريخ", dataKey: "date" },
                 { header: "المبلغ", dataKey: "amount" },
+                { header: "رصيد العميل الحالي", dataKey: "customerBalance" },
                 { header: "رقم العملية", dataKey: "transactionId" },
                 { header: "طريقة الدفع", dataKey: "paymentMethod" },
                 { header: "المستخدم", dataKey: "user" },
@@ -522,8 +556,11 @@ export default function Collections() {
                 `تم قبض ${amountValue.toFixed(2)} ${currency} من ${customer.name}`
             );
 
-            // Generate and print receipt
-            generateCollectionReceipt(paymentRecord, previousBalance, newBalance);
+            // Generate and print receipt (only if auto-print is enabled)
+            const autoPrintReceipt = getSetting("auto_print_collection_receipt") !== "false";
+            if (autoPrintReceipt) {
+                generateCollectionReceipt(paymentRecord, previousBalance, newBalance);
+            }
 
             // إعادة تعيين النموذج
             setSelectedCustomerId("");
@@ -825,14 +862,16 @@ export default function Collections() {
 
     // إرسال إيصال القبض عبر واتساب
     const handleSendReceiptWhatsApp = async (collection: CollectionRecord) => {
-        const customer = customers.find(c => c.id === collection.customerId);
-        if (!customer?.phone) {
-            toast.error("العميل ليس لديه رقم هاتف");
+        // Reload customer from DB to get latest group settings
+        const customer = await db.get<Customer>("customers", collection.customerId || "");
+        const sendTarget = customer?.collectionGroupId || customer?.whatsappGroupId || customer?.phone;
+        if (!sendTarget) {
+            toast.error("العميل ليس لديه رقم هاتف أو جروب واتساب");
             return;
         }
 
         try {
-            toast.info("📄 جاري تجهيز إيصال القبض...");
+            toast.info("📄 جاري تجهيز إيصال القبض وكشف الحساب...");
 
             // حساب الأرصدة
             const currentBalance = getBalance(customer.id, Number(customer.currentBalance || 0));
@@ -842,7 +881,7 @@ export default function Collections() {
             const html = await buildReceiptHTML(collection, previousBalance, currentBalance, false);
 
             // تحويل HTML إلى PDF عبر iframe
-            toast.info("🖨️ جاري توليد PDF...");
+            toast.info("🖨️ جاري توليد PDF الإيصال...");
             const pdfBlob = await new Promise<Blob>((resolve, reject) => {
                 const iframe = document.createElement("iframe");
                 iframe.style.position = "fixed";
@@ -902,9 +941,16 @@ export default function Collections() {
                 }, 1500);
             });
 
+            // توليد كشف حساب PDF
+            toast.info("📊 جاري توليد كشف الحساب...");
+            const { generateStatementPDF } = await import("@/services/statementPdfService");
+            const now = new Date();
+            const yearStart = new Date(now.getFullYear(), 0, 1);
+            const statementBlob = await generateStatementPDF(customer.id, yearStart, now);
+
             toast.info("📤 جاري الإرسال عبر واتساب...");
 
-            // تحويل PDF إلى Base64
+            // تحويل PDF الإيصال إلى Base64
             const base64data = await new Promise<string>((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onloadend = () => resolve(reader.result as string);
@@ -921,7 +967,8 @@ export default function Collections() {
                 `*التاريخ:* ${new Date(collection.createdAt).toLocaleDateString("ar-EG")}\n` +
                 `شركة لونج تايم للصناعات الكهربائية`;
 
-            const phone = customer.phone.replace(/[^0-9]/g, "");
+            const phone = (customer.phone || "").replace(/[^0-9]/g, "");
+            const targetNumber = customer.collectionGroupId || customer.whatsappGroupId || phone;
             const receiptNumber = collection.id.replace('collection_', '');
 
             // البحث عن حساب واتساب نشط
@@ -931,9 +978,10 @@ export default function Collections() {
             if (activeAccount) {
                 const { whatsappService } = await import("@/services/whatsapp/whatsappService");
 
-                const msgId = await whatsappService.sendMessage(
+                // 1) إرسال إيصال القبض
+                await whatsappService.sendMessage(
                     (activeAccount as any).id,
-                    phone,
+                    targetNumber,
                     message,
                     {
                         type: "document",
@@ -947,16 +995,38 @@ export default function Collections() {
                     }
                 );
 
-                try {
-                    const delivered = await (whatsappService as any).waitForMessage(msgId, 60000);
-                    if (delivered) {
-                        toast.success("✅ تم إرسال إيصال القبض بنجاح!");
-                    } else {
-                        toast.error("❌ فشل إرسال الإيصال");
-                    }
-                } catch {
-                    toast.success("✅ تم إرسال إيصال القبض!");
+                // 2) إرسال كشف الحساب إذا تم توليده بنجاح
+                if (statementBlob) {
+                    const statementBase64 = await new Promise<string>((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result as string);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(statementBlob);
+                    });
+
+                    const statementCaption = `📊 *كشف حساب*\n` +
+                        `*العميل:* ${collection.customerName}\n` +
+                        `*الرصيد الحالي:* ${fmtAmt(Number(currentBalance))} ${currency}\n` +
+                        `يرجى مراجعة الملف المرفق.`;
+
+                    await whatsappService.sendMessage(
+                        (activeAccount as any).id,
+                        targetNumber,
+                        statementCaption,
+                        {
+                            type: "document",
+                            url: statementBase64,
+                            caption: statementCaption,
+                            filename: `كشف حساب ${collection.customerName}.pdf`
+                        },
+                        {
+                            customerId: customer.id,
+                            type: "statement",
+                        }
+                    );
                 }
+
+                toast.success("✅ تم إرسال إيصال القبض وكشف الحساب بنجاح!");
             } else {
                 // Fallback to wa.me
                 const encodedMessage = encodeURIComponent(message);
@@ -967,6 +1037,106 @@ export default function Collections() {
             console.error("WhatsApp receipt send error:", error);
             toast.error("حدث خطأ أثناء إرسال الإيصال");
         }
+    };
+
+    // إرسال تحصيلات اليوم عبر واتساب (مجمّعة لكل عميل)
+    const handleSendTodayCollectionsWhatsApp = async () => {
+        if (todayCollections.length === 0) {
+            toast.error("لا توجد تحصيلات اليوم");
+            return;
+        }
+
+        // البحث عن حساب واتساب نشط
+        const accounts = await db.getAll("whatsappAccounts");
+        const activeAccount = accounts.find((a: any) => a.isActive && a.status === "connected");
+        if (!activeAccount) {
+            toast.error("لا يوجد حساب واتساب متصل");
+            return;
+        }
+
+        const { whatsappService } = await import("@/services/whatsapp/whatsappService");
+
+        // تجميع التحصيلات حسب العميل
+        const byCustomer = new Map<string, CollectionRecord[]>();
+        for (const c of todayCollections) {
+            const list = byCustomer.get(c.customerId) || [];
+            list.push(c);
+            byCustomer.set(c.customerId, list);
+        }
+
+        let sentCount = 0;
+        let failCount = 0;
+        const fmtAmt = (v: number) => v % 1 !== 0 ? v.toFixed(2) : v.toLocaleString();
+        const todayStr = new Date().toLocaleDateString("ar-EG");
+
+        toast.info(`📤 جاري إرسال تحصيلات اليوم لـ ${byCustomer.size} عميل...`);
+
+        for (const [customerId, collections] of byCustomer) {
+            try {
+                const customer = await db.get<Customer>("customers", customerId);
+                if (!customer) continue;
+
+                const sendTarget = customer.collectionGroupId || customer.whatsappGroupId || customer.phone;
+                if (!sendTarget) continue;
+
+                const currentBalance = getBalance(customer.id, Number(customer.currentBalance || 0));
+                const totalCollected = collections.reduce((s, c) => s + Number(c.amount), 0);
+
+                let message = `💰 *ملخص تحصيلات اليوم*\n`;
+                message += `📅 *التاريخ:* ${todayStr}\n`;
+                message += `*العميل:* ${customer.name}\n\n`;
+
+                if (collections.length === 1) {
+                    message += `*المبلغ:* ${fmtAmt(totalCollected)} ${currency}\n`;
+                } else {
+                    collections.forEach((c, i) => {
+                        message += `${i + 1}. ${fmtAmt(Number(c.amount))} ${currency}`;
+                        if (c.notes) message += ` (${c.notes})`;
+                        message += `\n`;
+                    });
+                    message += `\n*الإجمالي:* ${fmtAmt(totalCollected)} ${currency}\n`;
+                }
+
+                message += `*الرصيد الحالي:* ${fmtAmt(currentBalance)} ${currency}\n\n`;
+                message += `شكراً لتعاملكم معنا 🙏`;
+
+                const phone = (customer.phone || "").replace(/[^0-9]/g, "");
+                const targetNumber = customer.collectionGroupId || customer.whatsappGroupId || phone;
+
+                await whatsappService.sendMessage(
+                    (activeAccount as any).id,
+                    targetNumber,
+                    message,
+                    undefined,
+                    { customerId: customer.id, type: "payment_receipt" }
+                );
+
+                sentCount++;
+                // تأخير بسيط بين الرسائل
+                await new Promise((r) => setTimeout(r, 1000));
+            } catch (error) {
+                console.error(`Failed to send collections for customer ${customerId}:`, error);
+                failCount++;
+            }
+        }
+
+        if (sentCount > 0) {
+            toast.success(`✅ تم إرسال تحصيلات اليوم لـ ${sentCount} عميل`);
+        }
+        if (failCount > 0) {
+            toast.error(`❌ فشل الإرسال لـ ${failCount} عميل`);
+        }
+    };
+
+    // الحصول على آخر فاتورة للعميل
+    const getLastInvoiceAmount = (customerId: string): number | null => {
+        const customerInvoices = allInvoices
+            .filter((inv) => inv.customerId === customerId)
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        if (customerInvoices.length > 0) {
+            return Number(customerInvoices[0].total || 0);
+        }
+        return null;
     };
 
     // معالجة الضغط على Enter
@@ -1010,6 +1180,10 @@ export default function Collections() {
         setEditAmount(collection.amount.toString());
         setEditNotes(collection.notes || "");
         setEditPaymentMethodId(collection.paymentMethodId);
+        // تحويل التاريخ إلى صيغة datetime-local
+        const d = new Date(collection.createdAt);
+        const localISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        setEditDate(localISO);
         setEditDialogOpen(true);
     };
 
@@ -1037,6 +1211,9 @@ export default function Collections() {
                 await db.update("customers", { ...customer, currentBalance: updatedBalance });
             }
 
+            // التاريخ الجديد
+            const newDate = editDate ? new Date(editDate).toISOString() : editingCollection.createdAt;
+
             // تحديث في localStorage
             const saved = localStorage.getItem('pos-collections');
             if (saved) {
@@ -1049,6 +1226,7 @@ export default function Collections() {
                         notes: editNotes || undefined,
                         paymentMethodId: editPaymentMethodId,
                         paymentMethodName: paymentMethod?.name || collections[idx].paymentMethodName,
+                        createdAt: newDate,
                     };
                     localStorage.setItem('pos-collections', JSON.stringify(collections));
                 }
@@ -1064,6 +1242,8 @@ export default function Collections() {
                         notes: editNotes || undefined,
                         paymentMethodId: editPaymentMethodId,
                         paymentMethodName: paymentMethod?.name || payment.paymentMethodName,
+                        createdAt: newDate,
+                        paymentDate: newDate,
                     });
                 }
             } catch (_e) { /* قد لا يكون موجود */ }
@@ -1248,14 +1428,24 @@ export default function Collections() {
                             </div>
                             <div className="space-y-2">
                                 <Label>تصدير</Label>
-                                <Button
-                                    variant="outline"
-                                    onClick={handleExportToExcel}
-                                    className="h-10 gap-2"
-                                >
-                                    <FileSpreadsheet className="h-4 w-4" />
-                                    تصدير Excel
-                                </Button>
+                                <div className="flex gap-2">
+                                    <Button
+                                        variant="outline"
+                                        onClick={handleExportToExcel}
+                                        className="h-10 gap-2"
+                                    >
+                                        <FileSpreadsheet className="h-4 w-4" />
+                                        تصدير Excel
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        onClick={handleSendTodayCollectionsWhatsApp}
+                                        className="h-10 gap-2 text-green-600 border-green-300 hover:bg-green-50"
+                                    >
+                                        <Send className="h-4 w-4" />
+                                        إرسال تحصيلات اليوم
+                                    </Button>
+                                </div>
                             </div>
                         </div>
                     </Card>
@@ -1329,6 +1519,30 @@ export default function Collections() {
                         </h2>
 
                         <form onSubmit={handleSubmit} className="space-y-4">
+                            {/* المبلغ */}
+                            <div className="space-y-2">
+                                <Label>المبلغ *</Label>
+                                <Input
+                                    ref={amountInputRef}
+                                    type="number"
+                                    value={amount}
+                                    onChange={(e) => setAmount(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                            e.preventDefault();
+                                            if (!selectedCustomerId) {
+                                                setCustomerSearchOpen(true);
+                                            } else if (selectedCustomerId && amount) {
+                                                handleSubmit();
+                                            }
+                                        }
+                                    }}
+                                    placeholder="0.00"
+                                    className="h-14 text-2xl font-bold text-center"
+                                    autoFocus
+                                />
+                            </div>
+
                             {/* اختيار العميل */}
                             <div className="space-y-2">
                                 <Label>العميل *</Label>
@@ -1376,10 +1590,6 @@ export default function Collections() {
                                                             onSelect={() => {
                                                                 setSelectedCustomerId(customer.id);
                                                                 setCustomerSearchOpen(false);
-                                                                // التركيز على حقل المبلغ
-                                                                setTimeout(() => {
-                                                                    amountInputRef.current?.focus();
-                                                                }, 100);
                                                             }}
                                                         >
                                                             <Check
@@ -1412,20 +1622,6 @@ export default function Collections() {
                                         </Command>
                                     </PopoverContent>
                                 </Popover>
-                            </div>
-
-                            {/* المبلغ */}
-                            <div className="space-y-2">
-                                <Label>المبلغ *</Label>
-                                <Input
-                                    ref={amountInputRef}
-                                    type="number"
-                                    value={amount}
-                                    onChange={(e) => setAmount(e.target.value)}
-                                    onKeyDown={handleKeyDown}
-                                    placeholder="0.00"
-                                    className="h-14 text-2xl font-bold text-center"
-                                />
                                 {selectedCustomer && (
                                     <div className="flex gap-2">
                                         <Button
@@ -1440,18 +1636,19 @@ export default function Collections() {
                                         >
                                             كامل الرصيد
                                         </Button>
-                                        <Button
-                                            type="button"
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() =>
-                                                setAmount(
-                                                    (getBalance(selectedCustomer.id, Number(selectedCustomer.currentBalance || 0)) / 2).toFixed(2)
-                                                )
-                                            }
-                                        >
-                                            نصف الرصيد
-                                        </Button>
+                                        {(() => {
+                                            const lastInv = getLastInvoiceAmount(selectedCustomer.id);
+                                            return lastInv !== null ? (
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => setAmount(lastInv.toFixed(2))}
+                                                >
+                                                    آخر فاتورة ({lastInv.toLocaleString()})
+                                                </Button>
+                                            ) : null;
+                                        })()}
                                     </div>
                                 )}
                             </div>
@@ -1546,7 +1743,7 @@ export default function Collections() {
                                         </TableCell>
                                     </TableRow>
                                 ) : (
-                                    filteredCollections.map((collection) => (
+                                    pagination.paginatedItems.map((collection) => (
                                         <TableRow key={collection.id}>
                                             <TableCell className="font-medium">
                                                 {collection.customerName}
@@ -1610,6 +1807,7 @@ export default function Collections() {
                             </TableBody>
                         </Table>
                     </Card>
+                    <DataPagination {...pagination} entityName="عملية قبض" />
                 </div>
             </div>
             )}
@@ -1627,9 +1825,15 @@ export default function Collections() {
                         <div className="space-y-4 py-2">
                             <div className="p-3 bg-muted rounded-lg">
                                 <p className="font-medium">{editingCollection.customerName}</p>
-                                <p className="text-sm text-muted-foreground">
-                                    التاريخ: {formatDate(editingCollection.createdAt)}
-                                </p>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>التاريخ</Label>
+                                <Input
+                                    type="datetime-local"
+                                    value={editDate}
+                                    onChange={(e) => setEditDate(e.target.value)}
+                                    className="h-11"
+                                />
                             </div>
                             <div className="space-y-2">
                                 <Label>المبلغ *</Label>

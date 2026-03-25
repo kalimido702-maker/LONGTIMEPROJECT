@@ -43,6 +43,8 @@ import {
 } from "@/shared/lib/indexedDB";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 const EmployeeAdvances = () => {
   const { can, user } = useAuth();
@@ -219,6 +221,8 @@ const EmployeeAdvances = () => {
       adv.reason.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const pagination = usePagination(filteredAdvances, { resetDeps: [searchTerm] });
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "pending":
@@ -354,7 +358,7 @@ const EmployeeAdvances = () => {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredAdvances.map((advance) => (
+                pagination.paginatedItems.map((advance) => (
                   <TableRow key={advance.id}>
                     <TableCell className="font-medium">
                       {advance.employeeName}
@@ -403,6 +407,8 @@ const EmployeeAdvances = () => {
             </TableBody>
           </Table>
         </Card>
+
+        <DataPagination {...pagination} entityName="سُلفة" />
 
         {/* Add Dialog */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

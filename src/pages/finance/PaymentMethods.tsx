@@ -52,6 +52,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 const paymentTypeIcons: Record<string, any> = {
   cash: Banknote,
@@ -273,6 +275,8 @@ export default function PaymentMethods() {
     return <Icon className="h-5 w-5" />;
   };
 
+  const pagination = usePagination(paymentMethods);
+
   return (
     <div className="min-h-screen bg-background" dir="rtl">
       <POSHeader />
@@ -320,7 +324,7 @@ export default function PaymentMethods() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {paymentMethods.map((method) => (
+                  {pagination.paginatedItems.map((method) => (
                     <TableRow key={method.id}>
                       <TableCell>
                         <div className="flex items-center gap-2">
@@ -385,6 +389,7 @@ export default function PaymentMethods() {
                 </TableBody>
               </Table>
             )}
+            <DataPagination {...pagination} entityName="طريقة دفع" />
           </CardContent>
         </Card>
 

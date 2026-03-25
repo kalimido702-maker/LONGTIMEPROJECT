@@ -164,6 +164,12 @@ export class WebSocketClient {
     console.log("📨 Received WebSocket message:", message.type);
 
     switch (message.type) {
+      case "ping":
+        // Server-initiated heartbeat - must respond with pong
+        if (this.ws?.readyState === WebSocket.OPEN) {
+          this.ws.send(JSON.stringify({ type: "pong" }));
+        }
+        break;
       case "pong":
         // Heartbeat response
         break;

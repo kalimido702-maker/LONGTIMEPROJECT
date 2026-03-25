@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { POSHeader } from "@/components/POS/POSHeader";
 import { useCustomerBalances } from "@/hooks/useCustomerBalances";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -462,37 +464,36 @@ const Reports = () => {
 
   }, [filteredInvoices, customers]);
 
-  // العملاء الأكثر مدفوعات
+  // المدفوعات (من سجلات القبض الفعلية)
   const topCustomersByPayments = useMemo(() => {
     const customerPaymentsMap = new Map<
       string,
       { name: string; totalPaid: number; count: number; phone: string }
     >();
 
-    filteredInvoices.forEach((inv) => {
-      if (inv.customerId && Number(inv.paidAmount) > 0) {
-        const customer = customers.find((c) => c.id === inv.customerId);
-        const existing = customerPaymentsMap.get(inv.customerId) || {
-          name: inv.customerName || customer?.name || "غير محدد",
-          totalPaid: 0,
-          count: 0,
-          phone: customer?.phone || "-",
-        };
+    filteredPayments.forEach((pay: any) => {
+      const custId = String(pay.customerId);
+      if (!custId) return;
+      const customer = customers.find((c) => String(c.id) === custId);
+      const existing = customerPaymentsMap.get(custId) || {
+        name: pay.customerName || customer?.name || "غير محدد",
+        totalPaid: 0,
+        count: 0,
+        phone: customer?.phone || "-",
+      };
 
-        customerPaymentsMap.set(inv.customerId, {
-          name: existing.name,
-          totalPaid: existing.totalPaid + Number(inv.paidAmount || 0),
-          count: existing.count + 1,
-          phone: existing.phone,
-        });
-      }
+      customerPaymentsMap.set(custId, {
+        name: customer?.name || existing.name,
+        totalPaid: existing.totalPaid + Number(pay.amount || 0),
+        count: existing.count + 1,
+        phone: customer?.phone || existing.phone,
+      });
     });
 
     return Array.from(customerPaymentsMap.values())
-      .sort((a, b) => b.totalPaid - a.totalPaid)
       .sort((a, b) => b.totalPaid - a.totalPaid);
 
-  }, [filteredInvoices, customers]);
+  }, [filteredPayments, customers]);
 
   // العملاء الأكثر ديون
   const topCustomersByDebt = useMemo(() => {
@@ -536,6 +537,14 @@ const Reports = () => {
 
     return Array.from(categorySales.values()).sort((a, b) => b.total - a.total);
   }, [filteredInvoices, products, categories]);
+
+  // Pagination for all tabs
+  const productsPagination = usePagination(topProducts, { resetDeps: [startDate, endDate, selectedEmployee, selectedPaymentMethod, selectedCategory, selectedCustomer, selectedSupervisor, selectedSalesRep] });
+  const customersPagination = usePagination(topCustomers, { resetDeps: [startDate, endDate, selectedEmployee, selectedPaymentMethod, selectedCategory, selectedCustomer, selectedSupervisor, selectedSalesRep] });
+  const paymentsPagination = usePagination(topCustomersByPayments, { resetDeps: [startDate, endDate, selectedEmployee, selectedPaymentMethod, selectedCategory, selectedCustomer, selectedSupervisor, selectedSalesRep] });
+  const debtsPagination = usePagination(topCustomersByDebt, { resetDeps: [startDate, endDate, selectedEmployee, selectedPaymentMethod, selectedCategory, selectedCustomer, selectedSupervisor, selectedSalesRep] });
+  const invoicesPagination = usePagination(filteredInvoices, { resetDeps: [startDate, endDate, selectedEmployee, selectedPaymentMethod, selectedCategory, selectedCustomer, selectedSupervisor, selectedSalesRep] });
+  const categoriesPagination = usePagination(salesByCategory, { resetDeps: [startDate, endDate, selectedEmployee, selectedPaymentMethod, selectedCategory, selectedCustomer, selectedSupervisor, selectedSalesRep] });
 
   // مبيعات يومية (آخر 7 أيام)
   const dailySales = useMemo(() => {
@@ -1048,24 +1057,24 @@ const Reports = () => {
         {/* Detailed Tables */}
         <Tabs defaultValue="products" className="w-full">
           <TabsList className="grid w-full grid-cols-6">
-            <TabsTrigger value="products">أفضل المنتجات</TabsTrigger>
-            <TabsTrigger value="customers">أفضل العملاء</TabsTrigger>
-            <TabsTrigger value="payments">الأكثر مدفوعات</TabsTrigger>
-            <TabsTrigger value="debts">الأكثر ديون</TabsTrigger>
+            <TabsTrigger value="products">المنتجات</TabsTrigger>
+            <TabsTrigger value="customers">العملاء</TabsTrigger>
+            <TabsTrigger value="payments">المدفوعات</TabsTrigger>
+            <TabsTrigger value="debts">الديون</TabsTrigger>
             <TabsTrigger value="invoices">الفواتير</TabsTrigger>
-            <TabsTrigger value="categories">مبيعات الأقسام</TabsTrigger>
+            <TabsTrigger value="categories">الأقسام</TabsTrigger>
           </TabsList>
 
           <TabsContent value="products" className="space-y-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>أفضل المنتجات مبيعاً</CardTitle>
+                <CardTitle>المنتجات ({topProducts.length})</CardTitle>
                 <ExportButtons
-                  title="تقرير أفضل المنتجات"
+                  title="تقرير المنتجات"
                   subtitle={`من ${formatDate(startDate)} إلى ${formatDate(
                     endDate
                   )}`}
-                  fileName={`top-products-${startDate}-${endDate}`}
+                  fileName={`products-${startDate}-${endDate}`}
                   data={topProducts}
                   columns={[
                     { header: "المنتج", dataKey: "name" },
@@ -1092,9 +1101,9 @@ const Reports = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {topProducts.map((product, index) => (
+                    {productsPagination.paginatedItems.map((product, index) => (
                       <TableRow key={index}>
-                        <TableCell>{index + 1}</TableCell>
+                        <TableCell>{(productsPagination.currentPage - 1) * productsPagination.pageSize + index + 1}</TableCell>
                         <TableCell className="font-medium">
                           {product.name}
                         </TableCell>
@@ -1111,6 +1120,18 @@ const Reports = () => {
                     ))}
                   </TableBody>
                 </Table>
+                <DataPagination
+                  currentPage={productsPagination.currentPage}
+                  totalPages={productsPagination.totalPages}
+                  totalItems={productsPagination.totalItems}
+                  pageSize={productsPagination.pageSize}
+                  entityName="منتج"
+                  getVisiblePages={productsPagination.getVisiblePages}
+                  goToPage={productsPagination.goToPage}
+                  goToNext={productsPagination.goToNext}
+                  goToPrev={productsPagination.goToPrev}
+                  changePageSize={productsPagination.changePageSize}
+                />
               </CardContent>
             </Card>
           </TabsContent>
@@ -1118,13 +1139,13 @@ const Reports = () => {
           <TabsContent value="customers" className="space-y-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>أفضل العملاء</CardTitle>
+                <CardTitle>العملاء ({topCustomers.length})</CardTitle>
                 <ExportButtons
-                  title="تقرير أفضل العملاء"
+                  title="تقرير العملاء"
                   subtitle={`من ${formatDate(startDate)} إلى ${formatDate(
                     endDate
                   )}`}
-                  fileName={`top-customers-${startDate}-${endDate}`}
+                  fileName={`customers-${startDate}-${endDate}`}
                   data={topCustomers}
                   columns={[
                     { header: "اسم العميل", dataKey: "name" },
@@ -1152,9 +1173,9 @@ const Reports = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {topCustomers.map((customer, index) => (
+                    {customersPagination.paginatedItems.map((customer, index) => (
                       <TableRow key={index}>
-                        <TableCell>{index + 1}</TableCell>
+                        <TableCell>{(customersPagination.currentPage - 1) * customersPagination.pageSize + index + 1}</TableCell>
                         <TableCell className="font-medium">
                           {customer.name}
                         </TableCell>
@@ -1169,6 +1190,18 @@ const Reports = () => {
                     ))}
                   </TableBody>
                 </Table>
+                <DataPagination
+                  currentPage={customersPagination.currentPage}
+                  totalPages={customersPagination.totalPages}
+                  totalItems={customersPagination.totalItems}
+                  pageSize={customersPagination.pageSize}
+                  entityName="عميل"
+                  getVisiblePages={customersPagination.getVisiblePages}
+                  goToPage={customersPagination.goToPage}
+                  goToNext={customersPagination.goToNext}
+                  goToPrev={customersPagination.goToPrev}
+                  changePageSize={customersPagination.changePageSize}
+                />
               </CardContent>
             </Card>
           </TabsContent>
@@ -1176,13 +1209,13 @@ const Reports = () => {
           <TabsContent value="payments" className="space-y-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>أفضل العملاء بالمدفوعات</CardTitle>
+                <CardTitle>المدفوعات ({topCustomersByPayments.length})</CardTitle>
                 <ExportButtons
-                  title="تقرير العملاء الأكثر مدفوعات"
+                  title="تقرير المدفوعات"
                   subtitle={`من ${formatDate(startDate)} إلى ${formatDate(
                     endDate
                   )}`}
-                  fileName={`top-customers-payments-${startDate}-${endDate}`}
+                  fileName={`customers-payments-${startDate}-${endDate}`}
                   data={topCustomersByPayments}
                   columns={[
                     { header: "اسم العميل", dataKey: "name" },
@@ -1210,9 +1243,9 @@ const Reports = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {topCustomersByPayments.map((customer, index) => (
+                    {paymentsPagination.paginatedItems.map((customer, index) => (
                       <TableRow key={index}>
-                        <TableCell>{index + 1}</TableCell>
+                        <TableCell>{(paymentsPagination.currentPage - 1) * paymentsPagination.pageSize + index + 1}</TableCell>
                         <TableCell className="font-medium">
                           {customer.name}
                         </TableCell>
@@ -1227,6 +1260,18 @@ const Reports = () => {
                     ))}
                   </TableBody>
                 </Table>
+                <DataPagination
+                  currentPage={paymentsPagination.currentPage}
+                  totalPages={paymentsPagination.totalPages}
+                  totalItems={paymentsPagination.totalItems}
+                  pageSize={paymentsPagination.pageSize}
+                  entityName="عميل"
+                  getVisiblePages={paymentsPagination.getVisiblePages}
+                  goToPage={paymentsPagination.goToPage}
+                  goToNext={paymentsPagination.goToNext}
+                  goToPrev={paymentsPagination.goToPrev}
+                  changePageSize={paymentsPagination.changePageSize}
+                />
               </CardContent>
             </Card>
           </TabsContent>
@@ -1234,11 +1279,11 @@ const Reports = () => {
           <TabsContent value="debts" className="space-y-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>العملاء الأكثر مديونية</CardTitle>
+                <CardTitle>الديون ({topCustomersByDebt.length})</CardTitle>
                 <ExportButtons
-                  title="تقرير العملاء الأكثر ديون"
+                  title="تقرير الديون"
                   subtitle={`حتى ${formatDate(endDate)}`}
-                  fileName={`top-customers-debts-${endDate}`}
+                  fileName={`customers-debts-${endDate}`}
                   data={topCustomersByDebt}
                   columns={[
                     { header: "اسم العميل", dataKey: "name" },
@@ -1264,9 +1309,9 @@ const Reports = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {topCustomersByDebt.map((customer, index) => (
+                    {debtsPagination.paginatedItems.map((customer, index) => (
                       <TableRow key={index}>
-                        <TableCell>{index + 1}</TableCell>
+                        <TableCell>{(debtsPagination.currentPage - 1) * debtsPagination.pageSize + index + 1}</TableCell>
                         <TableCell className="font-medium">
                           {customer.name}
                         </TableCell>
@@ -1281,6 +1326,18 @@ const Reports = () => {
                     ))}
                   </TableBody>
                 </Table>
+                <DataPagination
+                  currentPage={debtsPagination.currentPage}
+                  totalPages={debtsPagination.totalPages}
+                  totalItems={debtsPagination.totalItems}
+                  pageSize={debtsPagination.pageSize}
+                  entityName="عميل"
+                  getVisiblePages={debtsPagination.getVisiblePages}
+                  goToPage={debtsPagination.goToPage}
+                  goToNext={debtsPagination.goToNext}
+                  goToPrev={debtsPagination.goToPrev}
+                  changePageSize={debtsPagination.changePageSize}
+                />
               </CardContent>
             </Card>
           </TabsContent>
@@ -1337,7 +1394,7 @@ const Reports = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredInvoices.slice(0, 50).map((invoice) => (
+                    {invoicesPagination.paginatedItems.map((invoice) => (
                       <TableRow key={invoice.id}>
                         <TableCell className="font-medium">
                           #{invoice.id}
@@ -1371,11 +1428,18 @@ const Reports = () => {
                     ))}
                   </TableBody>
                 </Table>
-                {filteredInvoices.length > 50 && (
-                  <p className="text-sm text-muted-foreground mt-4 text-center">
-                    عرض أول 50 فاتورة من {filteredInvoices.length} فاتورة
-                  </p>
-                )}
+                <DataPagination
+                  currentPage={invoicesPagination.currentPage}
+                  totalPages={invoicesPagination.totalPages}
+                  totalItems={invoicesPagination.totalItems}
+                  pageSize={invoicesPagination.pageSize}
+                  entityName="فاتورة"
+                  getVisiblePages={invoicesPagination.getVisiblePages}
+                  goToPage={invoicesPagination.goToPage}
+                  goToNext={invoicesPagination.goToNext}
+                  goToPrev={invoicesPagination.goToPrev}
+                  changePageSize={invoicesPagination.changePageSize}
+                />
               </CardContent>
             </Card>
           </TabsContent>
@@ -1383,7 +1447,7 @@ const Reports = () => {
           <TabsContent value="categories" className="space-y-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>تقرير مبيعات الأقسام</CardTitle>
+                <CardTitle>الأقسام ({salesByCategory.length})</CardTitle>
                 <ExportButtons
                   title="تقرير مبيعات الأقسام"
                   subtitle={`من ${formatDate(startDate)} إلى ${formatDate(endDate)}`}
@@ -1411,9 +1475,9 @@ const Reports = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {salesByCategory.map((category, index) => (
+                    {categoriesPagination.paginatedItems.map((category, index) => (
                       <TableRow key={index}>
-                        <TableCell>{index + 1}</TableCell>
+                        <TableCell>{(categoriesPagination.currentPage - 1) * categoriesPagination.pageSize + index + 1}</TableCell>
                         <TableCell className="font-medium">
                           {category.name}
                         </TableCell>
@@ -1427,6 +1491,18 @@ const Reports = () => {
                     ))}
                   </TableBody>
                 </Table>
+                <DataPagination
+                  currentPage={categoriesPagination.currentPage}
+                  totalPages={categoriesPagination.totalPages}
+                  totalItems={categoriesPagination.totalItems}
+                  pageSize={categoriesPagination.pageSize}
+                  entityName="قسم"
+                  getVisiblePages={categoriesPagination.getVisiblePages}
+                  goToPage={categoriesPagination.goToPage}
+                  goToNext={categoriesPagination.goToNext}
+                  goToPrev={categoriesPagination.goToPrev}
+                  changePageSize={categoriesPagination.changePageSize}
+                />
               </CardContent>
             </Card>
           </TabsContent>

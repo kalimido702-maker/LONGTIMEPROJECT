@@ -13,6 +13,7 @@ import { EventEmitter } from 'events';
 import { FastifyClient } from '../http/FastifyClient';
 import { WebSocketClient, ConnectionState } from '../http/WebSocketClient';
 import { getDatabaseService } from '../database/DatabaseService';
+import { getStoreName, getTableName, SYNCABLE_TABLES } from './syncConstants';
 
 // Types
 export interface SyncRecord {
@@ -41,6 +42,19 @@ export interface SyncEvent {
     userId?: string;
 }
 
+export interface SyncProgressEvent {
+    phase: 'pulling' | 'pushing' | 'processing';
+    message: string;
+    /** Current step within this phase */
+    current?: number;
+    /** Total steps in this phase */
+    total?: number;
+    /** Per-table detail when available */
+    table?: string;
+    /** Total records pulled/pushed so far */
+    recordCount?: number;
+}
+
 export interface SmartSyncConfig {
     syncInterval: number;        // How often to sync (ms) - default 30s
     pullOnConnect: boolean;      // Pull changes on connect - default true
@@ -51,77 +65,7 @@ export interface SmartSyncConfig {
 
 type SyncStatus = 'idle' | 'syncing' | 'pulling' | 'pushing' | 'offline' | 'error';
 
-// Syncable tables configuration - all tables that should sync to server
-const SYNCABLE_TABLES = [
-    // Core products & inventory
-    'products',
-    'product_categories',
-    'product_units',
-    'units',
-    'price_types',
-    'warehouses',
-    // People
-    'customers',
-    'suppliers',
-    'employees',
-    'supervisors',     // Added
-    'sales_reps',      // Added (snake_case for backend)
-    // Users & Permissions (synced from backend)
-    'users',
-    'roles',
-    // Sales
-    'invoices',
-    'invoice_items',
-    'sales_returns',
-    // Purchases
-    'purchases',
-    'purchase_items',
-    'purchase_returns',
-    // Finance
-    'expenses',
-    'expense_categories',
-    'expense_items',
-    'deposits',
-    'deposit_sources',
-    'payments',
-    'payment_methods',
-    // Operations
-    'shifts',
-    // Settings & Audit
-    'settings',
-    'audit_logs',
-];
-
-// Mapping from snake_case table names to camelCase IndexedDB store names
-const TABLE_TO_STORE_MAP: Record<string, string> = {
-    'product_categories': 'productCategories',
-    'product_units': 'productUnits',
-    'price_types': 'priceTypes',
-    'invoice_items': 'invoiceItems',
-    'sales_returns': 'salesReturns',
-    'purchase_items': 'purchaseItems',
-    'purchase_returns': 'purchaseReturns',
-    'expense_categories': 'expenseCategories',
-    'expense_items': 'expenseItems',
-    'deposit_sources': 'depositSources',
-    'payment_methods': 'paymentMethods',
-    'audit_logs': 'auditLogs',
-    'sales_reps': 'salesReps',    // Added
-};
-
-// Helper function to get the store name from table name
-function getStoreName(tableName: string): string {
-    return TABLE_TO_STORE_MAP[tableName] || tableName;
-}
-
-// Helper function to get the table name from store name (reverse mapping)
-function getTableName(storeName: string): string {
-    const reverseMap = Object.entries(TABLE_TO_STORE_MAP).reduce((acc, [table, store]) => {
-        acc[store] = table;
-        return acc;
-    }, {} as Record<string, string>);
-    return reverseMap[storeName] || storeName;
-}
+// SYNCABLE_TABLES, getStoreName, getTableName are imported from syncConstants
 
 export class SmartSyncManager extends EventEmitter {
     private httpClient: FastifyClient;
@@ -134,6 +78,18 @@ export class SmartSyncManager extends EventEmitter {
     // Use 'any' for timer to avoid NodeJS/Browser type conflicts
     private syncTimer: any = null;
     private isOnline: boolean = navigator.onLine;
+    // Mutex to prevent concurrent sync operations
+    private isSyncing: boolean = false;
+    // Circuit breaker: stop retrying after consecutive auth failures
+    private consecutiveAuthFailures: number = 0;
+    private readonly MAX_AUTH_FAILURES = 3;
+    // Queue for batching WebSocket notifications
+    private pendingNotifications: Map<string, SyncEvent> = new Map();
+    private notificationFlushTimer: any = null;
+    private readonly NOTIFICATION_BATCH_DELAY = 2000; // 2 seconds
+    // When true, applyServerRecord bypasses the pending-local-changes guard
+    // Used by forceFullSync / forceServerOverwrite
+    private isForceMode: boolean = false;
 
     constructor(
         httpClient: FastifyClient,
@@ -207,8 +163,8 @@ export class SmartSyncManager extends EventEmitter {
                     return;
                 }
                 console.log('[SmartSync] App came to foreground, syncing...');
-                // Pull changes from server when app becomes visible
-                this.pullChanges();
+                // Push local changes first, then pull server updates
+                this.performFullSync();
             }
         });
 
@@ -222,15 +178,16 @@ export class SmartSyncManager extends EventEmitter {
                     return;
                 }
                 console.log('[SmartSync] Window focused, checking for updates...');
-                // Pull changes when window gains focus
-                this.pullChanges();
+                // Push local changes first, then pull server updates
+                this.performFullSync();
             }
         });
 
         // WebSocket events
         this.wsClient.on('connected', () => {
             if (this.config.pullOnConnect) {
-                this.pullChanges();
+                // Push local changes first, then pull server updates
+                this.performFullSync();
             }
         });
 
@@ -367,6 +324,10 @@ export class SmartSyncManager extends EventEmitter {
 
             // 3. Clear ALL local syncable stores
             console.log('[SmartSync] 🗑️ Clearing all local data...');
+            this.emit('syncProgress', {
+                phase: 'processing',
+                message: 'جاري مسح البيانات المحلية...',
+            } as SyncProgressEvent);
             let clearedCount = 0;
             for (const tableName of SYNCABLE_TABLES) {
                 try {
@@ -396,15 +357,27 @@ export class SmartSyncManager extends EventEmitter {
             this.saveLastSyncTime(0);
             console.log('[SmartSync] ⏰ Reset sync timestamp to 0');
 
-            // 4. Pull everything fresh from server
+            // 4. Pull everything fresh from server (force mode: bypass pending-changes protection)
             console.log('[SmartSync] ⬇️ Pulling all data from server...');
-            const pullResult = await this.pullChanges();
+            this.emit('syncProgress', {
+                phase: 'pulling',
+                message: 'جاري تحميل جميع البيانات من السيرفر...',
+            } as SyncProgressEvent);
+            this.isForceMode = true;
+            const pullResult = await this.pullChanges(true);
+            this.isForceMode = false;
             result.pulled = pullResult.pulled;
             result.conflicts = pullResult.conflicts;
             result.errors.push(...pullResult.errors);
 
             // 5. Post-pull: reconstruct invoice items arrays
             console.log('[SmartSync] 🔗 Reconstructing invoice items...');
+            this.emit('syncProgress', {
+                phase: 'processing',
+                message: 'جاري ربط عناصر الفواتير...',
+                current: 1,
+                total: 3,
+            } as SyncProgressEvent);
             try {
                 await this.reconstructInvoiceItems();
             } catch (e) {
@@ -413,6 +386,12 @@ export class SmartSyncManager extends EventEmitter {
 
             // 6. Post-pull: fix products (category names, prices, units)
             console.log('[SmartSync] 📦 Post-processing products...');
+            this.emit('syncProgress', {
+                phase: 'processing',
+                message: 'جاري معالجة المنتجات...',
+                current: 2,
+                total: 3,
+            } as SyncProgressEvent);
             try {
                 await this.postProcessProducts();
             } catch (e) {
@@ -421,6 +400,12 @@ export class SmartSyncManager extends EventEmitter {
 
             // 7. Post-pull: recalculate customer balances from invoices & payments
             console.log('[SmartSync] 💰 Recalculating customer balances...');
+            this.emit('syncProgress', {
+                phase: 'processing',
+                message: 'جاري حساب أرصدة العملاء...',
+                current: 3,
+                total: 3,
+            } as SyncProgressEvent);
             try {
                 await this.recalculateCustomerBalances();
             } catch (e) {
@@ -537,9 +522,11 @@ export class SmartSyncManager extends EventEmitter {
             }
         }
 
-        // 3. Perform Pull
+        // 3. Perform Pull (force mode: bypass pending-changes protection since we explicitly want all data)
         console.log('[SmartSync] Pulling all data from server...');
-        const pullResult = await this.pullChanges();
+        this.isForceMode = true;
+        const pullResult = await this.pullChanges(true);
+        this.isForceMode = false;
 
         // 3.5 Post-process products (resolve categories, prices, units)
         try { await this.postProcessProducts(); } catch { /* ignore */ }
@@ -562,6 +549,25 @@ export class SmartSyncManager extends EventEmitter {
      * Perform a complete bidirectional sync
      */
     async performFullSync(): Promise<SyncResult> {
+        // Guard against concurrent sync operations
+        if (this.isSyncing) {
+            console.log('[SmartSync] Sync already in progress, skipping performFullSync...');
+            return { pulled: 0, pushed: 0, conflicts: 0, errors: [] };
+        }
+
+        // Circuit breaker: skip sync if too many consecutive auth failures
+        if (this.consecutiveAuthFailures >= this.MAX_AUTH_FAILURES) {
+            console.warn(`[SmartSync] Circuit breaker OPEN: ${this.consecutiveAuthFailures} consecutive auth failures. Skipping sync until re-authenticated.`);
+            this.setStatus('error');
+            return { pulled: 0, pushed: 0, conflicts: 0, errors: ['Auth circuit breaker open - too many 401 failures'] };
+        }
+
+        // Check if we have auth tokens before attempting sync
+        if (!this.httpClient.isAuthenticated()) {
+            console.warn('[SmartSync] Not authenticated - skipping sync. Will retry when tokens are available.');
+            this.setStatus('idle');
+            return { pulled: 0, pushed: 0, conflicts: 0, errors: ['Not authenticated'] };
+        }
 
         console.log('[SmartSync] Performing full sync...');
         this.setStatus('syncing');
@@ -574,27 +580,46 @@ export class SmartSyncManager extends EventEmitter {
         };
 
         try {
-            // Step 1: Pull changes from server first
-            const pullResult = await this.pullChanges();
-            result.pulled = pullResult.pulled;
-            result.conflicts += pullResult.conflicts;
-            result.errors.push(...pullResult.errors);
-
-            // Step 2: Push local changes to server
+            // Step 1: Push local changes to server FIRST
+            // This ensures pending edits reach the server before we pull,
+            // preventing server data from overwriting unsaved local changes
             const pushResult = await this.pushChanges();
             result.pushed = pushResult.pushed;
             result.conflicts += pushResult.conflicts;
             result.errors.push(...pushResult.errors);
 
+            // Step 2: Pull changes from server
+            const pullResult = await this.pullChanges();
+            result.pulled = pullResult.pulled;
+            result.conflicts += pullResult.conflicts;
+            result.errors.push(...pullResult.errors);
+
             this.saveLastSyncTime();
             this.setStatus('idle');
             this.emit('syncComplete', result);
+
+            // Reset auth failure counter on successful sync
+            this.consecutiveAuthFailures = 0;
 
             console.log(`[SmartSync] Full sync complete: pulled=${result.pulled}, pushed=${result.pushed}, conflicts=${result.conflicts}`);
 
         } catch (error: any) {
             console.error('[SmartSync] Full sync failed:', error);
             result.errors.push(error.message);
+
+            // Detect auth failures (401 / token errors) and increment circuit breaker
+            const errorMsg = error.message?.toLowerCase() || '';
+            const isAuthError = error.response?.status === 401 
+                || errorMsg.includes('401')
+                || errorMsg.includes('unauthorized')
+                || errorMsg.includes('no refresh token')
+                || errorMsg.includes('failed to refresh token');
+            
+            if (isAuthError) {
+                this.consecutiveAuthFailures++;
+                console.warn(`[SmartSync] Auth failure #${this.consecutiveAuthFailures}/${this.MAX_AUTH_FAILURES}. ${this.consecutiveAuthFailures >= this.MAX_AUTH_FAILURES ? 'Circuit breaker will OPEN.' : 'Will retry.'}`);
+            }
+
             this.setStatus('error');
             this.emit('syncError', error);
         }
@@ -607,7 +632,13 @@ export class SmartSyncManager extends EventEmitter {
     /**
      * Pull changes from server and apply to local IndexedDB
      */
-    async pullChanges(): Promise<SyncResult> {
+    async pullChanges(force: boolean = false): Promise<SyncResult> {
+        // Prevent concurrent pull operations (unless forced by forceServerOverwrite/forceFullSync)
+        if (this.isSyncing && !force) {
+            console.log('[SmartSync] Pull already in progress, skipping...');
+            return { pulled: 0, pushed: 0, conflicts: 0, errors: [] };
+        }
+        this.isSyncing = true;
         console.log('[SmartSync] Pulling changes from server...');
         this.setStatus('pulling');
 
@@ -619,90 +650,100 @@ export class SmartSyncManager extends EventEmitter {
         };
 
         try {
-            let hasMore = true;
-            let currentSyncTime = this.lastSyncTime;
+            const since = this.lastSyncTime > 0
+                ? new Date(this.lastSyncTime).toISOString()
+                : '1970-01-01T00:00:00.000Z';
 
-            // Loop until all pages are fetched
-            while (hasMore) {
-                // Get the since timestamp - use ISO string
-                const since = currentSyncTime > 0
-                    ? new Date(currentSyncTime).toISOString()
-                    : '1970-01-01T00:00:00.000Z';
+            console.log(`[SmartSync] Pulling with since=${since}`);
 
-                const response = await this.httpClient.get<{
-                    success?: boolean;
-                    changes: any[];
-                    has_more?: boolean;
-                    next_cursor?: string;
-                }>(`/api/sync/pull-changes?since=${encodeURIComponent(since)}&tables=${SYNCABLE_TABLES.join(',')}`);
+            this.emit('syncProgress', {
+                phase: 'pulling',
+                message: 'جاري تحميل البيانات من السيرفر...',
+            } as SyncProgressEvent);
 
-                // Normalize response format - convert array to object keyed by table
-                const changesObj: Record<string, any[]> = {};
-                if (Array.isArray(response.changes)) {
-                    // DEBUG: Log first few changes to understand the response structure
-                    if (response.changes.length > 0) {
-                        console.log('[SmartSync DEBUG] First change object:', JSON.stringify(response.changes[0]));
-                        console.log('[SmartSync DEBUG] First change.data:', JSON.stringify(response.changes[0]?.data));
+            const response = await this.httpClient.get<{
+                success?: boolean;
+                changes: any[];
+                has_more?: boolean;
+                next_cursor?: string;
+            }>(`/api/sync/pull-changes?since=${encodeURIComponent(since)}&tables=${SYNCABLE_TABLES.join(',')}`, {
+                timeout: 120000, // 2 minutes for large pulls (force-overwrite)
+            });
+
+            // Normalize response format - convert array to object keyed by table
+            const changesObj: Record<string, any[]> = {};
+            if (Array.isArray(response.changes)) {
+                // DEBUG: Log table counts
+                const tableCounts: Record<string, number> = {};
+                for (const change of response.changes) {
+                    const table = change.table_name;
+                    tableCounts[table] = (tableCounts[table] || 0) + 1;
+                    if (!changesObj[table]) {
+                        changesObj[table] = [];
                     }
-
-                    for (const change of response.changes) {
-                        const table = change.table_name;
-                        if (!changesObj[table]) {
-                            changesObj[table] = [];
-                        }
-                        // Include is_deleted and server_updated_at in the record
-                        const record = {
-                            ...(change.data || {}),
-                            is_deleted: change.is_deleted,
-                            server_updated_at: change.server_updated_at,
-                        };
-                        changesObj[table].push(record);
-                    }
-                } else if (response.changes) {
-                    Object.assign(changesObj, response.changes);
+                    const record = {
+                        ...(change.data || {}),
+                        is_deleted: change.is_deleted,
+                        server_updated_at: change.server_updated_at,
+                    };
+                    changesObj[table].push(record);
                 }
+                console.log('[SmartSync] Records per table:', JSON.stringify(tableCounts));
+            } else if (response.changes) {
+                Object.assign(changesObj, response.changes);
+            }
 
-                let pagePulledCount = 0;
-                let pageErrorCount = 0;
-                // Apply each table's changes to local IndexedDB
-                for (const [tableName, records] of Object.entries(changesObj)) {
-                    for (const record of records) {
-                        try {
-                            await this.applyServerRecord(tableName, record);
-                            pagePulledCount++;
-                            result.pulled++;
-                        } catch (recordError: any) {
-                            // Log error but continue with other records
-                            pageErrorCount++;
-                            const errorMsg = `${tableName}/${record.id}: ${recordError.message}`;
-                            console.warn(`[SmartSync] Skipping failed record: ${errorMsg}`);
-                            result.errors.push(errorMsg);
-                        }
+            let pulledCount = 0;
+            const tableEntries = Object.entries(changesObj);
+            let tableIndex = 0;
+            // Apply each table's changes to local IndexedDB
+            for (const [tableName, records] of tableEntries) {
+                tableIndex++;
+                console.log(`[SmartSync] Applying ${records.length} records for ${tableName}...`);
+                this.emit('syncProgress', {
+                    phase: 'pulling',
+                    message: `جاري تطبيق ${records.length} سجل من ${tableName}...`,
+                    current: tableIndex,
+                    total: tableEntries.length,
+                    table: tableName,
+                    recordCount: pulledCount,
+                } as SyncProgressEvent);
+                for (const record of records) {
+                    try {
+                        await this.applyServerRecord(tableName, record);
+                        pulledCount++;
+                        result.pulled++;
+                    } catch (recordError: any) {
+                        const errorMsg = `${tableName}/${record.id}: ${recordError.message}`;
+                        console.warn(`[SmartSync] Skipping failed record: ${errorMsg}`);
+                        result.errors.push(errorMsg);
                     }
-                }
-
-                console.log(`[SmartSync] Pulled page with ${pagePulledCount} records`);
-
-                // Check pagination
-                hasMore = response.has_more || false;
-
-                // Update timestamp for next page if provided, otherwise update lastSyncTime
-                if (hasMore && response.next_cursor) {
-                    currentSyncTime = new Date(response.next_cursor).getTime();
-                } else {
-                    // Update global lastSyncTime only when full sync is done
-                    this.saveLastSyncTime();
                 }
             }
+
+            console.log(`[SmartSync] Pulled ${pulledCount} records from server`);
+
+            // Update global lastSyncTime
+            this.saveLastSyncTime();
 
             // Update last pull time for throttling
             this.lastPullTime = Date.now();
 
             console.log(`[SmartSync] Total pulled: ${result.pulled} records from server`);
 
+            this.emit('syncProgress', {
+                phase: 'pulling',
+                message: `تم تحميل ${result.pulled} سجل بنجاح`,
+                current: tableEntries.length,
+                total: tableEntries.length,
+                recordCount: result.pulled,
+            } as SyncProgressEvent);
+
         } catch (error: any) {
             console.error('[SmartSync] Pull failed:', error);
             result.errors.push(error.message);
+        } finally {
+            this.isSyncing = false;
         }
 
         this.setStatus('idle');
@@ -731,11 +772,9 @@ export class SmartSyncManager extends EventEmitter {
                 console.warn(`[SmartSync] No data returned for ${tableName}/${recordId}`);
             }
         } catch (error: any) {
-            console.error(`[SmartSync] Failed to pull ${tableName}/${recordId}:`, error);
-
-            // Fallback: trigger full sync for this table
-            console.log('[SmartSync] Falling back to full sync...');
-            await this.pullChanges();
+            console.error(`[SmartSync] Failed to pull ${tableName}/${recordId}:`, error?.message || error);
+            // Do NOT fallback to full pullChanges() - it causes infinite loops with large datasets
+            // The periodic sync will pick up any missed records
         }
     }
 
@@ -884,6 +923,13 @@ export class SmartSyncManager extends EventEmitter {
                 try { record.items = JSON.parse(record.items); } catch { record.items = []; }
             }
             if (!Array.isArray(record.items)) record.items = [];
+        }
+
+        // For users: keep roleId in sync with role (roleId is used client-side but not synced to server)
+        if (tableName === 'users') {
+            if (record.role) {
+                record.roleId = record.role;
+            }
         }
 
         // For customers: ensure numeric fields
@@ -1042,9 +1088,30 @@ export class SmartSyncManager extends EventEmitter {
     }
 
     /**
-     * Determine if server record is newer than local
+     * Determine if server record should overwrite local record.
+     * Protects records with pending local changes from being overwritten.
      */
     private shouldApplyServerUpdate(local: any, server: any): boolean {
+        // In normal (non-force) mode: never overwrite records with pending local changes
+        if (!this.isForceMode) {
+            // Check is_synced flag (set to false by SyncableRepository.update/add)
+            if (local.is_synced === false) {
+                console.log(`[SmartSync] ⏳ Skipping server update - record has pending local changes (is_synced=false)`);
+                return false;
+            }
+
+            // Also check timestamp: if local was modified after last sync, it has pending changes
+            // This catches edits where is_synced wasn't properly set (e.g., legacy records)
+            if (local.last_synced_at && local.local_updated_at) {
+                const localModifiedAt = new Date(local.local_updated_at).getTime();
+                const lastSyncedAt = new Date(local.last_synced_at).getTime();
+                if (localModifiedAt > lastSyncedAt) {
+                    console.log(`[SmartSync] ⏳ Skipping server update - local changes newer than last sync (modified=${local.local_updated_at}, synced=${local.last_synced_at})`);
+                    return false;
+                }
+            }
+        }
+
         const localTime = new Date(local.local_updated_at || local.updatedAt || 0).getTime();
         const serverTime = new Date(server.server_updated_at || server.updated_at || 0).getTime();
 
@@ -1336,6 +1403,13 @@ export class SmartSyncManager extends EventEmitter {
      */
     async pushChanges(): Promise<SyncResult> {
         console.log('[SmartSync] Pushing local changes to server...');
+
+        // Skip push if not authenticated
+        if (!this.httpClient.isAuthenticated()) {
+            console.warn('[SmartSync] Not authenticated - skipping push.');
+            return { pulled: 0, pushed: 0, conflicts: 0, errors: ['Not authenticated'] };
+        }
+
         this.setStatus('pushing');
 
         const result: SyncResult = {
@@ -1373,6 +1447,15 @@ export class SmartSyncManager extends EventEmitter {
             }
 
             console.log(`[SmartSync] Found ${unsyncedRecords.length} unsynced records`);
+
+            this.emit('syncProgress', {
+                phase: 'pushing',
+                message: `جاري رفع ${unsyncedRecords.length} سجل إلى السيرفر...`,
+                current: 0,
+                total: unsyncedRecords.length,
+                recordCount: 0,
+            } as SyncProgressEvent);
+
             // Log details of unsynced records for debugging
             for (const { table, record } of unsyncedRecords) {
                 console.log(`[SmartSync] Unsynced: ${table}/${record.id || record.key} (is_synced=${record.is_synced}, last_synced_at=${record.last_synced_at})`);
@@ -1380,8 +1463,17 @@ export class SmartSyncManager extends EventEmitter {
 
             // Send in batches
             const batches = this.createBatches(unsyncedRecords, this.config.batchSize);
+            let batchIndex = 0;
 
             for (const batch of batches) {
+                batchIndex++;
+                this.emit('syncProgress', {
+                    phase: 'pushing',
+                    message: `جاري رفع الدفعة ${batchIndex} من ${batches.length}...`,
+                    current: batchIndex,
+                    total: batches.length,
+                    recordCount: result.pushed,
+                } as SyncProgressEvent);
                 const batchResult = await this.pushBatch(batch);
                 result.pushed += batchResult.pushed;
                 result.conflicts += batchResult.conflicts;
@@ -1440,21 +1532,39 @@ export class SmartSyncManager extends EventEmitter {
             }>('/api/sync/batch-push', {
                 device_id: this.deviceId,
                 records: requestRecords,
+            }, {
+                timeout: 120000, // 2 minutes for large batch pushes
             });
 
             result.pushed = response.synced_count || 0;
 
-            // Mark successfully synced records
+            // Build sets of records that SHOULD NOT be marked as synced:
+            // - Records that had errors (server rejected them)
+            // - Records that had conflicts (need separate handling by resolveConflict)
             const db = getDatabaseService();
-            const errorSet = new Set(
-                (response.errors || []).map(e => `${e.table_name}:${e.record_id}`)
-            );
+            const skipSet = new Set<string>();
 
+            // Add error records to skip set
+            if (response.errors) {
+                for (const err of response.errors) {
+                    skipSet.add(`${err.table_name}:${err.record_id}`);
+                    result.errors.push(`${err.table_name}:${err.record_id} - ${err.error}`);
+                }
+            }
+
+            // Add conflicted records to skip set (resolveConflict will handle their sync state)
+            if (response.conflicts) {
+                for (const conflict of response.conflicts) {
+                    skipSet.add(`${conflict.table_name}:${conflict.record_id}`);
+                }
+            }
+
+            // Mark only SUCCESSFULLY synced records (not errors, not conflicts)
             for (const { table, record } of records) {
                 // Settings table uses 'key' as primary key
                 const recordKey = table === 'settings' ? (record.key || record.id) : record.id;
-                const errorKey = `${table}:${recordKey}`;
-                if (!errorSet.has(errorKey)) {
+                const skipKey = `${table}:${recordKey}`;
+                if (!skipSet.has(skipKey)) {
                     // Mark as synced
                     try {
                         const storeName = getStoreName(table);
@@ -1466,14 +1576,9 @@ export class SmartSyncManager extends EventEmitter {
                 }
             }
 
-            // Handle errors
-            if (response.errors) {
-                for (const err of response.errors) {
-                    result.errors.push(`${err.table_name}:${err.record_id} - ${err.error}`);
-                }
-            }
-
-            // Handle conflicts
+            // Handle conflicts AFTER marking synced records
+            // resolveConflict decides whether to mark as synced (server wins)
+            // or leave as unsynced (local wins → re-pushed in next cycle)
             if (response.conflicts) {
                 result.conflicts = response.conflicts.length;
                 for (const conflict of response.conflicts) {
@@ -1503,31 +1608,67 @@ export class SmartSyncManager extends EventEmitter {
 
         console.log(`[SmartSync] Notification received: ${event.table}/${event.recordId} (${event.operation})`);
 
-        try {
-            // For create/update: pull fresh data from server
-            if (event.operation === 'create' || event.operation === 'update') {
-                // Pull the specific record from server (single source of truth)
-                await this.pullSpecificRecord(event.table, event.recordId);
-            }
-            // For delete: apply directly (no need to fetch)
-            else if (event.operation === 'delete') {
+        // For delete: apply directly (no need to batch)
+        if (event.operation === 'delete') {
+            try {
                 const db = getDatabaseService();
                 const storeName = getStoreName(event.table);
                 const repo = db.getRepository(storeName);
                 await repo.deleteFromServer(event.recordId);
                 console.log(`[SmartSync] Deleted ${event.table}/${event.recordId} from local DB`);
+                this.emit('remoteUpdate', {
+                    table: event.table,
+                    recordId: event.recordId,
+                    operation: event.operation,
+                });
+            } catch (error) {
+                console.error('[SmartSync] Failed to handle remote delete:', error);
             }
-
-            // Emit event for UI refresh
-            this.emit('remoteUpdate', {
-                table: event.table,
-                recordId: event.recordId,
-                operation: event.operation,
-            });
-
-        } catch (error) {
-            console.error('[SmartSync] Failed to handle remote notification:', error);
+            return;
         }
+
+        // For create/update: batch notifications and do a single pull
+        // This prevents flooding the server with hundreds of individual record pulls
+        const key = `${event.table}/${event.recordId}`;
+        this.pendingNotifications.set(key, event);
+
+        // Debounce: wait for more notifications before pulling
+        if (this.notificationFlushTimer) {
+            clearTimeout(this.notificationFlushTimer);
+        }
+        this.notificationFlushTimer = setTimeout(() => {
+            this.flushPendingNotifications();
+        }, this.NOTIFICATION_BATCH_DELAY);
+    }
+
+    /**
+     * Flush pending notifications by doing a single pull instead of individual record fetches
+     */
+    private async flushPendingNotifications(): Promise<void> {
+        const count = this.pendingNotifications.size;
+        if (count === 0) return;
+
+        console.log(`[SmartSync] Flushing ${count} batched notifications...`);
+        const notifications = new Map(this.pendingNotifications);
+        this.pendingNotifications.clear();
+
+        // If we have many notifications (> 5), just do a full pull - much more efficient
+        if (count > 5) {
+            console.log(`[SmartSync] Too many notifications (${count}), doing full pull instead of individual fetches...`);
+            await this.pullChanges();
+        } else {
+            // Few notifications - pull each specific record
+            for (const [key, event] of notifications) {
+                try {
+                    await this.pullSpecificRecord(event.table, event.recordId);
+                } catch (error) {
+                    console.error(`[SmartSync] Failed to pull ${key}:`, error);
+                }
+            }
+        }
+
+        // Emit UI refresh event
+        this.emit('remoteUpdate', { count });
     }
 
     /**
@@ -1603,14 +1744,23 @@ export class SmartSyncManager extends EventEmitter {
         const storeName = getStoreName(table_name);
 
         try {
+            const repo = db.getRepository(storeName);
             if (serverTime >= localTime) {
-                // Server wins - mark local record as synced (don't re-push)
-                const repo = db.getRepository(storeName);
+                // Server wins - mark local record as synced so it doesn't get re-pushed.
+                // The next pull will overwrite local data with the server version.
                 await repo.markAsSynced(record_id);
                 console.log(`[SmartSync] Conflict resolved: Server wins, marked ${table_name}/${record_id} as synced`);
             } else {
-                // Local wins - will be pushed in next sync cycle
-                console.log(`[SmartSync] Conflict resolved: Local wins (will push)`);
+                // Local wins - ensure record stays UNSYNCED so it gets re-pushed in the next cycle.
+                // pushBatch already skipped marking it as synced (via skipSet),
+                // but be explicit: use batchUpdateFromServer to set is_synced=false
+                // WITHOUT triggering the sync queue (we don't want a circular re-queue).
+                const existing = await repo.getById(record_id);
+                if (existing && (existing as any).is_synced !== false) {
+                    const updated = { ...existing, is_synced: false, last_synced_at: null } as any;
+                    await repo.batchUpdateFromServer([updated]);
+                }
+                console.log(`[SmartSync] Conflict resolved: Local wins, ${table_name}/${record_id} will be re-pushed`);
             }
         } catch (e) {
             console.warn(`[SmartSync] Could not resolve conflict for ${table_name}/${record_id}:`, e);
@@ -1624,8 +1774,10 @@ export class SmartSyncManager extends EventEmitter {
         this.isOnline = true;
         this.setStatus('idle');
 
-        // Perform full sync when back online
-        this.performFullSync();
+        // Push first (save local edits), then pull (get server updates)
+        if (!this.isSyncing) {
+            this.performFullSync();
+        }
 
         this.emit('online');
     }
@@ -1645,7 +1797,7 @@ export class SmartSyncManager extends EventEmitter {
         }
 
         this.syncTimer = setInterval(() => {
-            if (this.isOnline && this.status === 'idle') {
+            if (this.isOnline && this.status === 'idle' && !this.isSyncing && this.httpClient.isAuthenticated()) {
                 this.performFullSync();
             }
         }, this.config.syncInterval);
@@ -1682,6 +1834,17 @@ export class SmartSyncManager extends EventEmitter {
 
     getDeviceId(): string {
         return this.deviceId;
+    }
+
+    /**
+     * Reset the auth circuit breaker (call after successful re-authentication)
+     */
+    resetAuthCircuitBreaker(): void {
+        if (this.consecutiveAuthFailures > 0) {
+            console.log(`[SmartSync] Auth circuit breaker RESET (was at ${this.consecutiveAuthFailures} failures)`);
+            this.consecutiveAuthFailures = 0;
+            this.setStatus('idle');
+        }
     }
 }
 

@@ -10,14 +10,14 @@ USERNAME="admin"
 PASSWORD="admin123"
 
 # بيانات العميل الجديد
-CLIENT_NAME="كافيه 13"
-CLIENT_NAME_EN="Cafe 13"
+CLIENT_NAME="olive"
+CLIENT_NAME_EN="olive"
 TIMESTAMP=$(date +%s)
 CLIENT_EMAIL="cafe13_${TIMESTAMP}@example.com"
 CLIENT_PHONE="0123456789"
 CLIENT_ADDRESS="القاهرة"
 MAX_BRANCHES=5
-MAX_DEVICES=100
+MAX_DEVICES=2
 
 echo "=========================================="
 echo "🚀 بدء إنشاء Client + License"

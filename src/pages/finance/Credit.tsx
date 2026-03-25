@@ -42,6 +42,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 export default function Credit() {
   const { can, user } = useAuth();
@@ -388,6 +390,10 @@ export default function Credit() {
     return matchesSearch && matchesCustomer && matchesSupervisor && matchesDate;
   });
 
+  const pagination = usePagination(filteredInvoices, {
+    resetDeps: [searchTerm, filterCustomerId, filterSupervisorId, filterDateFrom, filterDateTo],
+  });
+
   // Excel export
   const handleExportToExcel = () => {
     if (filteredInvoices.length === 0) {
@@ -680,7 +686,7 @@ export default function Credit() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredInvoices.map((invoice) => {
+                {pagination.paginatedItems.map((invoice) => {
                   const daysOverdue = getDaysOverdue(invoice.dueDate);
                   const isOverdue =
                     daysOverdue > 0 && invoice.remainingAmount > 0;
@@ -771,6 +777,7 @@ export default function Credit() {
               </TableBody>
             </Table>
           </Card>
+          <DataPagination {...pagination} entityName="فاتورة آجلة" />
 
           <Dialog
             open={isPaymentDialogOpen}

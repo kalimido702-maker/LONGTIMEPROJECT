@@ -320,4 +320,39 @@ export default async function customerRoutes(server: FastifyInstance) {
       }
     }
   );
+
+  // GET /api/customers/with-location - Get all customers that have lat/lng set
+  // For admin purposes to see which customers have location data
+  server.get(
+    "/with-location",
+    { preHandler: [server.authenticate] },
+    async (request, reply) => {
+      try {
+        const { clientId, branchId } = request.user!;
+
+        const [customers] = await db.query<RowDataPacket[]>(
+          `SELECT id, name, phone, address, latitude, longitude, address_text,
+                  customer_type, national_id, credit_limit, current_balance, bonus_balance,
+                  previous_statement, sales_rep_id, class, whatsapp_group_id,
+                  invoice_group_id, collection_group_id, loyalty_points, created_at, notes
+           FROM customers
+           WHERE client_id = ?
+             AND branch_id = ?
+             AND is_deleted = 0
+             AND latitude IS NOT NULL
+             AND longitude IS NOT NULL
+           ORDER BY name ASC`,
+          [clientId, branchId]
+        );
+
+        return reply.code(200).send({
+          data: customers,
+          total: customers.length,
+        });
+      } catch (error) {
+        logger.error({ error }, "Failed to fetch customers with location");
+        return reply.code(500).send({ error: "Failed to fetch customers with location" });
+      }
+    }
+  );
 }

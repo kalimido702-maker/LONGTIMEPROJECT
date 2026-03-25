@@ -417,7 +417,7 @@ export async function downloadInvoicePDF(
 ): Promise<PDFResult> {
   try {
     const html = generatePDFHTML(data, options);
-    const filename = `فاتورة_${data.invoiceNumber}_${data.customerName || 'عميل'}.pdf`;
+    const filename = `${data.customerName || 'عميل'} - ${data.invoiceNumber}.pdf`;
 
     // Create a new window for printing
     const printWindow = window.open('', '_blank');
@@ -466,7 +466,7 @@ export function saveInvoiceAsHTML(
 ): PDFResult {
   try {
     const html = generatePDFHTML(data, options);
-    const filename = `فاتورة_${data.invoiceNumber}_${data.customerName || 'عميل'}.html`;
+    const filename = `${data.customerName || 'عميل'} - ${data.invoiceNumber}.html`;
 
     // Create blob and download
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });

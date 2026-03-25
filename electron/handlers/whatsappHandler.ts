@@ -14,6 +14,11 @@ import { app } from "electron";
 const activeSockets = new Map<string, WASocket>();
 const accountStates = new Map<string, any>();
 
+// Track reconnect attempts per account to prevent infinite loops
+const reconnectAttempts = new Map<string, number>();
+const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const MAX_RECONNECT_ATTEMPTS = 5;
+
 // Reference to main window for forwarding bot messages
 let mainWindowRef: BrowserWindow | null = null;
 
@@ -141,6 +146,27 @@ function getSessionPath(accountId: string): string {
  */
 async function initializeAccount(accountId: string, accountPhone: string) {
   try {
+    // Cancel any pending reconnect timer for this account
+    const existingTimer = reconnectTimers.get(accountId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      reconnectTimers.delete(accountId);
+    }
+
+    // Close any existing socket first to prevent "conflict" errors
+    const existingSock = activeSockets.get(accountId);
+    if (existingSock) {
+      try {
+        existingSock.ev.removeAllListeners("connection.update");
+        existingSock.ev.removeAllListeners("creds.update");
+        existingSock.ev.removeAllListeners("messages.upsert");
+        existingSock.end(undefined);
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+      activeSockets.delete(accountId);
+    }
+
     const sessionPath = getSessionPath(accountId);
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
     const { version } = await fetchLatestBaileysVersion();
@@ -176,37 +202,64 @@ async function initializeAccount(accountId: string, accountPhone: string) {
 
       if (connection === "close") {
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        const errorMsg = (lastDisconnect?.error as Boom)?.message || "";
+        const isConflict = statusCode === DisconnectReason.connectionReplaced || errorMsg.includes("conflict");
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
         let errorMessage = ERROR_MESSAGES.CONNECTION_FAILED;
 
-        if (statusCode === DisconnectReason.loggedOut) {
+        if (isLoggedOut) {
           errorMessage = ERROR_MESSAGES.ACCOUNT_LOGGED_OUT;
           activeSockets.delete(accountId);
+          reconnectAttempts.delete(accountId);
           accountStates.set(accountId, {
             status: "disconnected",
             phone: accountPhone,
             error: errorMessage,
             message: errorMessage,
           });
-        } else if (shouldReconnect) {
-          console.log("Reconnecting WhatsApp...", accountId);
-          accountStates.set(accountId, {
-            status: "connecting",
-            phone: accountPhone,
-            message: ERROR_MESSAGES.RECONNECTING,
-          });
-          setTimeout(() => initializeAccount(accountId, accountPhone), 3000);
-        } else {
+        } else if (isConflict) {
+          // "conflict" means another session took over - do NOT reconnect (causes infinite loop)
+          console.log(`⚠️ WhatsApp ${accountId} got conflict error - stopping reconnect to prevent loop`);
           activeSockets.delete(accountId);
+          reconnectAttempts.delete(accountId);
           accountStates.set(accountId, {
             status: "disconnected",
             phone: accountPhone,
-            error: errorMessage,
-            message: errorMessage,
+            error: "⚠️ تم الاتصال من جهاز آخر",
+            message: "⚠️ تم الاتصال من جهاز آخر - اضغط اتصال لإعادة الربط",
           });
+        } else {
+          // Other errors - reconnect with limit and exponential backoff
+          const attempts = (reconnectAttempts.get(accountId) || 0) + 1;
+          reconnectAttempts.set(accountId, attempts);
+
+          if (attempts <= MAX_RECONNECT_ATTEMPTS) {
+            const delay = Math.min(3000 * Math.pow(2, attempts - 1), 60000); // 3s, 6s, 12s, 24s, 48s
+            console.log(`🔄 Reconnecting WhatsApp ${accountId} (attempt ${attempts}/${MAX_RECONNECT_ATTEMPTS}) in ${delay/1000}s...`);
+            accountStates.set(accountId, {
+              status: "connecting",
+              phone: accountPhone,
+              message: ERROR_MESSAGES.RECONNECTING,
+            });
+            const timer = setTimeout(() => initializeAccount(accountId, accountPhone), delay);
+            reconnectTimers.set(accountId, timer);
+          } else {
+            console.log(`❌ WhatsApp ${accountId} max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`);
+            activeSockets.delete(accountId);
+            reconnectAttempts.delete(accountId);
+            accountStates.set(accountId, {
+              status: "disconnected",
+              phone: accountPhone,
+              error: "❌ فشل الاتصال بعد عدة محاولات",
+              message: "❌ فشل الاتصال - اضغط اتصال لإعادة المحاولة",
+            });
+          }
         }
       } else if (connection === "open") {
+        // Successfully connected - reset reconnect counter
+        reconnectAttempts.delete(accountId);
+
         // Get the real phone number from WhatsApp
         const realPhone =
           sock.user?.id?.split(":")[0] ||
@@ -335,6 +388,8 @@ async function sendTextMessage(accountId: string, to: string, message: string) {
     const isGroup = to.includes("@g.us");
     const cleanedNumber = to.replace(/\D/g, "");
 
+    console.log(`[WhatsApp sendText] to: "${to}", isGroup: ${isGroup}`);
+
     if (!isGroup && cleanedNumber.length < 10) {
       return {
         success: false,
@@ -347,6 +402,7 @@ async function sendTextMessage(accountId: string, to: string, message: string) {
     let formattedNumber: string;
     if (isGroup || to.includes("@g.us")) {
       formattedNumber = to; // Keep group JID as-is
+      console.log(`[WhatsApp sendText] Group message, using JID: ${formattedNumber}`);
     } else if (to.includes("@s.whatsapp.net")) {
       formattedNumber = to;
     } else {
@@ -357,12 +413,18 @@ async function sendTextMessage(accountId: string, to: string, message: string) {
     if (!isGroup) {
       try {
         const results = await sock.onWhatsApp(cleanedNumber);
-        if (results && results.length > 0 && !results[0]?.exists) {
-          return {
-            success: false,
-            message: ERROR_MESSAGES.NUMBER_NOT_ON_WHATSAPP,
-            messageAr: ERROR_MESSAGES.NUMBER_NOT_ON_WHATSAPP,
-          };
+        if (results && results.length > 0) {
+          if (!results[0]?.exists) {
+            return {
+              success: false,
+              message: ERROR_MESSAGES.NUMBER_NOT_ON_WHATSAPP,
+              messageAr: ERROR_MESSAGES.NUMBER_NOT_ON_WHATSAPP,
+            };
+          }
+          // Use the actual JID returned by WhatsApp to avoid sending to wrong number
+          if (results[0]?.jid) {
+            formattedNumber = results[0].jid;
+          }
         }
       } catch (checkError) {
         // Continue anyway if check fails
@@ -371,6 +433,7 @@ async function sendTextMessage(accountId: string, to: string, message: string) {
     }
 
     // Send with timeout
+    console.log(`[WhatsApp] Sending message to: ${formattedNumber}`);
     const sendPromise = sock.sendMessage(formattedNumber, { text: message });
     const timeoutPromise = new Promise((_, reject) =>
       setTimeout(() => reject(new Error("Timed out")), 30000)
@@ -421,6 +484,8 @@ async function sendMediaMessage(
     const isGroup = to.includes("@g.us");
     const cleanedNumber = to.replace(/\D/g, "");
 
+    console.log(`[WhatsApp sendMedia] to: "${to}", isGroup: ${isGroup}, mediaType: ${mediaType}`);
+
     if (!isGroup && cleanedNumber.length < 10) {
       return {
         success: false,
@@ -433,26 +498,50 @@ async function sendMediaMessage(
     let formattedNumber: string;
     if (isGroup || to.includes("@g.us")) {
       formattedNumber = to; // Keep group JID as-is
+      console.log(`[WhatsApp sendMedia] Group message, using JID: ${formattedNumber}`);
     } else if (to.includes("@s.whatsapp.net")) {
       formattedNumber = to;
     } else {
       formattedNumber = `${cleanedNumber}@s.whatsapp.net`;
     }
 
+    // Verify number and use actual JID (skip for groups)
+    if (!isGroup) {
+      try {
+        const results = await sock.onWhatsApp(cleanedNumber);
+        if (results && results.length > 0 && results[0]?.jid) {
+          formattedNumber = results[0].jid;
+        }
+      } catch (checkError) {
+        console.warn("Could not verify number for media:", checkError);
+      }
+    }
+
     // Fetch media from URL with timeout
     let buffer: Buffer;
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      // Handle base64 data URLs directly (e.g., from PDF generator)
+      if (mediaUrl.startsWith("data:")) {
+        const base64Match = mediaUrl.match(/^data:[^;]+;base64,(.+)$/);
+        if (base64Match) {
+          buffer = Buffer.from(base64Match[1], "base64");
+          console.log(`[WhatsApp sendMedia] Decoded base64 data URL, size: ${buffer.length} bytes`);
+        } else {
+          throw new Error("Invalid data URL format");
+        }
+      } else {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-      const response = await fetch(mediaUrl, { signal: controller.signal });
-      clearTimeout(timeoutId);
+        const response = await fetch(mediaUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        throw new Error("Failed to fetch media");
+        if (!response.ok) {
+          throw new Error("Failed to fetch media");
+        }
+
+        buffer = Buffer.from(await response.arrayBuffer());
       }
-
-      buffer = Buffer.from(await response.arrayBuffer());
 
       // Check file size (max 16MB for WhatsApp)
       if (buffer.length > 16 * 1024 * 1024) {
@@ -522,12 +611,56 @@ async function sendMediaMessage(
 }
 
 /**
+ * Soft-close account socket without logging out (preserves session)
+ * Used by auto-reconnect to skip accounts that need QR scan
+ */
+function closeSocket(accountId: string) {
+  try {
+    // Cancel any pending reconnect timer
+    const timer = reconnectTimers.get(accountId);
+    if (timer) {
+      clearTimeout(timer);
+      reconnectTimers.delete(accountId);
+    }
+    reconnectAttempts.delete(accountId);
+
+    const sock = activeSockets.get(accountId);
+    if (sock) {
+      // Remove all listeners first to prevent reconnect triggers
+      sock.ev.removeAllListeners("connection.update");
+      sock.ev.removeAllListeners("creds.update");
+      sock.ev.removeAllListeners("messages.upsert");
+      sock.end(undefined);
+      activeSockets.delete(accountId);
+      accountStates.delete(accountId);
+    }
+    return { success: true };
+  } catch (error: any) {
+    console.error("Failed to close socket:", error);
+    activeSockets.delete(accountId);
+    accountStates.delete(accountId);
+    return { success: true };
+  }
+}
+
+/**
  * Disconnect account
  */
 async function disconnectAccount(accountId: string) {
   try {
+    // Cancel any pending reconnect timer
+    const timer = reconnectTimers.get(accountId);
+    if (timer) {
+      clearTimeout(timer);
+      reconnectTimers.delete(accountId);
+    }
+    reconnectAttempts.delete(accountId);
+
     const sock = activeSockets.get(accountId);
     if (sock) {
+      sock.ev.removeAllListeners("connection.update");
+      sock.ev.removeAllListeners("creds.update");
+      sock.ev.removeAllListeners("messages.upsert");
       await sock.logout();
       activeSockets.delete(accountId);
       accountStates.delete(accountId);
@@ -604,6 +737,8 @@ export function registerWhatsAppHandlers() {
   ipcMain.handle(
     "whatsapp:init-account",
     async (_, accountId: string, accountPhone: string) => {
+      // Reset reconnect counter when user manually initiates
+      reconnectAttempts.delete(accountId);
       return await initializeAccount(accountId, accountPhone);
     }
   );
@@ -644,7 +779,12 @@ export function registerWhatsAppHandlers() {
     }
   );
 
-  // Disconnect account
+  // Close socket without logout (for auto-reconnect skip)
+  ipcMain.handle("whatsapp:close-socket", (_, accountId: string) => {
+    return closeSocket(accountId);
+  });
+
+  // Disconnect account (full logout)
   ipcMain.handle("whatsapp:disconnect", async (_, accountId: string) => {
     return await disconnectAccount(accountId);
   });

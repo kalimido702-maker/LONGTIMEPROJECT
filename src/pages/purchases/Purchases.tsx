@@ -49,6 +49,8 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { ExcelExportButton } from "@/components/common/ExcelExportButton";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 const Purchases = () => {
   const { user, can } = useAuth();
@@ -85,28 +87,32 @@ const Purchases = () => {
   }, []);
 
   const loadData = async () => {
-    await db.init();
-    const [purchasesData, suppliersData, productsData, unitsData, shiftsData] =
-      await Promise.all([
-        db.getAll<Purchase>("purchases"),
-        db.getAll<Supplier>("suppliers"),
-        db.getAll<Product>("products"),
-        db.getAll<Unit>("units"),
-        db.getAll<Shift>("shifts"),
-      ]);
+    try {
+      await db.init();
+      const [purchasesData, suppliersData, productsData, unitsData, shiftsData] =
+        await Promise.all([
+          db.getAll<Purchase>("purchases"),
+          db.getAll<Supplier>("suppliers"),
+          db.getAll<Product>("products"),
+          db.getAll<Unit>("units"),
+          db.getAll<Shift>("shifts"),
+        ]);
 
-    const sortedPurchases = purchasesData.sort(
-      (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
+      const sortedPurchases = (purchasesData || []).sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
 
-    setPurchases(sortedPurchases);
-    setSuppliers(suppliersData);
-    setProducts(productsData);
-    setUnits(unitsData);
+      setPurchases(sortedPurchases);
+      setSuppliers(suppliersData || []);
+      setProducts(productsData || []);
+      setUnits(unitsData || []);
 
-    const activeShift = shiftsData.find((s) => s.status === "active");
-    setCurrentShift(activeShift || null);
+      const activeShift = (shiftsData || []).find((s) => s.status === "active");
+      setCurrentShift(activeShift || null);
+    } catch (error) {
+      console.error("❌ [Purchases] Error loading data:", error);
+    }
   };
 
   const handleAddProduct = (product: Product) => {
@@ -289,8 +295,10 @@ const Purchases = () => {
     p.nameAr.toLowerCase().includes(productSearchQuery.toLowerCase())
   );
 
+  const pagination = usePagination(purchases);
+
   const formatCurrency = (amount: number) => {
-    return `${amount.toFixed(2)} ${currency}`;
+    return `${(Number(amount) || 0).toFixed(2)} ${currency}`;
   };
 
   const formatDate = (date: string) => {
@@ -358,14 +366,14 @@ const Purchases = () => {
                 قيمة المشتريات
               </div>
               <div className="text-2xl font-bold text-blue-600">
-                {formatCurrency(purchases.reduce((sum, p) => sum + p.total, 0))}
+                {formatCurrency(purchases.reduce((sum, p) => sum + (Number(p.total) || 0), 0))}
               </div>
             </Card>
             <Card className="p-4">
               <div className="text-sm text-muted-foreground">مدفوع</div>
               <div className="text-2xl font-bold text-green-600">
                 {formatCurrency(
-                  purchases.reduce((sum, p) => sum + p.paidAmount, 0)
+                  purchases.reduce((sum, p) => sum + (Number(p.paidAmount) || 0), 0)
                 )}
               </div>
             </Card>
@@ -375,7 +383,7 @@ const Purchases = () => {
               </div>
               <div className="text-2xl font-bold text-red-600">
                 {formatCurrency(
-                  purchases.reduce((sum, p) => sum + p.remainingAmount, 0)
+                  purchases.reduce((sum, p) => sum + (Number(p.remainingAmount) || 0), 0)
                 )}
               </div>
             </Card>
@@ -390,7 +398,7 @@ const Purchases = () => {
                   لا توجد فواتير شراء
                 </div>
               ) : (
-                purchases.map((purchase) => (
+                pagination.paginatedItems.map((purchase) => (
                   <Card key={purchase.id} className="p-4">
                     <div className="flex justify-between items-start">
                       <div className="flex-1">
@@ -435,7 +443,7 @@ const Purchases = () => {
                           {formatCurrency(purchase.total)}
                         </p>
                         <p className="text-sm text-muted-foreground">
-                          {purchase.items.length} منتج
+                          {(purchase.items || []).length} منتج
                         </p>
                         {purchase.remainingAmount > 0 && (
                           <p className="text-sm text-red-600 font-semibold">
@@ -449,6 +457,7 @@ const Purchases = () => {
               )}
             </div>
           </Card>
+          <DataPagination {...pagination} entityName="فاتورة شراء" />
 
           {/* Create Purchase Dialog */}
           <Dialog

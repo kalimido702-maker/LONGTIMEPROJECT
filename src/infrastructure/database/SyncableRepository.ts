@@ -23,10 +23,11 @@ export class SyncableRepository<
    * Add new record and queue for sync
    */
   async add(data: T): Promise<void> {
-    // Add timestamp
+    // Add timestamp and mark as unsynced
     const recordWithTimestamp = {
       ...data,
       local_updated_at: new Date().toISOString(),
+      is_synced: false,
     };
 
     // Add to local database
@@ -55,10 +56,11 @@ export class SyncableRepository<
    * Update existing record and queue for sync
    */
   async update(data: T): Promise<void> {
-    // Update timestamp
+    // Update timestamp and mark as unsynced
     const recordWithTimestamp = {
       ...data,
       local_updated_at: new Date().toISOString(),
+      is_synced: false,
     };
 
     // Update in local database
@@ -101,6 +103,21 @@ export class SyncableRepository<
       } catch (error) {
         console.warn("Failed to add to sync queue:", error);
       }
+
+      // Also push delete immediately via SmartSyncManager (since pushChanges
+      // only scans existing records and deleted records are already gone)
+      try {
+        const { getSmartSync } = await import("../sync/SmartSyncManager");
+        const smartSync = getSmartSync();
+        await smartSync.notifyLocalChange(
+          this.storeName,
+          String(id),
+          'delete',
+          { id, is_deleted: true, local_updated_at: new Date().toISOString() }
+        );
+      } catch (error) {
+        console.warn("Failed to notify SmartSync of delete:", error);
+      }
     }
   }
 
@@ -108,10 +125,11 @@ export class SyncableRepository<
    * Batch add with sync
    */
   async batchAdd(items: T[]): Promise<void> {
-    // Add timestamps
+    // Add timestamps and mark as unsynced
     const itemsWithTimestamps = items.map((item) => ({
       ...item,
       local_updated_at: new Date().toISOString(),
+      is_synced: false,
     }));
 
     // Add to local database
@@ -141,10 +159,11 @@ export class SyncableRepository<
    * Batch update with sync
    */
   async batchUpdate(items: T[]): Promise<void> {
-    // Update timestamps
+    // Update timestamps and mark as unsynced
     const itemsWithTimestamps = items.map((item) => ({
       ...item,
       local_updated_at: new Date().toISOString(),
+      is_synced: false,
     }));
 
     // Update in local database

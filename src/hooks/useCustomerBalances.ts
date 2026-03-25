@@ -64,12 +64,19 @@ export async function calculateAllCustomerBalances(): Promise<CustomerBalanceMap
       }
     } catch { /* ignore */ }
 
-    // تحميل البونص من localStorage
+    // تحميل البونص من IndexedDB
     let allBonuses: any[] = [];
     try {
+      allBonuses = await db.getAll<any>("customerBonuses");
+      // Fallback: merge from localStorage if migration hasn't happened yet
       const savedBonuses = localStorage.getItem("pos-bonuses");
       if (savedBonuses) {
-        allBonuses = JSON.parse(savedBonuses);
+        const oldBonuses = JSON.parse(savedBonuses) as any[];
+        const existingIds = new Set(allBonuses.map((b: any) => b.id));
+        const missingBonuses = oldBonuses.filter((b: any) => !existingIds.has(b.id));
+        if (missingBonuses.length > 0) {
+          allBonuses = [...allBonuses, ...missingBonuses];
+        }
       }
     } catch {
       // ignore

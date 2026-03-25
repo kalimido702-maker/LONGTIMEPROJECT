@@ -11,6 +11,7 @@ import {
   UserCheck,
   UserX,
   Wallet,
+  Printer,
 } from "lucide-react";
 import {
   db,
@@ -40,6 +41,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSettingsContext } from "@/contexts/SettingsContext";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 // حساب الأيام المتبقية حتى يوم صرف الراتب
 const getDaysUntilSalary = (salaryDay: number): number => {
@@ -399,6 +402,426 @@ const Employees = () => {
     }
   };
 
+  const handlePrintReport = (employee: Employee) => {
+    const fixedDeductions = Number(employee.deductions || 0);
+
+    const advanceDeductionsTotal = advances
+      .filter((a) => a.employeeId === employee.id && a.status === "approved")
+      .reduce((sum, a) => sum + Number(a.amount || 0), 0);
+
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
+
+    const employeeActiveDeductions = deductions.filter((d) => {
+      if (d.employeeId !== employee.id) return false;
+      if (d.type === "fixed") return d.status === "active";
+      if (d.type === "oneTime") {
+        if (d.status === "active") return true;
+        if (d.status === "completed") {
+          const startDate = new Date(d.startDate);
+          return startDate.getFullYear() === currentYear && startDate.getMonth() === currentMonth;
+        }
+      }
+      return false;
+    });
+
+    const activeDeductionsTotal = employeeActiveDeductions.reduce(
+      (sum, d) => sum + Number(d.amount || 0), 0
+    );
+    const totalDeductions = fixedDeductions + advanceDeductionsTotal + activeDeductionsTotal;
+    const netSalary = Number(employee.salary || 0) - totalDeductions;
+
+    const employeeAdvances = advances.filter(
+      (a) => a.employeeId === employee.id && a.status === "approved"
+    );
+
+    const roleName = (() => {
+      if (employee.roleId) {
+        const role = roles.find((r) => r.id === employee.roleId);
+        return role ? role.name : "غير محدد";
+      }
+      if (employee.role === "admin") return "مدير نظام";
+      if (employee.role === "manager") return "مدير";
+      if (employee.role === "cashier") return "كاشير";
+      if (employee.role === "accountant") return "محاسب";
+      const role = roles.find((r) => r.id === employee.role);
+      return role ? role.name : employee.role || "غير محدد";
+    })();
+
+    const now = new Date().toLocaleString("ar-EG");
+
+    const monthNames = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
+    const currentMonthName = monthNames[today.getMonth()];
+    const currentYearStr = today.getFullYear().toString();
+
+    const html = `
+      <!DOCTYPE html>
+      <html dir="rtl" lang="ar">
+      <head>
+        <meta charset="UTF-8">
+        <title>تقرير الموظف - ${employee.name}</title>
+        <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+        <style>
+          @media print {
+            @page { size: A4; margin: 15mm; }
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          }
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body {
+            font-family: 'Cairo', 'Segoe UI', Tahoma, Arial, sans-serif;
+            direction: rtl;
+            color: #1a1a2e;
+            background: #fff;
+            padding: 0;
+          }
+          .page {
+            max-width: 210mm;
+            margin: 0 auto;
+            padding: 20px 30px;
+          }
+          /* === HEADER === */
+          .report-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 25px;
+            border: 3px solid #1a3a5c;
+            border-radius: 0;
+            margin-bottom: 0;
+            background: linear-gradient(135deg, #1a3a5c 0%, #2b5f8e 100%);
+            color: #fff;
+          }
+          .header-right h1 {
+            font-size: 28px;
+            font-weight: 800;
+            letter-spacing: 1px;
+          }
+          .header-right p {
+            font-size: 13px;
+            opacity: 0.85;
+            margin-top: 2px;
+          }
+          .header-left {
+            text-align: left;
+            font-size: 12px;
+            line-height: 1.8;
+          }
+          .header-left .label { opacity: 0.7; }
+          .header-left .value { font-weight: 700; }
+          /* === TITLE BAR === */
+          .title-bar {
+            background: #e8f0fe;
+            border: 3px solid #1a3a5c;
+            border-top: none;
+            padding: 12px 25px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          }
+          .title-bar h2 {
+            font-size: 20px;
+            font-weight: 700;
+            color: #1a3a5c;
+          }
+          .title-bar .badge {
+            background: ${employee.active ? "#27ae60" : "#e74c3c"};
+            color: #fff;
+            padding: 4px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+          }
+          /* === SECTIONS === */
+          .content {
+            border: 3px solid #1a3a5c;
+            border-top: none;
+          }
+          .section {
+            padding: 0;
+          }
+          .section-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: #fff;
+            background: #1a3a5c;
+            padding: 8px 20px;
+            margin: 0;
+          }
+          .section-body {
+            padding: 15px 20px;
+          }
+          .section + .section {
+            border-top: 2px solid #1a3a5c;
+          }
+          /* === INFO TABLE === */
+          .info-table {
+            width: 100%;
+            border-collapse: collapse;
+          }
+          .info-table td {
+            padding: 8px 12px;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 14px;
+          }
+          .info-table td:first-child {
+            color: #64748b;
+            width: 35%;
+            font-weight: 600;
+          }
+          .info-table td:last-child {
+            font-weight: 700;
+            color: #1a1a2e;
+          }
+          .info-table tr:last-child td { border-bottom: none; }
+          /* === SALARY === */
+          .salary-table {
+            width: 100%;
+            border-collapse: collapse;
+          }
+          .salary-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 14px;
+          }
+          .salary-table td:first-child {
+            font-weight: 600;
+            color: #334155;
+          }
+          .salary-table td:last-child {
+            text-align: left;
+            font-weight: 700;
+            font-size: 15px;
+            direction: ltr;
+          }
+          .salary-table tr:last-child td { border-bottom: none; }
+          .salary-table .deduction td:last-child { color: #dc2626; }
+          .salary-table .total-row td {
+            border-top: 3px double #1a3a5c;
+            border-bottom: none;
+            font-size: 13px;
+            color: #dc2626;
+            font-weight: 700;
+          }
+          .net-box {
+            margin: 12px 0 0;
+            padding: 14px;
+            text-align: center;
+            border: 3px solid #1a3a5c;
+            background: #f0f9f4;
+          }
+          .net-box .label {
+            font-size: 14px;
+            color: #64748b;
+            font-weight: 600;
+          }
+          .net-box .amount {
+            font-size: 28px;
+            font-weight: 800;
+            color: #15803d;
+            margin-top: 2px;
+          }
+          /* === DATA TABLES === */
+          .data-table {
+            width: 100%;
+            border-collapse: collapse;
+          }
+          .data-table th {
+            background: #334155;
+            color: #fff;
+            padding: 10px 8px;
+            font-size: 13px;
+            font-weight: 700;
+            text-align: center;
+          }
+          .data-table td {
+            padding: 9px 8px;
+            text-align: center;
+            font-size: 13px;
+            border-bottom: 1px solid #e5e7eb;
+          }
+          .data-table tr:nth-child(even) { background: #f8fafc; }
+          .data-table tr:last-child td { border-bottom: none; }
+          /* === FOOTER === */
+          .report-footer {
+            border: 3px solid #1a3a5c;
+            border-top: none;
+            padding: 15px 25px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+          }
+          .signature-box {
+            text-align: center;
+            min-width: 180px;
+          }
+          .signature-line {
+            border-top: 2px solid #1a3a5c;
+            margin-top: 50px;
+            padding-top: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #64748b;
+          }
+          .notes-block {
+            margin-top: 0;
+            padding: 10px 14px;
+            background: #fffbeb;
+            border: 1px solid #fbbf24;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #92400e;
+          }
+          .notes-block strong { color: #78350f; }
+        </style>
+      </head>
+      <body>
+        <div class="page">
+          <!-- HEADER -->
+          <div class="report-header">
+            <div class="header-right">
+              <h1>تقرير موظف</h1>
+              <p>كشف الراتب والبيانات الوظيفية</p>
+            </div>
+            <div class="header-left">
+              <div><span class="label">الشهر: </span><span class="value">${currentMonthName} ${currentYearStr}</span></div>
+              <div><span class="label">تاريخ الطباعة: </span><span class="value">${now}</span></div>
+              <div><span class="label">رقم الموظف: </span><span class="value">#${employee.id.slice(-6)}</span></div>
+            </div>
+          </div>
+
+          <!-- TITLE BAR -->
+          <div class="title-bar">
+            <h2>${employee.name}</h2>
+            <span class="badge">${employee.active ? "نشط" : "غير نشط"}</span>
+          </div>
+
+          <!-- CONTENT -->
+          <div class="content">
+            <!-- المعلومات الشخصية -->
+            <div class="section">
+              <div class="section-title">البيانات الشخصية والوظيفية</div>
+              <div class="section-body">
+                <table class="info-table">
+                  <tr><td>الاسم الكامل</td><td>${employee.name}</td></tr>
+                  <tr><td>رقم الهاتف</td><td style="direction:ltr; text-align:right">${employee.phone}</td></tr>
+                  <tr><td>الرقم القومي</td><td style="direction:ltr; text-align:right">${employee.nationalId || "—"}</td></tr>
+                  <tr><td>المسمى الوظيفي</td><td>${employee.position}</td></tr>
+                  <tr><td>الدور (الصلاحيات)</td><td>${roleName}</td></tr>
+                  <tr><td>تاريخ التعيين</td><td>${new Date(employee.hireDate).toLocaleDateString("ar-EG", { year: "numeric", month: "long", day: "numeric" })}</td></tr>
+                  <tr><td>يوم صرف الراتب</td><td>اليوم ${employee.salaryDay || 1} من كل شهر</td></tr>
+                </table>
+              </div>
+            </div>
+
+            <!-- تفاصيل الراتب -->
+            <div class="section">
+              <div class="section-title">بيان الراتب — ${currentMonthName} ${currentYearStr}</div>
+              <div class="section-body">
+                <table class="salary-table">
+                  <tr>
+                    <td>الراتب الأساسي (الإجمالي)</td>
+                    <td>${Number(employee.salary || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 })} ${currency}</td>
+                  </tr>
+                  ${fixedDeductions > 0 ? `<tr class="deduction"><td>خصومات ثابتة (تأمينات / أخرى)</td><td>- ${fixedDeductions.toLocaleString("ar-EG", { minimumFractionDigits: 2 })} ${currency}</td></tr>` : ""}
+                  ${advanceDeductionsTotal > 0 ? `<tr class="deduction"><td>أقساط السُلف</td><td>- ${advanceDeductionsTotal.toLocaleString("ar-EG", { minimumFractionDigits: 2 })} ${currency}</td></tr>` : ""}
+                  ${activeDeductionsTotal > 0 ? `<tr class="deduction"><td>خصومات إضافية</td><td>- ${activeDeductionsTotal.toLocaleString("ar-EG", { minimumFractionDigits: 2 })} ${currency}</td></tr>` : ""}
+                  ${totalDeductions > 0 ? `<tr class="total-row"><td>إجمالي الاستقطاعات</td><td>- ${totalDeductions.toLocaleString("ar-EG", { minimumFractionDigits: 2 })} ${currency}</td></tr>` : ""}
+                </table>
+                <div class="net-box">
+                  <div class="label">صافي الراتب المستحق</div>
+                  <div class="amount">${netSalary.toLocaleString("ar-EG", { minimumFractionDigits: 2 })} ${currency}</div>
+                </div>
+              </div>
+            </div>
+
+            ${employeeActiveDeductions.length > 0 ? `
+            <!-- الخصومات الإضافية -->
+            <div class="section">
+              <div class="section-title">تفصيل الخصومات الإضافية</div>
+              <div class="section-body" style="padding:0">
+                <table class="data-table">
+                  <thead>
+                    <tr><th style="width:10%">م</th><th style="width:50%">البيان / السبب</th><th style="width:20%">النوع</th><th style="width:20%">المبلغ</th></tr>
+                  </thead>
+                  <tbody>
+                    ${employeeActiveDeductions.map((d, i) => `
+                      <tr>
+                        <td>${i + 1}</td>
+                        <td style="text-align:right; padding-right:15px">${d.reason}</td>
+                        <td>${d.type === "oneTime" ? "مرة واحدة" : "شهري ثابت"}</td>
+                        <td style="color:#dc2626; font-weight:700">${Number(d.amount || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 })} ${currency}</td>
+                      </tr>
+                    `).join("")}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            ` : ""}
+
+            ${employeeAdvances.length > 0 ? `
+            <!-- السُلف -->
+            <div class="section">
+              <div class="section-title">السُلف المعتمدة</div>
+              <div class="section-body" style="padding:0">
+                <table class="data-table">
+                  <thead>
+                    <tr><th>م</th><th>إجمالي السلفة</th><th>القسط الشهري</th><th>المسدد</th><th>المتبقي</th><th>التاريخ</th></tr>
+                  </thead>
+                  <tbody>
+                    ${employeeAdvances.map((a, i) => `
+                      <tr>
+                        <td>${i + 1}</td>
+                        <td>${Number(a.amount || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 })} ${currency}</td>
+                        <td>${Number(a.deductionAmount || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 })} ${currency}</td>
+                        <td style="color:#15803d">${Number(a.paidAmount || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 })} ${currency}</td>
+                        <td style="color:#dc2626; font-weight:700">${Number(a.remainingAmount || a.amount - (a.paidAmount || 0)).toLocaleString("ar-EG", { minimumFractionDigits: 2 })} ${currency}</td>
+                        <td>${new Date(a.createdAt).toLocaleDateString("ar-EG")}</td>
+                      </tr>
+                    `).join("")}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            ` : ""}
+
+            ${employee.notes ? `
+            <div class="section">
+              <div class="section-title">ملاحظات</div>
+              <div class="section-body">
+                <div class="notes-block"><strong>ملاحظة: </strong>${employee.notes}</div>
+              </div>
+            </div>
+            ` : ""}
+          </div>
+
+          <!-- FOOTER -->
+          <div class="report-footer">
+            <div class="signature-box">
+              <div class="signature-line">توقيع الموظف</div>
+            </div>
+            <div class="signature-box">
+              <div class="signature-line">توقيع المدير المسؤول</div>
+            </div>
+            <div class="signature-box">
+              <div class="signature-line">ختم الشركة</div>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const printWindow = window.open("", "_blank");
+    if (printWindow) {
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.onload = () => {
+        setTimeout(() => { printWindow.print(); }, 300);
+      };
+    }
+  };
+
   const resetForm = () => {
     // الحصول على الدور الافتراضي
     const defaultRole = roles.find((r) => r.isDefault);
@@ -429,6 +852,8 @@ const Employees = () => {
       e.position.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const pagination = usePagination(filteredEmployees, { resetDeps: [searchTerm] });
+
   return (
     <div className="min-h-screen bg-background" dir="rtl">
       <POSHeader />
@@ -454,7 +879,7 @@ const Employees = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredEmployees.map((employee) => {
+          {pagination.paginatedItems.map((employee) => {
             const daysUntilSalary = getDaysUntilSalary(employee.salaryDay || 1);
             const fixedDeductions = Number(employee.deductions || 0);
 
@@ -689,6 +1114,16 @@ const Employees = () => {
                       <Button
                         size="sm"
                         variant="outline"
+                        onClick={() => handlePrintReport(employee)}
+                        title="طباعة تقرير"
+                      >
+                        <Printer className="h-3 w-3" />
+                      </Button>
+                    )}
+                    {can("employees", "edit") && (
+                      <Button
+                        size="sm"
+                        variant="outline"
                         onClick={() => handleEdit(employee)}
                       >
                         <Edit className="h-3 w-3" />
@@ -709,6 +1144,8 @@ const Employees = () => {
             );
           })}
         </div>
+
+        <DataPagination {...pagination} entityName="موظف" />
 
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent

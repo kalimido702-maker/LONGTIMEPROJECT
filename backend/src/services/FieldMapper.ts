@@ -380,12 +380,30 @@ const SETTINGS_MAPPING: TableMapping = {
 };
 
 // Payment Methods - MySQL: name, name_en, type, active, sort_order
+// Helper: Map client payment method type to MySQL ENUM values
+// MySQL ENUM: 'cash', 'card', 'transfer', 'wallet', 'other'
+// Client types: 'cash', 'wallet', 'visa', 'bank_transfer', 'credit', 'other'
+function mapPaymentMethodType(val: string): string {
+    if (!val) return 'cash';
+    const mapping: Record<string, string> = {
+        'cash': 'cash',
+        'wallet': 'wallet',
+        'visa': 'card',
+        'card': 'card',
+        'bank_transfer': 'transfer',
+        'transfer': 'transfer',
+        'credit': 'other',
+        'other': 'other',
+    };
+    return mapping[val.toLowerCase()] || 'other';
+}
+
 const PAYMENT_METHODS_MAPPING: TableMapping = {
     fields: [
         { clientField: 'id', serverField: 'id' },
         { clientField: 'name', serverField: 'name' },
         { clientField: 'nameEn', serverField: 'name_en' },
-        { clientField: 'type', serverField: 'type', defaultValue: 'cash' },
+        { clientField: 'type', serverField: 'type', defaultValue: 'cash', transform: mapPaymentMethodType },
         { clientField: 'active', serverField: 'active', defaultValue: 1 },
         { clientField: 'sortOrder', serverField: 'sort_order', defaultValue: 0 },
         { clientField: 'createdBy', serverField: 'created_by' },
@@ -604,22 +622,21 @@ const TABLE_MAPPINGS: Record<string, TableMapping> = {
         ],
         clientOnlyFields: ['local_updated_at'],
     },
-    // Deposits - MySQL: customer_id, deposit_source_id, amount, deposit_date, user_id, shift_id, notes
+    // Deposits - MySQL: customer_id, deposit_source_id, amount, deposit_date, created_by, notes
     deposits: {
         fields: [
             { clientField: 'id', serverField: 'id' },
             { clientField: 'customerId', serverField: 'customer_id', transform: validateId },
             { clientField: 'sourceId', serverField: 'deposit_source_id', transform: validateId },
             { clientField: 'depositSourceId', serverField: 'deposit_source_id', transform: validateId },
-            { clientField: 'userId', serverField: 'user_id' },
+            { clientField: 'userId', serverField: 'created_by' },
             { clientField: 'createdBy', serverField: 'created_by' },
-            { clientField: 'shiftId', serverField: 'shift_id' },
             { clientField: 'amount', serverField: 'amount' },
             { clientField: 'depositDate', serverField: 'deposit_date', transform: toMySQLDateTime },
             { clientField: 'createdAt', serverField: 'deposit_date', transform: toMySQLDateTime },
             { clientField: 'notes', serverField: 'notes' },
         ],
-        clientOnlyFields: ['local_updated_at', 'sourceName', 'userName'],
+        clientOnlyFields: ['local_updated_at', 'sourceName', 'userName', 'shiftId'],
     },
     // Deposit Sources - SQLite: name, active
     deposit_sources: {
@@ -735,7 +752,8 @@ const TABLE_MAPPINGS: Record<string, TableMapping> = {
             { clientField: 'supplierId', serverField: 'supplier_id', transform: validateId },
             { clientField: 'totalAmount', serverField: 'total' },
             { clientField: 'total', serverField: 'total' },
-            { clientField: 'returnDate', serverField: 'return_date', transform: toMySQLDateTime },
+            { clientField: 'returnDate', serverField: 'return_date', defaultValue: () => toMySQLDateTime(new Date().toISOString()), transform: toMySQLDateTime },
+            { clientField: 'createdAt', serverField: 'return_date', transform: toMySQLDateTime },
             { clientField: 'reason', serverField: 'reason' },
             { clientField: 'notes', serverField: 'notes' },
             { clientField: 'userId', serverField: 'created_by' },
@@ -764,14 +782,17 @@ const TABLE_MAPPINGS: Record<string, TableMapping> = {
         fields: [
             { clientField: 'id', serverField: 'id' },
             { clientField: 'username', serverField: 'username' },
-            { clientField: 'password', serverField: 'password_hash', transform: (v: string) => {
-                if (!v) return null;
+            { clientField: 'password', serverField: 'password_hash', defaultValue: () => bcrypt.hashSync('0000', 10), transform: (v: string) => {
+                if (!v) {
+                    // Provide a default bcrypt hash for "0000" when password is missing
+                    return bcrypt.hashSync('0000', 10);
+                }
                 // If already a bcrypt hash, keep as-is
                 if (v.startsWith('$2b$') || v.startsWith('$2a$')) return v;
                 // Hash plaintext password
                 return bcrypt.hashSync(v, 10);
             }},
-            { clientField: 'name', serverField: 'full_name' },
+            { clientField: 'name', serverField: 'full_name', defaultValue: 'User' },
             { clientField: 'email', serverField: 'email' },
             { clientField: 'phone', serverField: 'phone' },
             { clientField: 'role', serverField: 'role', defaultValue: 'cashier' },
@@ -795,6 +816,50 @@ const TABLE_MAPPINGS: Record<string, TableMapping> = {
         ],
         clientOnlyFields: ['local_updated_at'],
     },
+    // Supervisor Bonuses - MySQL: supervisor_id, supervisor_name, period_start, period_end, total_team_sales, bonus_percentage, bonus_amount, manual_bonus_amount, total_deposits, user_id, user_name, notes, sales_reps (JSON), invoice_ids (JSON), by_category_sales (JSON)
+    supervisor_bonuses: {
+        fields: [
+            { clientField: 'id', serverField: 'id' },
+            { clientField: 'supervisorId', serverField: 'supervisor_id', transform: validateId },
+            { clientField: 'supervisorName', serverField: 'supervisor_name' },
+            { clientField: 'periodStart', serverField: 'period_start' },
+            { clientField: 'periodEnd', serverField: 'period_end' },
+            { clientField: 'totalTeamSales', serverField: 'total_team_sales', defaultValue: 0 },
+            { clientField: 'bonusPercentage', serverField: 'bonus_percentage', defaultValue: 0 },
+            { clientField: 'bonusAmount', serverField: 'bonus_amount', defaultValue: 0 },
+            { clientField: 'manualBonusAmount', serverField: 'manual_bonus_amount' },
+            { clientField: 'totalDeposits', serverField: 'total_deposits' },
+            { clientField: 'userId', serverField: 'user_id', transform: validateId },
+            { clientField: 'userName', serverField: 'user_name' },
+            { clientField: 'notes', serverField: 'notes' },
+            { clientField: 'salesReps', serverField: 'sales_reps', transform: toJsonString, reverseTransform: fromJsonString },
+            { clientField: 'invoiceIds', serverField: 'invoice_ids', transform: toJsonString, reverseTransform: fromJsonString },
+            { clientField: 'byCategorySales', serverField: 'by_category_sales', transform: toJsonString, reverseTransform: fromJsonString },
+            { clientField: 'createdAt', serverField: 'created_at', transform: toMySQLDateTime },
+            { clientField: 'updatedAt', serverField: 'updated_at', transform: toMySQLDateTime },
+        ],
+        clientOnlyFields: ['local_updated_at', 'is_synced', 'last_synced_at'],
+    },
+    // Customer Bonuses - MySQL: type, customer_id, customer_name, period_start, period_end, total_payments, bonus_percentage, bonus_amount, user_id, user_name, notes
+    customer_bonuses: {
+        fields: [
+            { clientField: 'id', serverField: 'id' },
+            { clientField: 'type', serverField: 'type', defaultValue: 'bonus' },
+            { clientField: 'customerId', serverField: 'customer_id', transform: validateId },
+            { clientField: 'customerName', serverField: 'customer_name' },
+            { clientField: 'periodStart', serverField: 'period_start' },
+            { clientField: 'periodEnd', serverField: 'period_end' },
+            { clientField: 'totalPayments', serverField: 'total_payments', defaultValue: 0 },
+            { clientField: 'bonusPercentage', serverField: 'bonus_percentage', defaultValue: 0 },
+            { clientField: 'bonusAmount', serverField: 'bonus_amount', defaultValue: 0 },
+            { clientField: 'userId', serverField: 'user_id', transform: validateId },
+            { clientField: 'userName', serverField: 'user_name' },
+            { clientField: 'notes', serverField: 'notes' },
+            { clientField: 'createdAt', serverField: 'created_at', transform: toMySQLDateTime },
+            { clientField: 'updatedAt', serverField: 'updated_at', transform: toMySQLDateTime },
+        ],
+        clientOnlyFields: ['local_updated_at', 'is_synced', 'last_synced_at'],
+    },
 };
 
 // ==================== Transformation Functions ====================
@@ -810,12 +875,15 @@ export class FieldMapper {
         branchId: string | number | null
     ): Record<string, any> {
         const mapping = TABLE_MAPPINGS[tableName];
+        // Fields that are client-only runtime fields and should NEVER be sent to the server
+        const GLOBAL_CLIENT_ONLY_FIELDS = ['local_updated_at', 'is_synced', 'last_synced_at', 'isSynced', 'lastSyncedAt'];
+
         if (!mapping) {
             // No mapping defined - pass through with basic camelCase to snake_case conversion
             console.warn(`No field mapping defined for table: ${tableName}`);
             const serverData: Record<string, any> = { client_id: clientId, branch_id: branchId };
             for (const [key, value] of Object.entries(clientData)) {
-                if (key === 'local_updated_at') continue;
+                if (GLOBAL_CLIENT_ONLY_FIELDS.includes(key)) continue;
                 // Convert camelCase to snake_case
                 const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
                 // Handle datetime
@@ -873,6 +941,11 @@ export class FieldMapper {
             for (const field of mapping.clientOnlyFields) {
                 delete serverData[field];
             }
+        }
+
+        // Always strip global client-only runtime fields as a safety net
+        for (const field of GLOBAL_CLIENT_ONLY_FIELDS) {
+            delete serverData[field];
         }
 
         return serverData;

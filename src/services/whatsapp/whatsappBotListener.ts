@@ -1,84 +1,76 @@
 /**
- * WhatsApp Bot Listener - يستمع للرسائل الواردة ويرد عليها
- * 
- * يعمل كـ React hook - يتم تفعيله في App.tsx أو في أي مكان مناسب
- * يستمع للرسائل عبر IPC ويستدعي whatsappBotService لمعالجتها
- * يدعم إرسال ملفات PDF مع الردود (فواتير، إيصالات...)
+ * WhatsApp Bot Listener - يستمع لإشعارات البوت من السيرفر
+ *
+ * البوت يعمل على السيرفر الآن (BotService)
+ * هذا الـ hook يستقبل الأحداث عبر WebSocket فقط لعرضها في الواجهة
  */
 
-import { useEffect, useRef } from "react";
-import { handleBotMessage, getBotSettings } from "./whatsappBotService";
+import { useEffect, useCallback } from "react";
+import { getWebSocketClient } from "@/infrastructure/http/WebSocketClient";
+
+interface BotEvent {
+  type: "whatsapp:bot-incoming";
+  payload: {
+    accountId: string;
+    senderPhone: string;
+    messageText: string;
+    reply?: string;
+  };
+}
+
+type BotNotificationHandler = (event: BotEvent["payload"]) => void;
+
+let notificationHandlers: BotNotificationHandler[] = [];
 
 /**
- * Hook لتشغيل بوت الواتساب
- * يجب استدعاؤه مرة واحدة في App.tsx
+ * Hook لتشغيل مستمع إشعارات بوت الواتساب
+ * يستقبل الأحداث من السيرفر عبر WebSocket
  */
 export function useWhatsAppBot() {
-    const processingRef = useRef(new Set<string>());
+  useEffect(() => {
+    let wsClient: ReturnType<typeof getWebSocketClient> | null = null;
 
-    useEffect(() => {
-        const api = (window as any).electronAPI?.whatsapp;
-        if (!api?.onBotIncoming || !api?.botReply) {
-            console.log("[WhatsApp Bot] Electron API not available - bot disabled");
-            return;
-        }
+    try {
+      wsClient = getWebSocketClient();
+    } catch {
+      console.log("[WhatsApp Bot] WebSocket not available yet");
+      return;
+    }
 
-        // Sync bot enabled state to main process
-        const settings = getBotSettings();
-        api.botSetEnabled?.(settings.enabled);
+    const handleMessage = (message: any) => {
+      if (message?.type === "whatsapp:bot-incoming") {
+        const payload = message.payload;
+        console.log(
+          `[WhatsApp Bot] 🤖 ${payload.senderPhone}: "${payload.messageText}"`,
+        );
+        notificationHandlers.forEach((h) => h(payload));
+      }
+    };
 
-        // Listen for incoming messages
-        api.onBotIncoming(async (data: any) => {
-            const { accountId, senderPhone, senderJid, messageText } = data;
-            
-            // Deduplicate (prevent double-processing)
-            const msgKey = `${senderPhone}:${messageText}:${Date.now()}`;
-            if (processingRef.current.has(msgKey)) return;
-            processingRef.current.add(msgKey);
-            
-            // Cleanup old keys after 10 seconds
-            setTimeout(() => processingRef.current.delete(msgKey), 10000);
+    wsClient.on("message", handleMessage);
+    console.log("[WhatsApp Bot] 🤖 Bot listener registered (server-side)");
 
-            try {
-                console.log(`[WhatsApp Bot] Processing: "${messageText}" from ${senderPhone}`);
-                
-                const reply = await handleBotMessage(senderPhone, messageText);
-                
-                if (reply) {
-                    console.log(`[WhatsApp Bot] Sending reply to ${senderPhone}:`, reply.text.substring(0, 100), reply.media ? "(+PDF)" : "(text only)");
-                    
-                    let result: any;
-                    
-                    if (reply.media && api.botReplyWithMedia) {
-                        // إرسال نص + ملف PDF
-                        result = await api.botReplyWithMedia(
-                            accountId,
-                            senderJid,
-                            reply.text,
-                            reply.media.base64,
-                            reply.media.filename
-                        );
-                    } else {
-                        // إرسال نص فقط
-                        result = await api.botReply(accountId, senderJid, reply.text);
-                    }
-                    
-                    if (result?.success) {
-                        console.log(`[WhatsApp Bot] ✅ Reply sent to ${senderPhone}${reply.media ? " (with PDF)" : ""}`);
-                    } else {
-                        console.error(`[WhatsApp Bot] ❌ Failed to send reply:`, result?.message);
-                    }
-                }
-            } catch (error) {
-                console.error("[WhatsApp Bot] Error:", error);
-            }
-        });
+    return () => {
+      wsClient?.off("message", handleMessage);
+      console.log("[WhatsApp Bot] Bot listener removed");
+    };
+  }, []);
+}
 
-        console.log("[WhatsApp Bot] 🤖 Bot listener registered (with PDF support)");
+/**
+ * Hook للاشتراك في إشعارات البوت (للعرض في UI)
+ */
+export function useWhatsAppBotNotifications(
+  handler: BotNotificationHandler,
+): void {
+  const stableHandler = useCallback(handler, [handler]);
 
-        return () => {
-            api.removeBotIncomingListener?.();
-            console.log("[WhatsApp Bot] Bot listener removed");
-        };
-    }, []);
+  useEffect(() => {
+    notificationHandlers.push(stableHandler);
+    return () => {
+      notificationHandlers = notificationHandlers.filter(
+        (h) => h !== stableHandler,
+      );
+    };
+  }, [stableHandler]);
 }

@@ -34,6 +34,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { toast } from "sonner";
 import { calculateSingleCustomerBalance } from "@/hooks/useCustomerBalances";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 const SalesReturns = () => {
   const { user, can } = useAuth();
@@ -59,6 +61,28 @@ const SalesReturns = () => {
   const [returnsSearchQuery, setReturnsSearchQuery] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+
+  // Filter returns
+  const filteredReturns = salesReturns.filter((returnDoc) => {
+    const searchLower = returnsSearchQuery.toLowerCase();
+    const matchesSearch = !returnsSearchQuery ||
+      returnDoc.id.toLowerCase().includes(searchLower) ||
+      returnDoc.customerName?.toLowerCase().includes(searchLower) ||
+      (returnDoc.items || []).some((item) =>
+        item.productName?.toLowerCase().includes(searchLower)
+      );
+    const returnDate = new Date(returnDoc.createdAt);
+    const fromDate = dateFrom ? new Date(dateFrom) : null;
+    const toDate = dateTo ? new Date(dateTo + "T23:59:59") : null;
+    const matchesDate =
+      (!fromDate || returnDate >= fromDate) &&
+      (!toDate || returnDate <= toDate);
+    return matchesSearch && matchesDate;
+  });
+
+  const pagination = usePagination(filteredReturns, {
+    resetDeps: [returnsSearchQuery, dateFrom, dateTo],
+  });
 
   // Edit return state
   const [editReturnDialogOpen, setEditReturnDialogOpen] = useState(false);
@@ -443,8 +467,8 @@ const SalesReturns = () => {
         try {
           const product = await db.get<Product>("products", item.productId);
           if (product) {
-            const restoredQty = Number(product.stockQuantity || 0) - Number(item.quantity);
-            await db.update("products", { ...product, stockQuantity: restoredQty });
+            const restoredQty = Number(product.stock || 0) - Number(item.quantity);
+            await db.update("products", { ...product, stock: restoredQty });
           }
         } catch (_e) { /* تجاهل */ }
       }
@@ -547,43 +571,15 @@ const SalesReturns = () => {
             </div>
 
             <div className="space-y-4">
-              {(() => {
-                // Filter returns based on search and date
-                const filteredReturns = salesReturns.filter((returnDoc) => {
-                  // Text search: search in products, return ID, customer name
-                  const searchLower = returnsSearchQuery.toLowerCase();
-                  const matchesSearch = !returnsSearchQuery ||
-                    returnDoc.id.toLowerCase().includes(searchLower) ||
-                    returnDoc.customerName?.toLowerCase().includes(searchLower) ||
-                    (returnDoc.items || []).some((item) =>
-                      item.productName?.toLowerCase().includes(searchLower)
-                    );
-
-                  // Date filter
-                  const returnDate = new Date(returnDoc.createdAt);
-                  const fromDate = dateFrom ? new Date(dateFrom) : null;
-                  const toDate = dateTo ? new Date(dateTo + "T23:59:59") : null;
-
-                  const matchesDate =
-                    (!fromDate || returnDate >= fromDate) &&
-                    (!toDate || returnDate <= toDate);
-
-                  return matchesSearch && matchesDate;
-                });
-
-                if (filteredReturns.length === 0) {
-                  return (
-                    <div className="text-center py-8 text-muted-foreground">
-                      {salesReturns.length === 0
-                        ? "لا توجد مرتجعات حتى الآن"
-                        : "لا توجد نتائج مطابقة للبحث"
-                      }
-                    </div>
-                  );
-                }
-
-                return filteredReturns.map((returnDoc) => {
-                  // Default refundStatus to 'completed' if missing
+              {filteredReturns.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  {salesReturns.length === 0
+                    ? "لا توجد مرتجعات حتى الآن"
+                    : "لا توجد نتائج مطابقة للبحث"
+                  }
+                </div>
+              ) : (
+                pagination.paginatedItems.map((returnDoc) => {
                   const status = returnDoc.refundStatus || "completed";
                   return (
                   <Card key={returnDoc.id} className="p-4">
@@ -673,9 +669,10 @@ const SalesReturns = () => {
                     </div>
                   </Card>
                   );
-                });
-              })()}
+                })
+              )}
             </div>
+            <DataPagination {...pagination} entityName="مرتجع" />
           </Card>
 
           {/* نافذة تعديل المرتجع */}

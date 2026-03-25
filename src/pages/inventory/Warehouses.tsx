@@ -35,6 +35,8 @@ import {
 } from "lucide-react";
 import { db, Warehouse } from "@/shared/lib/indexedDB";
 import { toast } from "sonner";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 export default function Warehouses() {
     const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
@@ -219,6 +221,8 @@ export default function Warehouses() {
     const activeCount = warehouses.filter((w) => w.isActive).length;
     const totalCount = warehouses.length;
 
+    const pagination = usePagination(warehouses);
+
     return (
         <div className="min-h-screen bg-background" dir="rtl">
             <POSHeader />
@@ -280,7 +284,7 @@ export default function Warehouses() {
                                     </TableCell>
                                 </TableRow>
                             ) : (
-                                warehouses.map((warehouse) => (
+                                pagination.paginatedItems.map((warehouse) => (
                                     <TableRow key={warehouse.id}>
                                         <TableCell className="font-medium">
                                             <div className="flex items-center gap-2">
@@ -344,6 +348,8 @@ export default function Warehouses() {
                         </TableBody>
                     </Table>
                 </Card>
+
+                <DataPagination {...pagination} entityName="مخزن" />
             </div>
 
             {/* Add/Edit Dialog */}

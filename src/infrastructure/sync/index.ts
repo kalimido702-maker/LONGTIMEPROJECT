@@ -15,4 +15,4 @@ export {
   initializeSmartSync,
   getSmartSync,
 } from "./SmartSyncManager";
-export type { SyncResult, SyncEvent, SmartSyncConfig } from "./SmartSyncManager";
+export type { SyncResult, SyncEvent, SmartSyncConfig, SyncProgressEvent } from "./SmartSyncManager";

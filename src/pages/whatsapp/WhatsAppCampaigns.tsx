@@ -56,6 +56,9 @@ import {
   RefreshCw,
   Smartphone,
   Calendar,
+  FileText,
+  UserCheck,
+  UsersRound,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
@@ -107,6 +110,18 @@ const MESSAGE_TEMPLATES = [
     template:
       "السلام عليكم {{name}} 💚\n\nنشكرك على ثقتك الغالية فينا!\nنتمنى نكون عند حسن ظنك دايماً 🌟\n\nأي وقت محتاج حاجة، إحنا موجودين 🤝\n{{storeName}}",
     targetType: "all",
+  },
+  {
+    id: "account_statement",
+    name: "📊 إرسال كشوفات حسابات",
+    icon: CreditCard,
+    color: "text-teal-500",
+    bgColor: "bg-teal-50 dark:bg-teal-950",
+    borderColor: "border-teal-200 dark:border-teal-800",
+    description: "ابعت كشف حساب PDF لكل عميل عليه رصيد",
+    template:
+      "📊 *كشف حساب تفصيلي*\n*العميل:* {{name}}\n\n*الرصيد النهائي:* {{amount}} جنيه\n\nيرجى مراجعة الملف المرفق.\nشكراً لتعاملكم معنا 🙏\n{{storeName}}",
+    targetType: "credit",
   },
   {
     id: "custom",
@@ -175,6 +190,7 @@ const WhatsAppCampaigns = () => {
     accountId: "",
     template: "",
     targetType: "all" as "credit" | "installment" | "all" | "custom",
+    sendTo: "customer" as "customer" | "salesRep" | "both",
     minAmount: "",
     maxAmount: "",
     class: "all",
@@ -198,6 +214,7 @@ const WhatsAppCampaigns = () => {
     newCampaign.class,
     newCampaign.supervisorId,
     newCampaign.salesRepId,
+    newCampaign.sendTo,
     customers,
   ]);
 
@@ -205,7 +222,7 @@ const WhatsAppCampaigns = () => {
     setIsLoading(true);
     try {
       await db.init();
-      const [campaignsData, accountsData, customersData] = await Promise.all([
+      const [campaignsData, accountsData, customersData, supervisorsData, salesRepsData] = await Promise.all([
         db.getAll<WhatsAppCampaign>("whatsappCampaigns"),
         db.getAll<WhatsAppAccount>("whatsappAccounts"),
         db.getAll("customers"),
@@ -271,7 +288,29 @@ const WhatsAppCampaigns = () => {
       filtered = filtered.filter((c: any) => c.salesRepId === newCampaign.salesRepId);
     }
 
-    filtered = filtered.filter((c: any) => c.phone);
+    // Filter based on sendTo - ensure recipients have reachable target
+    if (newCampaign.sendTo === "customer") {
+      filtered = filtered.filter((c: any) => c.phone || c.whatsappGroupId || c.invoiceGroupId || c.collectionGroupId);
+    } else if (newCampaign.sendTo === "salesRep") {
+      // Only include customers whose sales rep has a phone/group
+      filtered = filtered.filter((c: any) => {
+        if (!c.salesRepId) return false;
+        const rep = salesReps.find(r => r.id === c.salesRepId);
+        return rep && (rep.phone || rep.whatsappGroupId);
+      });
+    } else {
+      // "both" - include if either customer or their rep has a reachable target
+      filtered = filtered.filter((c: any) => {
+        const customerReachable = c.phone || c.whatsappGroupId || c.invoiceGroupId || c.collectionGroupId;
+        let repReachable = false;
+        if (c.salesRepId) {
+          const rep = salesReps.find(r => r.id === c.salesRepId);
+          repReachable = !!(rep && (rep.phone || rep.whatsappGroupId));
+        }
+        return customerReachable || repReachable;
+      });
+    }
+
     setRecipientCount(filtered.length);
   };
 
@@ -333,8 +372,10 @@ const WhatsAppCampaigns = () => {
         name: newCampaign.name,
         accountId: newCampaign.accountId,
         template: newCampaign.template,
+        templateId: selectedTemplate || undefined,
         variables,
         targetType: newCampaign.targetType,
+        sendTo: newCampaign.sendTo,
         filters: {
           minAmount: newCampaign.minAmount
             ? parseFloat(newCampaign.minAmount)
@@ -380,6 +421,7 @@ const WhatsAppCampaigns = () => {
       accountId: "",
       template: "",
       targetType: "all",
+      sendTo: "customer",
       minAmount: "",
       maxAmount: "",
       class: "all",
@@ -932,6 +974,43 @@ const WhatsAppCampaigns = () => {
                   </div>
                 </div>
 
+                {/* اختيار مستلم الرسالة */}
+                <div>
+                  <Label className="text-base font-bold mb-2 block">
+                    إرسال الرسالة إلى
+                  </Label>
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { value: "customer", label: "العميل فقط", icon: Users },
+                      { value: "salesRep", label: "المندوب فقط", icon: UserCheck },
+                      { value: "both", label: "العميل والمندوب", icon: UsersRound },
+                    ].map((option) => {
+                      const Icon = option.icon;
+                      return (
+                        <Card
+                          key={option.value}
+                          className={`cursor-pointer transition-all p-4 ${
+                            newCampaign.sendTo === option.value
+                              ? "ring-2 ring-primary bg-primary/5"
+                              : "hover:bg-muted"
+                          }`}
+                          onClick={() =>
+                            setNewCampaign({
+                              ...newCampaign,
+                              sendTo: option.value as any,
+                            })
+                          }
+                        >
+                          <div className="flex flex-col items-center gap-2 text-center">
+                            <Icon className="h-8 w-8 text-primary" />
+                            <span className="font-medium">{option.label}</span>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {newCampaign.targetType === "credit" && (
                   <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -1071,9 +1150,24 @@ const WhatsAppCampaigns = () => {
 
             {wizardStep === 3 && (
               <div className="space-y-6">
+                {selectedTemplate === "account_statement" && (
+                  <Alert className="border-teal-500 bg-teal-50 dark:bg-teal-950">
+                    <FileText className="h-5 w-5 text-teal-600" />
+                    <AlertTitle className="text-teal-700 dark:text-teal-300">
+                      📊 حملة كشوفات حسابات
+                    </AlertTitle>
+                    <AlertDescription className="text-teal-600 dark:text-teal-400">
+                      سيتم توليد ملف PDF كشف حساب تفصيلي لكل عميل وإرساله عبر الواتساب.
+                      <br />
+                      النص أدناه هو الرسالة المرفقة مع ملف الـ PDF.
+                    </AlertDescription>
+                  </Alert>
+                )}
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <Label className="text-base font-bold">نص الرسالة</Label>
+                    <Label className="text-base font-bold">
+                      {selectedTemplate === "account_statement" ? "نص الرسالة المرفقة مع الـ PDF" : "نص الرسالة"}
+                    </Label>
                     <Button
                       variant="outline"
                       size="sm"

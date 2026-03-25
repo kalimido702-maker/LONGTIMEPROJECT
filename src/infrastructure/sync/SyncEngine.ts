@@ -6,6 +6,9 @@ import {
   ConnectionState,
 } from "../http/WebSocketClient";
 import { SyncQueue, getSyncQueue, SyncQueueItem } from "./SyncQueue";
+import { getDatabaseService } from "../database/DatabaseService";
+
+import { TABLE_TO_STORE_MAP as TABLE_TO_STORE } from './syncConstants';
 
 export enum SyncStatus {
   IDLE = "idle",
@@ -277,6 +280,19 @@ export class SyncEngine extends EventEmitter {
           await this.syncQueue.updateStatus(item.id, "completed");
           this.stats.totalSynced++;
           this.emit("itemSynced", item);
+
+          // Also mark the IndexedDB record as synced so SmartSyncManager
+          // won't re-push it (avoiding unnecessary conflicts)
+          try {
+            const storeName = TABLE_TO_STORE[item.table] || item.table;
+            const db = getDatabaseService();
+            const repo = db.getRepository(storeName);
+            await repo.markAsSynced(item.recordId);
+          } catch (markErr) {
+            // Non-fatal: SmartSyncManager will handle it later
+            console.warn(`[SyncEngine] Could not mark ${item.table}:${item.recordId} as synced:`, markErr);
+          }
+
           console.log(`Synced: ${item.table} - ${item.operation} - ${item.recordId}`);
         }
       }
@@ -319,27 +335,9 @@ export class SyncEngine extends EventEmitter {
 
   private async pullFromServer(): Promise<void> {
     try {
-      // Get last sync timestamp from local storage; default to epoch
-      const lastSyncIso =
-        localStorage.getItem("lastServerSyncIso") || "1970-01-01T00:00:00.000Z";
-
-      // Request changes from server (correct endpoint)
-      const response = await this.httpClient.get<{ changes: any[] }>(
-        "/api/sync/pull-changes",
-        {
-          params: { since: lastSyncIso },
-        }
-      );
-
-      const changes = response?.changes || [];
-
-      if (changes.length > 0) {
-        console.log(`Received ${changes.length} changes from server`);
-        this.emit("serverChanges", changes);
-      }
-
-      // Update last sync timestamp to now
-      localStorage.setItem("lastServerSyncIso", new Date().toISOString());
+      // SmartSyncManager handles pulling. SyncEngine only handles push queue.
+      // Skip pull here to avoid dual-pull loops.
+      console.log('SyncEngine: Skipping pull (handled by SmartSyncManager)');
     } catch (error) {
       console.error("Failed to pull from server:", error);
       throw error;

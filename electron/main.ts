@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, dialog } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, dialog, session } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -13,8 +13,14 @@ import {
   registerAutoUpdaterHandlers,
 } from "./handlers/autoUpdater.js";
 import { registerPrinterHandlers } from "./handlers/printerHandler.js";
+import { registerDriveHandlers, setDriveMainWindow } from "./handlers/driveHandler.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// تعيين اسم التطبيق من متغير البيئة APP_ID
+if (process.env.APP_ID) {
+  app.setName(process.env.APP_ID);
+}
 
 // يمنع تشغيل أكثر من نسخة واحدة من التطبيق
 const gotTheLock = app.requestSingleInstanceLock();
@@ -82,7 +88,7 @@ if (!gotTheLock) {
         nodeIntegration: false,
         contextIsolation: true,
         sandbox: false,
-        webSecurity: !app.isPackaged, // تعطيل web security في packaged app
+        webSecurity: true,
       },
       // cancel view and window and edit buttons
       titleBarStyle: "hiddenInset",
@@ -132,6 +138,18 @@ if (!gotTheLock) {
 
   // عند استعداد التطبيق
   app.whenReady().then(() => {
+    // Allow HTTP requests from file:// (needed for non-HTTPS backend)
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [
+            "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: http: ws: https: wss:"
+          ],
+        },
+      });
+    });
+
     // Register License IPC handlers
     registerLicenseHandlers();
     // Register WhatsApp IPC handlers
@@ -140,11 +158,17 @@ if (!gotTheLock) {
     registerAutoUpdaterHandlers();
     // Register Printer IPC handlers
     registerPrinterHandlers();
+    // Register Google Drive IPC handlers
+    registerDriveHandlers();
     // Create main window
     createWindow();
     // Set main window reference for WhatsApp bot
     if (mainWindow) {
       setMainWindow(mainWindow);
+    }
+    // Set main window reference for Drive auth
+    if (mainWindow) {
+      setDriveMainWindow(mainWindow);
     }
     // Initialize auto-updater with main window (only in production)
     if (mainWindow) {
@@ -230,6 +254,45 @@ if (!gotTheLock) {
           success: false,
           error: error.message,
         };
+      }
+    }
+  );
+
+  // ==================== Select Folder ====================
+  ipcMain.handle("file:select-folder", async (_event, defaultPath?: string) => {
+    try {
+      if (!mainWindow) {
+        throw new Error("Main window not available");
+      }
+      const result = await dialog.showOpenDialog(mainWindow, {
+        defaultPath: defaultPath || app.getPath("documents"),
+        properties: ["openDirectory", "createDirectory"],
+        title: "اختر مجلد النسخ الاحتياطي",
+      });
+      if (result.canceled || !result.filePaths.length) {
+        return { success: false, canceled: true };
+      }
+      return { success: true, folderPath: result.filePaths[0] };
+    } catch (error: any) {
+      console.error("Select folder error:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // ==================== Save To Path ====================
+  ipcMain.handle(
+    "file:save-to-path",
+    async (_event, options: { filePath: string; content: string }) => {
+      try {
+        const dir = path.dirname(options.filePath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        fs.writeFileSync(options.filePath, options.content, "utf8");
+        return { success: true, filePath: options.filePath };
+      } catch (error: any) {
+        console.error("Save to path error:", error);
+        return { success: false, error: error.message };
       }
     }
   );

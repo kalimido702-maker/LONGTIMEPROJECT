@@ -248,6 +248,7 @@ export class MigrationRunner {
                         msg.includes("check that column/key exists") ||
                         msg.includes("unknown column") ||
                         msg.includes("doesn't exist") ||
+                        msg.includes("not supported in the prepared statement") ||
                         code === "ER_TABLE_EXISTS_ERROR" ||
                         code === "ER_DUP_FIELDNAME" ||
                         code === "ER_DUP_KEYNAME" ||
@@ -255,6 +256,7 @@ export class MigrationRunner {
                         code === "ER_CANT_DROP_FIELD_OR_KEY" ||
                         code === "ER_NO_SUCH_TABLE" ||
                         code === "ER_BAD_FIELD_ERROR" ||
+                        code === "ER_UNSUPPORTED_PS" ||
                         (code === "SQLITE_ERROR" && msg.includes("already exists"));
 
                     if (isIgnorable) {

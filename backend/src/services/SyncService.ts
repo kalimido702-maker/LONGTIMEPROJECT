@@ -100,6 +100,8 @@ const SYNCABLE_TABLES = [
   "product_units",
   "supervisors",
   "sales_reps",
+  "supervisor_bonuses",
+  "customer_bonuses",
   "roles",
   "users",
 ];
@@ -131,6 +133,8 @@ const TABLE_NAME_MAP: Record<string, string> = {
   auditLogs: "audit_logs",
   purchasePayments: "purchase_payments",
   productUnits: "product_units",
+  supervisorBonuses: "supervisor_bonuses",
+  customerBonuses: "customer_bonuses",
 };
 
 
@@ -140,7 +144,9 @@ function normalizeTableName(tableName: string): string {
 }
 
 const MAX_BATCH_SIZE = 50;
-const MAX_PULL_SIZE = 100;
+// No global pull limit - each table is fetched completely
+// This avoids cross-table cursor issues where some tables get skipped
+const PER_TABLE_PULL_LIMIT = 50000;
 
 export class SyncService {
   /**
@@ -178,6 +184,9 @@ export class SyncService {
 
     try {
       await connection.beginTransaction();
+      
+      // Temporarily disable FK checks to handle out-of-order sync (e.g., purchases before suppliers)
+      await connection.query('SET FOREIGN_KEY_CHECKS = 0');
 
       for (const record of records) {
         try {
@@ -315,7 +324,7 @@ export class SyncService {
           const errorMessage = error instanceof Error ? error.message : "Unknown error";
 
           // Handle UNIQUE constraint violations - record already exists with same unique field
-          if (errorMessage.includes('UNIQUE constraint failed')) {
+          if (errorMessage.includes('UNIQUE constraint failed') || errorMessage.includes('Duplicate entry')) {
             logger.warn({
               table_name: record.table_name,
               record_id: record.record_id,
@@ -344,6 +353,8 @@ export class SyncService {
         }
       }
 
+      // Re-enable FK checks before committing
+      await connection.query('SET FOREIGN_KEY_CHECKS = 1');
       await connection.commit();
       logger.info(
         {
@@ -354,6 +365,8 @@ export class SyncService {
         "Batch processing completed"
       );
     } catch (error) {
+      // Re-enable FK checks even on error
+      try { await connection.query('SET FOREIGN_KEY_CHECKS = 1'); } catch { /* ignore */ }
       await connection.rollback();
       logger.error({ error }, "Batch processing failed");
       throw error;
@@ -399,28 +412,36 @@ export class SyncService {
           let query: string;
 
           if (noBranchTables.includes(table_name)) {
-            // Tables without branch_id - only filter by client_id
             query = `SELECT * FROM ?? 
              WHERE client_id = ? 
-             AND server_updated_at > ? 
-             ORDER BY server_updated_at ASC 
+             AND server_updated_at >= ? 
+             ORDER BY server_updated_at ASC, id ASC 
              LIMIT ?`;
-            queryParams = [table_name, client_id, since, MAX_PULL_SIZE];
+            queryParams = [table_name, client_id, since, PER_TABLE_PULL_LIMIT];
           } else {
-            // Handle null branch_id: use IS NULL when branch_id is null, otherwise use =
-            const branchCondition = branch_id === null || branch_id === 'null' ? 'branch_id IS NULL' : 'branch_id = ?';
-            query = `SELECT * FROM ?? 
-             WHERE client_id = ? 
-             AND ${branchCondition}
-             AND server_updated_at > ? 
-             ORDER BY server_updated_at ASC 
-             LIMIT ?`;
-            queryParams = branch_id === null || branch_id === 'null'
-              ? [table_name, client_id, since, MAX_PULL_SIZE]
-              : [table_name, client_id, branch_id, since, MAX_PULL_SIZE];
+            // When branchId is null, pull ALL records for the client (no branch filtering)
+            // This handles the common case where license doesn't specify a branch
+            const branchIsNull = branch_id === null || branch_id === 'null';
+            if (branchIsNull) {
+              // No branch filtering - get all client records
+              query = `SELECT * FROM ?? 
+               WHERE client_id = ? 
+               AND server_updated_at >= ? 
+               ORDER BY server_updated_at ASC, id ASC 
+               LIMIT ?`;
+              queryParams = [table_name, client_id, since, PER_TABLE_PULL_LIMIT];
+            } else {
+              // Include records with NULL branch_id (imported data) alongside branch-specific records
+              query = `SELECT * FROM ?? 
+               WHERE client_id = ? 
+               AND (branch_id = ? OR branch_id IS NULL)
+               AND server_updated_at >= ? 
+               ORDER BY server_updated_at ASC, id ASC 
+               LIMIT ?`;
+              queryParams = [table_name, client_id, branch_id, since, PER_TABLE_PULL_LIMIT];
+            }
           }
 
-          // Use simple query; streaming API was failing in promise wrapper
           const [rows] = await connection.query<RowDataPacket[]>(query, queryParams);
 
           for (const row of rows) {
@@ -465,14 +486,6 @@ export class SyncService {
             "Skipping table during pull (likely missing client_id/branch_id columns)"
           );
           continue;
-        }
-
-        // التحقق من وجود المزيد من السجلات
-        if (response.changes.length >= MAX_PULL_SIZE) {
-          response.has_more = true;
-          response.next_cursor =
-            response.changes[response.changes.length - 1].server_updated_at;
-          break;
         }
       }
 
@@ -811,11 +824,15 @@ export class SyncService {
         query = `SELECT * FROM ?? WHERE ?? = ? AND client_id = ?`;
         params = [normalizedTableName, primaryKeyColumn, lookupValue, client_id];
       } else {
-        // Handle null branch_id
+        // When branchId is null, get record for any branch in the same client
         const branchIsNull = branch_id === null || branch_id === 'null';
-        const branchCondition = branchIsNull ? 'branch_id IS NULL' : 'branch_id = ?';
-        query = `SELECT * FROM ?? WHERE ?? = ? AND client_id = ? AND ${branchCondition}`;
-        params = [normalizedTableName, primaryKeyColumn, lookupValue, client_id, ...(branchIsNull ? [] : [branch_id])];
+        if (branchIsNull) {
+          query = `SELECT * FROM ?? WHERE ?? = ? AND client_id = ?`;
+          params = [normalizedTableName, primaryKeyColumn, lookupValue, client_id];
+        } else {
+          query = `SELECT * FROM ?? WHERE ?? = ? AND client_id = ? AND (branch_id = ? OR branch_id IS NULL)`;
+          params = [normalizedTableName, primaryKeyColumn, lookupValue, client_id, branch_id];
+        }
       }
 
       const [rows] = await connection.query<RowDataPacket[]>(query, params);
@@ -915,6 +932,78 @@ export class SyncService {
         last_sync_at: lastSyncRows[0].last_sync,
         tables_stats,
       };
+    } finally {
+      connection.release();
+    }
+  }
+
+  /**
+   * حذف جميع البيانات من السيرفر لعميل وفرع معين
+   * يحذف من جميع الجداول القابلة للمزامنة + جدول sync_queue
+   */
+  async clearAllData(
+    client_id: string | number,
+    branch_id: string | number
+  ): Promise<{ success: boolean; deleted_tables: string[]; total_deleted: number }> {
+    const connection = await db.getConnection();
+    try {
+      const branchIsNull = branch_id === null || branch_id === undefined || branch_id === '';
+      const branchCondition = branchIsNull ? 'branch_id IS NULL' : 'branch_id = ?';
+
+      let totalDeleted = 0;
+      const deletedTables: string[] = [];
+
+      await connection.beginTransaction();
+
+      for (const table of SYNCABLE_TABLES) {
+        try {
+          const params = branchIsNull ? [client_id] : [client_id, branch_id];
+          const [result] = await connection.query<ResultSetHeader>(
+            `DELETE FROM ?? WHERE client_id = ? AND ${branchCondition}`,
+            [table, ...params]
+          );
+          if (result.affectedRows > 0) {
+            deletedTables.push(table);
+            totalDeleted += result.affectedRows;
+            logger.info(`Cleared ${result.affectedRows} records from ${table}`);
+          }
+        } catch (tableError: any) {
+          // Skip tables that don't exist
+          if (tableError?.code === 'ER_NO_SUCH_TABLE') {
+            logger.warn(`Table ${table} does not exist, skipping`);
+          } else {
+            logger.error({ error: tableError }, `Error clearing table ${table}`);
+          }
+        }
+      }
+
+      // Also clear sync_queue for this client
+      try {
+        const queueParams = branchIsNull ? [client_id] : [client_id, branch_id];
+        const [queueResult] = await connection.query<ResultSetHeader>(
+          `DELETE FROM sync_queue WHERE client_id = ? AND ${branchCondition}`,
+          queueParams
+        );
+        if (queueResult.affectedRows > 0) {
+          deletedTables.push('sync_queue');
+          totalDeleted += queueResult.affectedRows;
+        }
+      } catch (e) {
+        logger.warn({ error: e }, 'Could not clear sync_queue');
+      }
+
+      await connection.commit();
+
+      logger.info(`Cleared all data: ${totalDeleted} records from ${deletedTables.length} tables`);
+
+      return {
+        success: true,
+        deleted_tables: deletedTables,
+        total_deleted: totalDeleted,
+      };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
     } finally {
       connection.release();
     }

@@ -10,16 +10,23 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { MessageCircle, Send, FileText, User, AlertCircle, Loader2 } from "lucide-react";
+import {
+    Command,
+    CommandEmpty,
+    CommandGroup,
+    CommandInput,
+    CommandItem,
+    CommandList,
+} from "@/components/ui/command";
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from "@/components/ui/popover";
+import { MessageCircle, Send, FileText, User, AlertCircle, Loader2, Search, Check, Download } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { db, Customer, Invoice } from "@/shared/lib/indexedDB";
 import { useToast } from "@/hooks/use-toast";
 import { useSettingsContext } from "@/contexts/SettingsContext";
@@ -49,7 +56,10 @@ export const StatementWhatsAppDialog = ({
 
     // Options
     const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
+    const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+    const [customerSearchQuery, setCustomerSearchQuery] = useState("");
     const [contentType, setContentType] = useState<"balanceOnly" | "balanceAndStatement">("balanceOnly");
+    const [sendMethod, setSendMethod] = useState<"whatsapp" | "savePdf">("whatsapp");
     const [fromDate, setFromDate] = useState(new Date(new Date().getFullYear(), 0, 1).toLocaleDateString('en-CA'));
     const [toDate, setToDate] = useState(new Date().toLocaleDateString('en-CA'));
     const [calculatedBalance, setCalculatedBalance] = useState<number | null>(null);
@@ -85,6 +95,15 @@ export const StatementWhatsAppDialog = ({
     const selectedCustomer = useMemo(() => {
         return customers.find((c) => c.id === selectedCustomerId);
     }, [customers, selectedCustomerId]);
+
+    // Filtered customers for search (show ALL customers - no balance filter)
+    const filteredCustomersForSearch = useMemo(() => {
+        if (!customerSearchQuery.trim()) return customers;
+        const q = customerSearchQuery.toLowerCase();
+        return customers.filter(
+            (c) => c.name?.toLowerCase().includes(q) || c.phone?.includes(q)
+        );
+    }, [customers, customerSearchQuery]);
 
     // Get customer invoices for statement
     const customerInvoices = useMemo(() => {
@@ -173,8 +192,83 @@ ${dateStr} ${timeStr}`;
         return message;
     };
 
+    // Save as PDF locally
+    const handleSavePDF = async () => {
+        if (!selectedCustomer) {
+            toast({ title: "يرجى اختيار عميل", variant: "destructive" });
+            return;
+        }
+
+        setSending(true);
+
+        try {
+            if (contentType === "balanceOnly") {
+                // For balance only, generate a simple text-based PDF
+                const { generateStatementPDF } = await import("@/services/statementPdfService");
+                const from = new Date(fromDate);
+                const to = new Date(toDate);
+                const pdfBlob = await generateStatementPDF(selectedCustomer.id, from, to);
+
+                if (!pdfBlob) {
+                    throw new Error("فشل توليد ملف PDF");
+                }
+
+                const url = URL.createObjectURL(pdfBlob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = `رصيد ${selectedCustomer.name}.pdf`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            } else {
+                // Generate full statement PDF
+                toast({ title: "📊 جاري توليد كشف الحساب...", description: "يرجى الانتظار" });
+
+                const { generateStatementPDF } = await import("@/services/statementPdfService");
+                const from = new Date(fromDate);
+                const to = new Date(toDate);
+                const pdfBlob = await generateStatementPDF(selectedCustomer.id, from, to);
+
+                if (!pdfBlob) {
+                    throw new Error("فشل توليد ملف PDF");
+                }
+
+                const url = URL.createObjectURL(pdfBlob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = `كشف حساب ${selectedCustomer.name}.pdf`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            }
+
+            toast({
+                title: "✅ تم حفظ الملف بنجاح",
+                description: `تم حفظ ملف PDF على الجهاز`,
+            });
+
+            onOpenChange(false);
+        } catch (error: any) {
+            console.error("Failed to save PDF:", error);
+            toast({
+                title: "فشل حفظ الملف",
+                description: error.message || "حدث خطأ أثناء توليد الملف",
+                variant: "destructive"
+            });
+        }
+
+        setSending(false);
+    };
+
     // Send statement using WhatsApp service
     const handleSend = async () => {
+        // If save PDF mode, use separate handler
+        if (sendMethod === "savePdf") {
+            return handleSavePDF();
+        }
+
         if (!activeAccount) {
             toast({
                 title: "لا يوجد حساب واتساب متصل",
@@ -189,8 +283,10 @@ ${dateStr} ${timeStr}`;
             return;
         }
 
-        if (!selectedCustomer.phone) {
-            toast({ title: "العميل ليس لديه رقم هاتف", variant: "destructive" });
+        // تحديد وجهة الإرسال (جروب القبض/كشف الحساب أو رقم هاتف)
+        const sendTarget = selectedCustomer.collectionGroupId || selectedCustomer.whatsappGroupId || selectedCustomer.phone;
+        if (!sendTarget) {
+            toast({ title: "العميل ليس لديه رقم هاتف أو جروب واتساب", variant: "destructive" });
             return;
         }
 
@@ -202,7 +298,7 @@ ${dateStr} ${timeStr}`;
                 const message = formatBalanceMessage();
                 await whatsappService.sendMessage(
                     activeAccount.id,
-                    selectedCustomer.phone,
+                    sendTarget,
                     message,
                     undefined,
                     { customerId: selectedCustomer.id, type: "reminder" }
@@ -242,7 +338,7 @@ ${dateStr} ${timeStr}`;
 
                 await whatsappService.sendMessage(
                     activeAccount.id,
-                    selectedCustomer.phone,
+                    sendTarget,
                     caption, // Message text used as caption
                     {
                         type: "document",
@@ -283,15 +379,113 @@ ${dateStr} ${timeStr}`;
                 </DialogHeader>
 
                 <div className="space-y-4 py-4">
+                    {/* Customer Selection */}
+                    <div className="space-y-2">
+                        <Label>اختر العميل</Label>
+                        <Popover open={customerSearchOpen} onOpenChange={setCustomerSearchOpen}>
+                            <PopoverTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    role="combobox"
+                                    aria-expanded={customerSearchOpen}
+                                    className="w-full justify-between h-12"
+                                >
+                                    {selectedCustomer ? (
+                                        <div className="flex flex-col items-start">
+                                            <span>{selectedCustomer.name}</span>
+                                            <span className="text-xs text-red-500">
+                                                رصيد: {getBalance(selectedCustomer.id, Number(selectedCustomer.currentBalance) || 0).toFixed(2)} {currency}
+                                            </span>
+                                        </div>
+                                    ) : (
+                                        <span className="text-muted-foreground">اختر أو ابحث عن عميل...</span>
+                                    )}
+                                    <Search className="h-4 w-4 shrink-0 opacity-50" />
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[350px] p-0" align="start">
+                                <Command shouldFilter={false}>
+                                    <CommandInput
+                                        placeholder="ابحث بالاسم أو رقم الهاتف..."
+                                        value={customerSearchQuery}
+                                        onValueChange={setCustomerSearchQuery}
+                                    />
+                                    <CommandList>
+                                        <CommandEmpty>لا يوجد عملاء</CommandEmpty>
+                                        <CommandGroup>
+                                            {filteredCustomersForSearch.map((customer) => (
+                                                <CommandItem
+                                                    key={customer.id}
+                                                    value={customer.id}
+                                                    onSelect={() => {
+                                                        setSelectedCustomerId(customer.id);
+                                                        setCustomerSearchOpen(false);
+                                                    }}
+                                                >
+                                                    <Check
+                                                        className={cn(
+                                                            "mr-2 h-4 w-4",
+                                                            selectedCustomerId === customer.id ? "opacity-100" : "opacity-0"
+                                                        )}
+                                                    />
+                                                    <div className="flex flex-col flex-1">
+                                                        <span>{customer.name}</span>
+                                                        <span className="text-xs text-muted-foreground">{customer.phone}</span>
+                                                    </div>
+                                                    <Badge variant="destructive" className="text-xs">
+                                                        {getBalance(customer.id, Number(customer.currentBalance) || 0).toFixed(2)}
+                                                    </Badge>
+                                                </CommandItem>
+                                            ))}
+                                        </CommandGroup>
+                                    </CommandList>
+                                </Command>
+                            </PopoverContent>
+                        </Popover>
+                    </div>
+
+                    {/* Send Method */}
+                    <div className="space-y-2">
+                        <Label>طريقة الإرسال</Label>
+                        <RadioGroup
+                            value={sendMethod}
+                            onValueChange={(v) => setSendMethod(v as "whatsapp" | "savePdf")}
+                        >
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-muted/50">
+                                    <RadioGroupItem value="whatsapp" id="method-whatsapp" />
+                                    <Label htmlFor="method-whatsapp" className="cursor-pointer">
+                                        <div className="font-medium flex items-center gap-1">
+                                            <MessageCircle className="h-4 w-4 text-green-600" />
+                                            إرسال واتساب
+                                        </div>
+                                        <div className="text-xs text-muted-foreground">إرسال عبر الواتساب</div>
+                                    </Label>
+                                </div>
+                                <div className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-muted/50">
+                                    <RadioGroupItem value="savePdf" id="method-pdf" />
+                                    <Label htmlFor="method-pdf" className="cursor-pointer">
+                                        <div className="font-medium flex items-center gap-1">
+                                            <Download className="h-4 w-4 text-blue-600" />
+                                            حفظ PDF
+                                        </div>
+                                        <div className="text-xs text-muted-foreground">حفظ على الجهاز</div>
+                                    </Label>
+                                </div>
+                            </div>
+                        </RadioGroup>
+                    </div>
+
                     {/* WhatsApp Account Status */}
-                    {!activeAccount ? (
+                    {sendMethod === "whatsapp" && !activeAccount && (
                         <Alert variant="destructive">
                             <AlertCircle className="h-4 w-4" />
                             <AlertDescription>
                                 لا يوجد حساب واتساب متصل. يرجى ربط حساب من صفحة إدارة الواتساب أولاً.
                             </AlertDescription>
                         </Alert>
-                    ) : (
+                    )}
+                    {sendMethod === "whatsapp" && activeAccount && (
                         <Alert className="bg-green-50 border-green-200">
                             <MessageCircle className="h-4 w-4 text-green-600" />
                             <AlertDescription className="text-green-800">
@@ -299,30 +493,6 @@ ${dateStr} ${timeStr}`;
                             </AlertDescription>
                         </Alert>
                     )}
-
-                    {/* Customer Selection */}
-                    <div className="space-y-2">
-                        <Label>اختر العميل</Label>
-                        <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
-                            <SelectTrigger>
-                                <SelectValue placeholder="اختر عميل له رصيد مستحق..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {customers
-                                    .filter((c) => getBalance(c.id, Number(c.currentBalance) || 0) > 0)
-                                    .map((customer) => (
-                                    <SelectItem key={customer.id} value={customer.id}>
-                                        <div className="flex items-center justify-between gap-4">
-                                            <span>{customer.name}</span>
-                                            <Badge variant="destructive" className="text-xs">
-                                                {getBalance(customer.id, Number(customer.currentBalance) || 0).toFixed(2)} {currency}
-                                            </Badge>
-                                        </div>
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
 
                     {/* Content Type */}
                     <div className="space-y-2">
@@ -404,15 +574,17 @@ ${dateStr} ${timeStr}`;
                     </Button>
                     <Button
                         onClick={handleSend}
-                        disabled={!selectedCustomerId || loading || !activeAccount || sending}
-                        className="gap-2 bg-green-600 hover:bg-green-700"
+                        disabled={!selectedCustomerId || loading || (sendMethod === "whatsapp" && !activeAccount) || sending}
+                        className={cn("gap-2", sendMethod === "savePdf" ? "bg-blue-600 hover:bg-blue-700" : "bg-green-600 hover:bg-green-700")}
                     >
                         {sending ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : sendMethod === "savePdf" ? (
+                            <Download className="h-4 w-4" />
                         ) : (
                             <Send className="h-4 w-4" />
                         )}
-                        إرسال الكشف
+                        {sendMethod === "savePdf" ? "حفظ PDF" : "إرسال الكشف"}
                     </Button>
                 </DialogFooter>
             </DialogContent>

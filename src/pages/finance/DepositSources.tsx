@@ -24,6 +24,8 @@ import { Switch } from "@/components/ui/switch";
 import { Plus, Pencil, Search } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 const DepositSources = () => {
   const { can } = useAuth();
@@ -160,6 +162,8 @@ const DepositSources = () => {
     resetForm();
   };
 
+  const pagination = usePagination(filteredSources, { resetDeps: [searchTerm] });
+
   if (!can("depositSources", "view")) {
     return (
       <div className="min-h-screen bg-background" dir="rtl">
@@ -225,7 +229,7 @@ const DepositSources = () => {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredSources.map((source) => (
+                pagination.paginatedItems.map((source) => (
                   <TableRow key={source.id}>
                     <TableCell className="font-medium">{source.name}</TableCell>
                     <TableCell className="text-gray-600">
@@ -266,6 +270,8 @@ const DepositSources = () => {
             </TableBody>
           </Table>
         </div>
+
+        <DataPagination {...pagination} entityName="مصدر إيداع" />
 
         {/* Add/Edit Dialog */}
         <Dialog open={showDialog} onOpenChange={handleCloseDialog}>

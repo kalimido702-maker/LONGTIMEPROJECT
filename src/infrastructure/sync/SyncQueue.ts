@@ -184,15 +184,14 @@ export class SyncQueue {
     failed: number;
   }> {
     this.ensureInitialized();
-    const allItems = await this.getAll();
-
-    return {
-      total: allItems.length,
-      pending: allItems.filter((i) => i.status === "pending").length,
-      processing: allItems.filter((i) => i.status === "processing").length,
-      completed: allItems.filter((i) => i.status === "completed").length,
-      failed: allItems.filter((i) => i.status === "failed").length,
-    };
+    const [pending, processing, completed, failed, total] = await Promise.all([
+      this.db!.countFromIndex(this.storeName, "status", "pending"),
+      this.db!.countFromIndex(this.storeName, "status", "processing"),
+      this.db!.countFromIndex(this.storeName, "status", "completed"),
+      this.db!.countFromIndex(this.storeName, "status", "failed"),
+      this.db!.count(this.storeName),
+    ]);
+    return { total, pending, processing, completed, failed };
   }
 
   private generateId(): string {

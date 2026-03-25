@@ -4,6 +4,8 @@ import fastifyCors from "@fastify/cors";
 import fastifyRateLimit from "@fastify/rate-limit";
 import fastifyWebsocket from "@fastify/websocket";
 import fastifyMultipart from "@fastify/multipart";
+import { resolve } from "path";
+import { createReadStream, existsSync } from "fs";
 import { env } from "./config/env.js";
 import { jwtConfig } from "./config/jwt.js";
 import logger from "./config/logger.js";
@@ -16,6 +18,7 @@ import {
   initializeWebSocketServer,
   wsSyncServer,
 } from "./websocket/syncServer.js";
+import { notificationService } from "./services/NotificationService.js";
 
 // Import routes
 import authRoutes from "./routes/auth.js";
@@ -23,6 +26,7 @@ import licenseRoutes from "./routes/license.js";
 import { syncRoutes } from "./routes/sync.js";
 import productRoutes from "./routes/products.js";
 import customerRoutes from "./routes/customers.js";
+import nearestTraderRoutes from "./routes/nearestTrader.js";
 import invoiceRoutes from "./routes/invoices.js";
 import categoryRoutes from "./routes/categories.js";
 import supplierRoutes from "./routes/suppliers.js";
@@ -39,6 +43,15 @@ import adminPackagesRoutes from "./routes/admin/packages.js";
 import updateRoutes from "./routes/updates.js";
 import { supervisorRoutes } from "./routes/supervisors.js";
 import { salesRepRoutes } from "./routes/salesReps.js";
+import { mobileRoutes } from "./routes/mobile.js";
+import { mobileAccountRoutes } from "./routes/mobile-accounts.js";
+import { whatsappRoutes } from "./routes/whatsapp.js";
+import { notificationRoutes } from "./routes/notifications.js";
+import {
+  initializeWhatsAppService,
+  shutdownWhatsAppService,
+  setBroadcaster,
+} from "./services/whatsapp/index.js";
 
 const fastify = Fastify({
   logger: logger,
@@ -87,6 +100,21 @@ async function registerPlugins() {
     },
   });
 
+  // Serve uploaded notification images
+  fastify.get("/uploads/notification-images/:filename", async (request, reply) => {
+    const { filename } = request.params as { filename: string };
+    // Prevent path traversal
+    if (filename.includes("..") || filename.includes("/")) {
+      return reply.code(400).send({ error: "Invalid filename" });
+    }
+    const filePath = resolve(process.cwd(), "data/notification-images", filename);
+    if (!existsSync(filePath)) return reply.code(404).send({ error: "Not found" });
+    const ext = filename.split(".").pop()?.toLowerCase() || "jpg";
+    const mimeMap: Record<string, string> = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp" };
+    reply.header("Content-Type", mimeMap[ext] || "application/octet-stream");
+    return reply.send(createReadStream(filePath));
+  });
+
   // WebSocket
   await fastify.register(fastifyWebsocket, {
     options: {
@@ -130,6 +158,9 @@ async function registerRoutes() {
   await fastify.register(customerRoutes, {
     prefix: `${env.API_PREFIX}/customers`,
   });
+  await fastify.register(nearestTraderRoutes, {
+    prefix: `${env.API_PREFIX}/nearest-trader`,
+  });
   await fastify.register(invoiceRoutes, {
     prefix: `${env.API_PREFIX}/invoices`,
   });
@@ -161,12 +192,32 @@ async function registerRoutes() {
     prefix: `${env.API_PREFIX}/sales-reps`,
   });
 
+  // Mobile routes
+  await fastify.register(mobileRoutes, {
+    prefix: `${env.API_PREFIX}/mobile`,
+  });
+
+  // Mobile account management routes
+  await fastify.register(mobileAccountRoutes, {
+    prefix: `${env.API_PREFIX}/mobile/accounts`,
+  });
+
   // Admin routes
   await fastify.register(adminRoutes, { prefix: `${env.API_PREFIX}/admin` });
   await fastify.register(adminClientsRoutes, { prefix: `${env.API_PREFIX}/admin/clients` });
   await fastify.register(adminLicensesRoutes, { prefix: `${env.API_PREFIX}/admin/licenses` });
   await fastify.register(adminBranchesRoutes, { prefix: `${env.API_PREFIX}/admin/branches` });
   await fastify.register(adminPackagesRoutes, { prefix: `${env.API_PREFIX}/admin/packages` });
+
+  // Notifications routes
+  await fastify.register(notificationRoutes, {
+    prefix: `${env.API_PREFIX}/notifications`,
+  });
+
+  // WhatsApp routes
+  await fastify.register(whatsappRoutes, {
+    prefix: `${env.API_PREFIX}/whatsapp`,
+  });
 
   // App Updates routes - register under both /api/updates and /api/admin/updates
   await fastify.register(updateRoutes, { prefix: `${env.API_PREFIX}/updates` });
@@ -182,6 +233,7 @@ fastify.setErrorHandler(errorHandler);
 async function gracefulShutdown() {
   logger.info("Received shutdown signal, closing server gracefully...");
   try {
+    await shutdownWhatsAppService();
     if (wsSyncServer) {
       await wsSyncServer.shutdown();
     }
@@ -223,6 +275,21 @@ async function start() {
 
     // Initialize WebSocket server
     await initializeWebSocketServer(fastify as any);
+
+    // Initialize WhatsApp service
+    initializeWhatsAppService();
+    setBroadcaster((clientId, event, data) => {
+      if (wsSyncServer) {
+        wsSyncServer.broadcastToClientRooms(String(clientId), {
+          type: event,
+          data,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
+
+    // Initialize Firebase for push notifications
+    notificationService.initialize();
 
     // Start listening
     const host = env.HOST || "0.0.0.0";

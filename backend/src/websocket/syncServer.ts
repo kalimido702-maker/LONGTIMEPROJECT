@@ -385,6 +385,40 @@ class WebSocketSyncServer {
     }, this.PING_INTERVAL);
   }
 
+  // Reverse mapping: snake_case (DB) => camelCase (Client)
+  private static readonly REVERSE_TABLE_MAP: Record<string, string> = {
+    product_categories: "productCategories",
+    invoice_items: "invoiceItems",
+    cash_movements: "cashMovements",
+    payment_methods: "paymentMethods",
+    deposit_sources: "depositSources",
+    expense_categories: "expenseCategories",
+    expense_items: "expenseItems",
+    product_stock: "productStock",
+    purchase_items: "purchaseItems",
+    sales_returns: "salesReturns",
+    purchase_returns: "purchaseReturns",
+    employee_advances: "employeeAdvances",
+    employee_deductions: "employeeDeductions",
+    whatsapp_accounts: "whatsappAccounts",
+    whatsapp_messages: "whatsappMessages",
+    sales_reps: "salesReps",
+    whatsapp_campaigns: "whatsappCampaigns",
+    whatsapp_tasks: "whatsappTasks",
+    restaurant_tables: "restaurantTables",
+    payment_apps: "paymentApps",
+    price_types: "priceTypes",
+    audit_logs: "auditLogs",
+    purchase_payments: "purchasePayments",
+    product_units: "productUnits",
+    supervisor_bonuses: "supervisorBonuses",
+    customer_bonuses: "customerBonuses",
+  };
+
+  private toClientTableName(dbTableName: string): string {
+    return WebSocketSyncServer.REVERSE_TABLE_MAP[dbTableName] || dbTableName;
+  }
+
   private startQueueMonitoring(): void {
     this.queueMonitor = setInterval(async () => {
       try {
@@ -400,7 +434,8 @@ class WebSocketSyncServer {
           const room = `${row.client_id}:${row.branch_id}`;
           let data = null;
 
-          const tableName = row.entity_type; // entity_type stores the table name
+          const tableName = row.entity_type; // entity_type stores the table name (snake_case)
+          const clientTableName = this.toClientTableName(tableName); // Convert to camelCase for client
           const recordId = row.entity_id;    // entity_id stores the record id
           const operation = row.operation;
 
@@ -430,7 +465,7 @@ class WebSocketSyncServer {
 
           await this.broadcastToRoom(
             room,
-            tableName,
+            clientTableName,
             recordId,
             operation,
             data,
@@ -465,6 +500,24 @@ class WebSocketSyncServer {
     }
 
     logger.info("WebSocket Sync Server shut down");
+  }
+
+  /**
+   * Broadcast a message to all clients belonging to a specific clientId
+   * Used by WhatsApp service to send real-time events
+   */
+  broadcastToClientRooms(clientId: string, message: any): void {
+    const messageStr = JSON.stringify(message);
+
+    for (const [deviceId, client] of this.clients) {
+      if (String(client.clientId) === clientId && client.connection.readyState === 1) {
+        try {
+          client.connection.send(messageStr);
+        } catch (error) {
+          logger.error({ error, device_id: deviceId }, "Failed to send WhatsApp event");
+        }
+      }
+    }
   }
 
   getStats(): any {

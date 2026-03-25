@@ -24,6 +24,8 @@ import { Switch } from "@/components/ui/switch";
 import { Plus, Pencil, Search } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 const ExpenseCategories = () => {
   const { can } = useAuth();
@@ -161,6 +163,8 @@ const ExpenseCategories = () => {
     resetForm();
   };
 
+  const pagination = usePagination(filteredCategories, { resetDeps: [searchTerm] });
+
   if (!can("expenseCategories", "view")) {
     return (
       <div className="min-h-screen bg-background" dir="rtl">
@@ -226,7 +230,7 @@ const ExpenseCategories = () => {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredCategories.map((category) => (
+                pagination.paginatedItems.map((category) => (
                   <TableRow key={category.id}>
                     <TableCell className="font-medium">
                       {category.name}
@@ -269,6 +273,8 @@ const ExpenseCategories = () => {
             </TableBody>
           </Table>
         </div>
+
+        <DataPagination {...pagination} entityName="فئة مصروفات" />
 
         {/* Add/Edit Dialog */}
         <Dialog open={showDialog} onOpenChange={handleCloseDialog}>

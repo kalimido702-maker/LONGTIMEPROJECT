@@ -6,6 +6,7 @@ import {
 } from "../services/SyncService.js";
 import { logger } from "../config/logger.js";
 import { wsSyncServer } from "../websocket/syncServer.js";
+import { notificationService } from "../services/NotificationService.js";
 
 interface BatchPushBody {
   device_id: string;
@@ -157,6 +158,62 @@ export async function syncRoutes(server: FastifyInstance) {
           logger.info({ room, synced_count: result.synced_count }, "Broadcasted sync updates to room");
         }
 
+        // ── Push Notifications for mobile customers ──────────────
+        // Fire-and-forget: don't block the sync response
+        if (result.synced_count > 0) {
+          setImmediate(async () => {
+            try {
+              for (const record of records) {
+                // Skip deleted records and conflicts
+                if (record.is_deleted) continue;
+                const hasConflict = result.conflicts?.some(
+                  (c: any) =>
+                    c.record_id === record.record_id &&
+                    c.table_name === record.table_name
+                );
+                if (hasConflict) continue;
+
+                const tableName = record.table_name;
+                const data = record.data || {};
+
+                if (
+                  tableName === "invoices" ||
+                  tableName === "Invoices"
+                ) {
+                  await notificationService.notifyNewInvoice(
+                    { id: record.record_id, ...data },
+                    clientId as string,
+                    branchId as string
+                  );
+                } else if (
+                  tableName === "payments" ||
+                  tableName === "Payments"
+                ) {
+                  await notificationService.notifyNewPayment(
+                    { id: record.record_id, ...data },
+                    clientId as string,
+                    branchId as string
+                  );
+                } else if (
+                  tableName === "salesReturns" ||
+                  tableName === "sales_returns"
+                ) {
+                  await notificationService.notifyNewReturn(
+                    { id: record.record_id, ...data },
+                    clientId as string,
+                    branchId as string
+                  );
+                }
+              }
+            } catch (notifError) {
+              logger.warn(
+                { error: notifError },
+                "Failed to send push notifications after sync"
+              );
+            }
+          });
+        }
+
         return reply.code(200).send(result);
       } catch (error) {
         logger.error({ error }, "Batch push failed");
@@ -182,7 +239,7 @@ export async function syncRoutes(server: FastifyInstance) {
           type: "object",
           required: ["since"],
           properties: {
-            since: { type: "string", format: "date-time" },
+            since: { type: "string" }, // timestamp or compound cursor (timestamp|id)
             tables: { type: "string" }, // comma-separated table names
           },
         },
@@ -466,6 +523,56 @@ export async function syncRoutes(server: FastifyInstance) {
         logger.error({ error }, "Get sync stats failed");
         return reply.code(500).send({
           error: "Stats retrieval failed",
+          message: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    }
+  );
+
+  /**
+   * DELETE /api/sync/clear-all
+   * حذف جميع البيانات من السيرفر للعميل والفرع الحالي
+   * ⚠️ عملية خطيرة - تحذف كل البيانات
+   */
+  server.delete(
+    "/clear-all",
+    {
+      preHandler: [server.authenticate],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { userId, clientId, branchId } = request.user!;
+
+        logger.warn(
+          {
+            user_id: userId,
+            client_id: clientId,
+            branch_id: branchId,
+          },
+          "⚠️ CLEAR ALL DATA request"
+        );
+
+        const result = await syncService.clearAllData(
+          clientId as any,
+          branchId as any
+        );
+
+        logger.warn(
+          {
+            user_id: userId,
+            client_id: clientId,
+            branch_id: branchId,
+            deleted_tables: result.deleted_tables,
+            total_deleted: result.total_deleted,
+          },
+          "✅ CLEAR ALL DATA completed"
+        );
+
+        return reply.code(200).send(result);
+      } catch (error) {
+        logger.error({ error }, "Clear all data failed");
+        return reply.code(500).send({
+          error: "Clear all data failed",
           message: error instanceof Error ? error.message : "Unknown error",
         });
       }

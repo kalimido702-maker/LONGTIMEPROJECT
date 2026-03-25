@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MasrPOS</string>
+    <string name="title_activity_main">MasrPOS</string>
+    <string name="package_name">com.masrpos.app</string>
+    <string name="custom_url_scheme">com.masrpos.app</string>
+</resources>

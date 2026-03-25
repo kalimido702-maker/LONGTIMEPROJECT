@@ -30,3 +30,7 @@ export * from "./PendingOrder";
 export * from "./CartItem";
 export * from "./Supervisor";
 export * from "./SalesRep";
+// WhatsApp Bot v2 - Phase 1 entities
+export * from "./CustomerIdentification";
+export * from "./CustomerPhone";
+export * from "./Trader";

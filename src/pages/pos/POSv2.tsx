@@ -25,6 +25,7 @@ import {
   Package,
   PackageCheck,
   Landmark,
+  Check,
 } from "lucide-react";
 import {
   db,
@@ -72,6 +73,20 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { cn, getLocalDateString } from "@/lib/utils";
+import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
@@ -103,6 +118,7 @@ const POSv2 = () => {
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>("");
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [highlightedProductIndex, setHighlightedProductIndex] = useState(-1);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
@@ -113,6 +129,8 @@ const POSv2 = () => {
   // Payment states - now only credit (آجل) is supported
   const [paymentType] = useState<"credit">("credit");
   const [selectedCustomer, setSelectedCustomer] = useState<string>("cash");
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState("");
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] =
     useState<string>("");
   const [selectedPriceTypeId, setSelectedPriceTypeId] = useState<string>("");
@@ -145,7 +163,7 @@ const POSv2 = () => {
   const [invoiceNotes, setInvoiceNotes] = useState<string>("");
 
   // Invoice date (admin-only override)
-  const [invoiceDate, setInvoiceDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [invoiceDate, setInvoiceDate] = useState<string>(getLocalDateString());
   const isAdmin = user?.role === "admin" || user?.roleId === "admin";
 
   // Delivery status - default is "not_delivered"
@@ -399,7 +417,7 @@ const POSv2 = () => {
 
       // Keep original date if needed
       if (invoice.createdAt) {
-        setInvoiceDate(new Date(invoice.createdAt).toISOString().split('T')[0]);
+        setInvoiceDate(getLocalDateString(new Date(invoice.createdAt)));
       }
 
       toast({ title: "تم تحميل الفاتورة للتعديل" });
@@ -471,6 +489,13 @@ const POSv2 = () => {
       toast({ title: "خطأ في تحميل بيانات عرض السعر", variant: "destructive" });
     }
   };
+
+  // Filtered customers for search dropdown
+  const filteredCustomersForPOS = customers.filter((c) => {
+    if (!customerSearchQuery.trim()) return true;
+    const q = customerSearchQuery.toLowerCase();
+    return c.name?.toLowerCase().includes(q) || c.phone?.includes(q);
+  });
 
   const filteredProducts = products.filter((p) => {
     // Search by name, barcode, or code
@@ -838,7 +863,7 @@ const POSv2 = () => {
     }
 
     // Reset date to today
-    setInvoiceDate(new Date().toISOString().split('T')[0]);
+    setInvoiceDate(getLocalDateString());
   };
 
   // Calculations
@@ -1506,9 +1531,13 @@ const POSv2 = () => {
   const handleSendWhatsApp = async () => {
     if (!savedInvoiceForWhatsApp) return;
 
-    const customer = customers.find(c => c.id === savedInvoiceForWhatsApp.customerId);
-    if (!customer?.phone) {
-      toast({ title: "لا يوجد رقم هاتف للعميل", variant: "destructive" });
+    // Reload customer from DB to get latest group settings
+    const customer = savedInvoiceForWhatsApp.customerId
+      ? await db.get<Customer>("customers", savedInvoiceForWhatsApp.customerId)
+      : undefined;
+    const customerSendTarget = customer?.invoiceGroupId || customer?.whatsappGroupId || customer?.phone;
+    if (!customerSendTarget && (whatsappSendTarget === "customer" || whatsappSendTarget === "both")) {
+      toast({ title: "العميل ليس لديه رقم هاتف أو جروب واتساب", variant: "destructive" });
       return;
     }
 
@@ -1573,7 +1602,10 @@ const POSv2 = () => {
       // Determine recipients
       const recipients: { phone: string; isGroup?: boolean; label: string }[] = [];
       if (whatsappSendTarget === "customer" || whatsappSendTarget === "both") {
-        if (phone) recipients.push({ phone, label: "العميل" });
+        const customerTarget = customer?.invoiceGroupId || customer?.whatsappGroupId || phone;
+        if (customerTarget) {
+          recipients.push({ phone: customerTarget, isGroup: !!(customer?.invoiceGroupId || customer?.whatsappGroupId), label: "العميل" });
+        }
       }
       if (whatsappSendTarget === "salesRep") {
         if (repPhone) recipients.push({ phone: repPhone, label: "المندوب" });
@@ -1621,7 +1653,7 @@ const POSv2 = () => {
               type: "document",
               url: base64data,
               caption: message,
-              filename: `فاتورة-${savedInvoiceForWhatsApp.invoiceNumber || savedInvoiceForWhatsApp.id}.pdf`
+              filename: `${savedInvoiceForWhatsApp.customerName || customer.name || 'عميل'} - ${savedInvoiceForWhatsApp.invoiceNumber || savedInvoiceForWhatsApp.id}.pdf`
             },
             {
               invoiceId: savedInvoiceForWhatsApp.id,
@@ -1751,19 +1783,46 @@ const POSv2 = () => {
                   <Input
                     ref={searchInputRef}
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setHighlightedProductIndex(-1);
+                    }}
                     onKeyDown={(e) => {
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setHighlightedProductIndex((prev) => {
+                          const max = Math.min(filteredProducts.length, 10) - 1;
+                          const next = prev < max ? prev + 1 : 0;
+                          setTimeout(() => {
+                            document.querySelector(`[data-product-index="${next}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+                          }, 0);
+                          return next;
+                        });
+                      }
+                      if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setHighlightedProductIndex((prev) => {
+                          const max = Math.min(filteredProducts.length, 10) - 1;
+                          const next = prev > 0 ? prev - 1 : max;
+                          setTimeout(() => {
+                            document.querySelector(`[data-product-index="${next}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+                          }, 0);
+                          return next;
+                        });
+                      }
                       if (e.key === "Enter") {
                         e.preventDefault();
-                        if (filteredProducts.length === 1) {
-                          addToCart(filteredProducts[0]);
-                        } else if (filteredProducts.length > 1) {
-                          // Open first product if multiple
+                        if (highlightedProductIndex >= 0 && highlightedProductIndex < filteredProducts.length) {
+                          addToCart(filteredProducts[highlightedProductIndex]);
+                          setSearchQuery("");
+                          setHighlightedProductIndex(-1);
+                        } else if (filteredProducts.length >= 1) {
                           addToCart(filteredProducts[0]);
                         }
                       }
                       if (e.key === "Escape") {
                         setSearchQuery("");
+                        setHighlightedProductIndex(-1);
                       }
                     }}
                     placeholder="ابحث بالاسم أو الكود أو الباركود..."
@@ -1776,12 +1835,14 @@ const POSv2 = () => {
                       {filteredProducts.slice(0, 10).map((product, index) => (
                         <div
                           key={product.id}
+                          data-product-index={index}
                           onClick={() => {
                             addToCart(product);
                             setSearchQuery("");
+                            setHighlightedProductIndex(-1);
                           }}
-                          className={`flex items-center gap-3 p-3 cursor-pointer hover:bg-muted/50 transition ${index !== 0 ? "border-t" : ""
-                            }`}
+                          className={`flex items-center gap-3 p-3 cursor-pointer transition ${index !== 0 ? "border-t" : ""
+                            } ${highlightedProductIndex === index ? "bg-primary/10 ring-1 ring-primary" : "hover:bg-muted/50"}`}
                         >
                           {/* Product Image */}
                           {product.imageUrl ? (
@@ -1879,8 +1940,8 @@ const POSv2 = () => {
                   <table className="w-full text-sm">
                     <thead className="bg-muted/50 sticky top-0">
                       <tr className="border-b">
-                        <th className="text-right p-2">المنتج</th>
                         <th className="text-center p-2 w-28">الكمية</th>
+                        <th className="text-right p-2">المنتج</th>
                         <th className="text-center p-2 w-24">السعر</th>
                         <th className="text-right p-2 w-24">المجموع</th>
                         <th className="w-8"></th>
@@ -1892,29 +1953,6 @@ const POSv2 = () => {
                           key={`${item.id}-${item.productUnitId || "base"}-${index}`}
                           className={`border-b hover:bg-muted/30 ${item.isPriceVerified === false && mode === "return" ? "bg-amber-50" : ""}`}
                         >
-                          <td className="p-2">
-                            <div className="font-bold text-xs flex items-center gap-1">
-                              {item.nameAr}
-                              {item.isPriceVerified === false && mode === "return" && (
-                                <div className="text-[10px] text-amber-600 bg-amber-100 px-1 rounded border border-amber-200" title="لم يتم شراء هذا المنتج من قبل من هذا العميل">
-                                  ! لم يُشترى
-                                </div>
-                              )}
-                            </div>
-                            {item.selectedUnitName && (
-                              <div className="text-[10px] text-muted-foreground flex items-center gap-1">
-                                <Badge variant="secondary" className="text-[9px] h-4 px-1">
-                                  {item.selectedUnitName}
-                                </Badge>
-                                {item.conversionFactor && item.conversionFactor > 1 && (
-                                  <span>({item.conversionFactor} قطعة)</span>
-                                )}
-                              </div>
-                            )}
-                            {!item.selectedUnitName && item.unitName && (
-                              <div className="text-[10px] text-muted-foreground">{item.unitName}</div>
-                            )}
-                          </td>
                           <td className="p-2">
                             <div className="flex items-center justify-center gap-1">
                               <Button
@@ -1941,6 +1979,29 @@ const POSv2 = () => {
                                 <Plus className="h-3 w-3" />
                               </Button>
                             </div>
+                          </td>
+                          <td className="p-2">
+                            <div className="font-bold text-xs flex items-center gap-1">
+                              {item.nameAr}
+                              {item.isPriceVerified === false && mode === "return" && (
+                                <div className="text-[10px] text-amber-600 bg-amber-100 px-1 rounded border border-amber-200" title="لم يتم شراء هذا المنتج من قبل من هذا العميل">
+                                  ! لم يُشترى
+                                </div>
+                              )}
+                            </div>
+                            {item.selectedUnitName && (
+                              <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                <Badge variant="secondary" className="text-[9px] h-4 px-1">
+                                  {item.selectedUnitName}
+                                </Badge>
+                                {item.conversionFactor && item.conversionFactor > 1 && (
+                                  <span>({item.conversionFactor} قطعة)</span>
+                                )}
+                              </div>
+                            )}
+                            {!item.selectedUnitName && item.unitName && (
+                              <div className="text-[10px] text-muted-foreground">{item.unitName}</div>
+                            )}
                           </td>
                           <td className="p-2">
                             <Input
@@ -2000,27 +2061,91 @@ const POSv2 = () => {
                 </div>
               </div>
 
+              {/* Quick Actions - Top */}
+              <div className="p-2 border-b bg-muted/30 space-y-2">
+                <div className="grid grid-cols-3 gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => saveInvoice(false)}
+                  >
+                    <Save className="h-4 w-4 ml-1" />
+                    حفظ
+                  </Button>
+                  <Button size="sm" onClick={() => saveInvoice(true)}>
+                    <Printer className="h-4 w-4 ml-1" />
+                    حفظ وطباعة
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={generateQuotePDF}>
+                    <FileText className="h-4 w-4 ml-1" />
+                    عرض سعر
+                  </Button>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={clearCart} className="flex-1">
+                    <X className="h-4 w-4 ml-1" />
+                    إلغاء
+                  </Button>
+                </div>
+              </div>
+
               {/* Invoice Data Section */}
               <div className="h-full overflow-auto p-3 space-y-3">
                 {/* Customer Selection */}
                 <div className="space-y-2">
                   <Label className="text-xs">العميل * (آجل)</Label>
                   <div className="flex gap-2">
-                    <Select
-                      value={selectedCustomer}
-                      onValueChange={setSelectedCustomer}
-                    >
-                      <SelectTrigger className="h-9">
-                        <SelectValue placeholder="اختر عميل" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {customers.map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            {c.name} - {c.phone}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Popover open={customerSearchOpen} onOpenChange={setCustomerSearchOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={customerSearchOpen}
+                          className="flex-1 justify-between h-9 text-sm"
+                        >
+                          {selectedCustomer && selectedCustomer !== "cash"
+                            ? customers.find((c) => c.id === selectedCustomer)?.name || "اختر عميل"
+                            : "اختر عميل"}
+                          <Search className="h-3.5 w-3.5 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[300px] p-0" align="start">
+                        <Command shouldFilter={false}>
+                          <CommandInput
+                            placeholder="ابحث بالاسم أو الهاتف..."
+                            value={customerSearchQuery}
+                            onValueChange={setCustomerSearchQuery}
+                          />
+                          <CommandList>
+                            <CommandEmpty>لا يوجد عملاء</CommandEmpty>
+                            <CommandGroup>
+                              {filteredCustomersForPOS.map((c) => (
+                                <CommandItem
+                                  key={c.id}
+                                  value={c.id}
+                                  onSelect={() => {
+                                    setSelectedCustomer(c.id);
+                                    setCustomerSearchOpen(false);
+                                    setTimeout(() => searchInputRef.current?.focus(), 100);
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-3.5 w-3.5",
+                                      selectedCustomer === c.id ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  <div className="flex flex-col flex-1">
+                                    <span className="text-sm">{c.name}</span>
+                                    <span className="text-xs text-muted-foreground">{c.phone}</span>
+                                  </div>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                     <Button
                       size="sm"
                       variant="outline"
@@ -2509,31 +2634,7 @@ const POSv2 = () => {
                   </div>
                 )}
 
-                {/* Actions */}
-                <div className="flex gap-2">
-                  <Button variant="outline" onClick={clearCart} className="flex-1">
-                    <X className="h-4 w-4 ml-2" />
-                    إلغاء
-                  </Button>
-                </div>
 
-                <div className="grid grid-cols-3 gap-2">
-                  <Button
-                    variant="secondary"
-                    onClick={() => saveInvoice(false)}
-                  >
-                    <Save className="h-4 w-4 ml-2" />
-                    حفظ
-                  </Button>
-                  <Button onClick={() => saveInvoice(true)}>
-                    <Printer className="h-4 w-4 ml-2" />
-                    حفظ وطباعة
-                  </Button>
-                  <Button variant="outline" onClick={generateQuotePDF}>
-                    <FileText className="h-4 w-4 ml-2" />
-                    عرض سعر
-                  </Button>
-                </div>
               </div>
             </div>
           </ResizablePanel>

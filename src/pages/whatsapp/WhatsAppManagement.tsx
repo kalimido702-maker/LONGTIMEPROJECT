@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { POSHeader } from "@/components/POS/POSHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +26,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { db, WhatsAppAccount } from "@/shared/lib/indexedDB";
 import { whatsappService } from "@/services/whatsapp/whatsappService";
+import { whatsappApi } from "@/services/whatsapp/whatsappApiClient";
 import { getBotSettings, saveBotSettings, type BotSettings } from "@/services/whatsapp/whatsappBotService";
 import {
   MessageSquare,
@@ -137,6 +138,9 @@ const WhatsAppManagement = () => {
     antiSpamDelay: 3000,
   });
 
+  // Track last notified status per account to prevent repeated toasts
+  const lastNotifiedStatusRef = useRef<Record<string, string>>({});
+
   // Bot settings state
   const [botSettings, setBotSettings] = useState<BotSettings>(getBotSettings());
 
@@ -172,41 +176,42 @@ const WhatsAppManagement = () => {
     };
   }, []);
 
-  // Monitor WhatsApp connection states continuously
+  // Monitor WhatsApp connection states continuously via server API
   useEffect(() => {
-    if (!(window as any).electronAPI?.whatsapp) return;
+    if (accounts.length === 0) return;
 
     const statusChecker = setInterval(async () => {
-      // Check status for all accounts
       for (const account of accounts) {
         try {
-          const state = await (window as any).electronAPI.whatsapp.getState(
-            account.id
-          );
+          const state = await whatsappService.getAccountState(account.id);
 
-          // Update database if status changed
           if (state.status && state.status !== account.status) {
             account.status = state.status as any;
+            if (state.status === "connected" && state.phone) {
+              account.phone = state.phone;
+              account.lastConnectedAt = new Date().toISOString();
+            }
             await db.update("whatsappAccounts", account);
-
-            // Reload to update UI
             await loadAccounts();
 
-            // Show notification
-            if (state.status === "connected") {
-              toast({ title: `✅ ${account.name} متصل الآن` });
-            } else if (state.status === "disconnected") {
-              toast({
-                title: `⚠️ ${account.name} غير متصل`,
-                variant: "destructive",
-              });
+            if (lastNotifiedStatusRef.current[account.id] !== state.status) {
+              lastNotifiedStatusRef.current[account.id] = state.status;
+
+              if (state.status === "connected") {
+                toast({ title: `✅ ${account.name} متصل الآن` });
+              } else if (state.status === "disconnected") {
+                toast({
+                  title: `⚠️ ${account.name} غير متصل`,
+                  variant: "destructive",
+                });
+              }
             }
           }
         } catch (error) {
-          console.error(`Error checking status for ${account.id}:`, error);
+          // API call failed, will retry next interval
         }
       }
-    }, 5000); // Check every 5 seconds
+    }, 5000);
 
     return () => clearInterval(statusChecker);
   }, [accounts]);
@@ -215,22 +220,82 @@ const WhatsAppManagement = () => {
     setIsLoading(true);
     try {
       await db.init();
-      const data = await db.getAll<WhatsAppAccount>("whatsappAccounts");
+      
+      // 1. جلب الحسابات من السيرفر أولاً (المصدر الرئيسي)
+      let serverAccounts: WhatsAppAccount[] = [];
+      try {
+        const serverData = await whatsappApi.getAccounts();
+        serverAccounts = serverData.map((sa) => ({
+          id: sa.id,
+          name: sa.name,
+          phone: sa.phone || "",
+          status: (sa.liveStatus?.status || sa.status || "disconnected") as WhatsAppAccount["status"],
+          dailyLimit: sa.daily_limit || 100,
+          dailySent: sa.daily_sent || 0,
+          lastResetDate: sa.last_reset_date || new Date().toISOString(),
+          antiSpamDelay: sa.anti_spam_delay || 3000,
+          isActive: sa.is_active ?? false,
+          createdAt: sa.created_at || new Date().toISOString(),
+          lastConnectedAt: sa.last_connected_at,
+        }));
+      } catch {
+        // السيرفر مش متاح - هنستخدم البيانات المحلية
+        console.warn("[WhatsApp] Server unreachable, using local data only");
+      }
 
-      // Sync with electron state
-      if ((window as any).electronAPI?.whatsapp) {
-        for (const account of data) {
-          const state = await (window as any).electronAPI.whatsapp.getState(
-            account.id
-          );
+      // 2. جلب الحسابات المحلية
+      const localAccounts = await db.getAll<WhatsAppAccount>("whatsappAccounts");
+
+      // 3. دمج: الحسابات من السيرفر لها الأولوية
+      let mergedAccounts: WhatsAppAccount[];
+
+      if (serverAccounts.length > 0) {
+        const localMap = new Map(localAccounts.map((a) => [a.id, a]));
+        mergedAccounts = [];
+
+        for (const serverAcc of serverAccounts) {
+          const localAcc = localMap.get(serverAcc.id);
+          const merged = localAcc
+            ? { ...localAcc, ...serverAcc, isActive: localAcc.isActive }
+            : serverAcc;
+          mergedAccounts.push(merged);
+
+          // حفظ/تحديث في IndexedDB المحلي
+          if (localAcc) {
+            await db.update("whatsappAccounts", merged);
+          } else {
+            await db.add("whatsappAccounts", merged);
+          }
+          localMap.delete(serverAcc.id);
+        }
+
+        // إضافة الحسابات المحلية الغير موجودة على السيرفر (لسا ما اتعمل لها sync)
+        for (const [, localOnly] of localMap) {
+          mergedAccounts.push(localOnly);
+        }
+      } else {
+        // السيرفر مش متاح - استخدام البيانات المحلية فقط
+        mergedAccounts = localAccounts;
+      }
+
+      // 4. تحديث حالة كل حساب من السيرفر
+      for (const account of mergedAccounts) {
+        try {
+          const state = await whatsappService.getAccountState(account.id);
           if (state.status && state.status !== account.status) {
             account.status = state.status as any;
+            if (state.status === "connected" && state.phone) {
+              account.phone = state.phone;
+              account.lastConnectedAt = new Date().toISOString();
+            }
             await db.update("whatsappAccounts", account);
           }
+        } catch {
+          // Server not reachable, use local status
         }
       }
 
-      setAccounts(data);
+      setAccounts(mergedAccounts);
     } catch (error: any) {
       console.error("Error loading accounts:", error);
       if (error.message?.includes("not found")) {
@@ -329,10 +394,10 @@ const WhatsAppManagement = () => {
         });
       }, 1000);
 
-      // Poll for QR code from Electron main process (every 2 seconds to avoid conflicts)
+      // Poll for QR code from server API (every 2 seconds)
       pollQR = window.setInterval(async () => {
-        if ((window as any).electronAPI?.whatsapp) {
-          const state = await (window as any).electronAPI.whatsapp.getState(
+        try {
+          const state = await whatsappService.getAccountState(
             accountId
           );
 
@@ -377,6 +442,9 @@ const WhatsAppManagement = () => {
             setConnectingAccount(null);
             setConnectionError(null);
 
+            // Mark as notified so polling doesn't show duplicate toast
+            lastNotifiedStatusRef.current[accountId] = "connected";
+
             // Update database status with real phone number from WhatsApp
             const account = await db.get<WhatsAppAccount>(
               "whatsappAccounts",
@@ -403,7 +471,7 @@ const WhatsAppManagement = () => {
             setConnectingAccount(null);
 
             const errorMsg =
-              state.message || state.error || "فشل الاتصال - جرب تاني";
+              state.message || (state as any).error || "فشل الاتصال - جرب تاني";
             setConnectionError(errorMsg);
 
             toast({
@@ -412,6 +480,8 @@ const WhatsAppManagement = () => {
               variant: "destructive",
             });
           }
+        } catch (pollError) {
+          // API call failed, will retry next interval
         }
       }, 2000);
 
@@ -462,6 +532,9 @@ const WhatsAppManagement = () => {
       if ((window as any).electronAPI?.whatsapp) {
         await (window as any).electronAPI.whatsapp.disconnect(id);
       }
+
+      // Clean up notification tracking
+      delete lastNotifiedStatusRef.current[id];
 
       // Delete from database
       await db.delete("whatsappAccounts", id);
@@ -919,6 +992,8 @@ const WhatsAppManagement = () => {
                                     ).electronAPI.whatsapp.disconnect(
                                       account.id
                                     );
+                                    // Reset notification tracking so reconnect shows toast
+                                    delete lastNotifiedStatusRef.current[account.id];
                                     toast({ title: "✅ تم قطع الاتصال" });
                                     await loadAccounts();
                                   }

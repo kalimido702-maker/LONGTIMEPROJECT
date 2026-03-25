@@ -18,6 +18,7 @@ export interface JWTPayload {
   branchId: string;
   role: string;
   permissions: string[];
+  pwdv?: string;
   type: "access" | "refresh";
 }
 

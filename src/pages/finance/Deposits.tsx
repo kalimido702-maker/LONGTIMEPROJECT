@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { POSHeader } from "@/components/POS/POSHeader";
 import { db, Deposit, DepositSource } from "@/shared/lib/indexedDB";
 import { Button } from "@/components/ui/button";
@@ -26,9 +26,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Filter } from "lucide-react";
+import { Plus, Filter, ChevronRight, ChevronLeft } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { TABLE_SETTINGS } from "@/lib/constants";
 
 const Deposits = () => {
   const { can, user } = useAuth();
@@ -49,6 +50,10 @@ const Deposits = () => {
     dateFrom: "",
     dateTo: "",
   });
+
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(TABLE_SETTINGS.DEFAULT_PAGE_SIZE);
 
   useEffect(() => {
     loadData();
@@ -95,6 +100,32 @@ const Deposits = () => {
 
     setFilteredDeposits(filtered);
   };
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters]);
+
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredDeposits.length / pageSize);
+  const paginatedDeposits = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredDeposits.slice(start, start + pageSize);
+  }, [filteredDeposits, currentPage, pageSize]);
+
+  const getVisiblePages = useCallback(() => {
+    const maxVisible = TABLE_SETTINGS.MAX_VISIBLE_PAGES;
+    const pages: number[] = [];
+    let start = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+    let end = Math.min(totalPages, start + maxVisible - 1);
+    if (end - start + 1 < maxVisible) {
+      start = Math.max(1, end - maxVisible + 1);
+    }
+    for (let i = start; i <= end; i++) {
+      pages.push(i);
+    }
+    return pages;
+  }, [currentPage, totalPages]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -287,7 +318,7 @@ const Deposits = () => {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredDeposits.map((deposit) => (
+                paginatedDeposits.map((deposit) => (
                   <TableRow key={deposit.id}>
                     <TableCell>
                       {new Date(deposit.createdAt).toLocaleString("ar-EG", {
@@ -311,6 +342,108 @@ const Deposits = () => {
             </TableBody>
           </Table>
         </div>
+
+        {/* Pagination Controls */}
+        {filteredDeposits.length > 0 && (
+          <div className="flex items-center justify-between mt-4 flex-wrap gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">عرض</span>
+              <Select
+                value={pageSize.toString()}
+                onValueChange={(v) => {
+                  setPageSize(Number(v));
+                  setCurrentPage(1);
+                }}
+              >
+                <SelectTrigger className="w-[80px] h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TABLE_SETTINGS.PAGE_SIZE_OPTIONS.map((size) => (
+                    <SelectItem key={size} value={size.toString()}>
+                      {size}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="text-sm text-muted-foreground">
+                من أصل {filteredDeposits.length} إيداع
+              </span>
+            </div>
+
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                  السابق
+                </Button>
+
+                {getVisiblePages()[0] > 1 && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(1)}
+                      className="w-8 h-8 p-0"
+                    >
+                      1
+                    </Button>
+                    {getVisiblePages()[0] > 2 && (
+                      <span className="px-1 text-muted-foreground">...</span>
+                    )}
+                  </>
+                )}
+
+                {getVisiblePages().map((page) => (
+                  <Button
+                    key={page}
+                    variant={page === currentPage ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setCurrentPage(page)}
+                    className="w-8 h-8 p-0"
+                  >
+                    {page}
+                  </Button>
+                ))}
+
+                {getVisiblePages()[getVisiblePages().length - 1] < totalPages && (
+                  <>
+                    {getVisiblePages()[getVisiblePages().length - 1] < totalPages - 1 && (
+                      <span className="px-1 text-muted-foreground">...</span>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(totalPages)}
+                      className="w-8 h-8 p-0"
+                    >
+                      {totalPages}
+                    </Button>
+                  </>
+                )}
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  التالي
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+
+            <div className="text-sm text-muted-foreground">
+              صفحة {currentPage} من {totalPages}
+            </div>
+          </div>
+        )}
 
         {/* Add Dialog */}
         <Dialog open={showDialog} onOpenChange={handleCloseDialog}>

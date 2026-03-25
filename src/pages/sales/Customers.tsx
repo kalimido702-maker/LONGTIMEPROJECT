@@ -33,16 +33,11 @@ import {
   Download,
   Upload,
   FileSpreadsheet,
+  MessageCircle,
+  Loader2,
+  RefreshCw,
 } from "lucide-react";
-import { db, Customer, Invoice, PaymentMethod } from "@/shared/lib/indexedDB";
-
-interface SalesRep {
-  id: string;
-  name: string;
-  phone: string;
-  supervisorId: string;
-  isActive: boolean;
-}
+import { db, Customer, Invoice, PaymentMethod, Supervisor, SalesRep, CustomerPhone, CustomerIdentification } from "@/shared/lib/indexedDB";
 import { toast } from "sonner";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -54,6 +49,10 @@ import {
   importCustomersFromExcel,
   ImportResult,
 } from "@/lib/customerImport";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
+import { Switch } from "@/components/ui/switch";
+import { whatsappService } from "@/services/whatsapp/whatsappService";
 
 const Customers = () => {
   const { can, user } = useAuth();
@@ -71,12 +70,15 @@ const Customers = () => {
   const [salesReps, setSalesReps] = useState<SalesRep[]>([]);
   const [filterBySalesRep, setFilterBySalesRep] = useState<string>("all");
   const [filterBySupervisor, setFilterBySupervisor] = useState<string>("all");
-  const [supervisors, setSupervisors] = useState<SalesRep[]>([]);
+  const [hideZeroBalance, setHideZeroBalance] = useState(true);
+  const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [isImportResultOpen, setIsImportResultOpen] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const { getBalance, refresh: refreshBalances } = useCustomerBalances([customers]);
+  const [whatsappGroups, setWhatsappGroups] = useState<{ id: string; name: string }[]>([]);
+  const [isFetchingGroups, setIsFetchingGroups] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     phone: "",
@@ -88,6 +90,15 @@ const Customers = () => {
     previousStatement: 0,
     notes: "",
     salesRepId: "",
+    whatsappGroupId: "",
+    invoiceGroupId: "",
+    collectionGroupId: "",
+    // WhatsApp Bot v2 fields
+    customerType: "registered" as "registered" | "casual",
+    additionalPhones: [] as string[],
+    idNumbers: [] as { number: string; label: string }[],
+    latitude: null as number | null,
+    longitude: null as number | null,
   });
 
   useEffect(() => {
@@ -109,8 +120,8 @@ const Customers = () => {
   const loadSalesReps = async () => {
     const reps = await db.getAll<SalesRep>("salesReps");
     setSalesReps(reps.filter((r) => r.isActive));
-    const sups = reps.filter((r: any) => r.role === "supervisor" || r.isSupervisor);
-    setSupervisors(sups);
+    const sups = await db.getAll<Supervisor>("supervisors");
+    setSupervisors(sups.filter((s) => s.isActive));
   };
 
   const getSalesRepName = (id?: string) => {
@@ -138,9 +149,16 @@ const Customers = () => {
         matchesSupervisor = !!rep && rep.supervisorId === filterBySupervisor;
       }
 
-      return matchesSearch && matchesSalesRep && matchesSupervisor;
+      // Filter by zero balance
+      const matchesBalance = !hideZeroBalance || getBalance(customer.id, Number(customer.currentBalance || 0)) !== 0;
+
+      return matchesSearch && matchesSalesRep && matchesSupervisor && matchesBalance;
     }
   );
+
+  const pagination = usePagination(filteredCustomers, {
+    resetDeps: [searchQuery, filterBySalesRep, filterBySupervisor, hideZeroBalance],
+  });
 
   const { getSetting } = useSettingsContext();
 
@@ -149,29 +167,39 @@ const Customers = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.name || !formData.phone) {
-      toast.error("يرجى إدخال الاسم ورقم الهاتف");
+    if (!formData.name) {
+      toast.error("يرجى إدخال اسم العميل");
       return;
     }
 
     try {
+      let customerId: string;
+
       if (editingCustomer) {
         const updatedCustomer: Customer = {
           ...editingCustomer,
           ...formData,
+          whatsappGroupId: formData.whatsappGroupId?.trim() || undefined,
+          invoiceGroupId: formData.invoiceGroupId?.trim() || undefined,
+          collectionGroupId: formData.collectionGroupId?.trim() || undefined,
         };
         await db.update("customers", updatedCustomer);
+        customerId = editingCustomer.id;
         toast.success("تم تحديث بيانات العميل");
       } else {
         const newCustomer: Customer = {
           id: Date.now().toString(),
           ...formData,
+          whatsappGroupId: formData.whatsappGroupId?.trim() || undefined,
+          invoiceGroupId: formData.invoiceGroupId?.trim() || undefined,
+          collectionGroupId: formData.collectionGroupId?.trim() || undefined,
           currentBalance: 0,
           bonusBalance: 0,
           loyaltyPoints: 0,
           createdAt: new Date().toISOString(),
         };
         await db.add("customers", newCustomer);
+        customerId = newCustomer.id;
 
         // إنشاء فاتورة آجلة للرصيد الافتتاحي إذا كان المبلغ أكبر من صفر
         if (formData.initialCreditBalance > 0) {
@@ -229,10 +257,57 @@ const Customers = () => {
         }
       }
 
+      // Save additional phones to customerPhones store
+      if (formData.additionalPhones.length > 0) {
+        // Delete existing additional phones for this customer (keep main phone in customer record)
+        const existingPhones = await db.getByIndex<CustomerPhone>("customerPhones", "customerId", customerId);
+        for (const phone of existingPhones) {
+          await db.delete("customerPhones", phone.id);
+        }
+        // Add new additional phones
+        for (const phone of formData.additionalPhones) {
+          if (phone.trim()) {
+            const customerPhone: CustomerPhone = {
+              id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+              customerId,
+              phone: phone.trim(),
+              label: "additional",
+              isActive: true,
+              createdAt: new Date().toISOString(),
+            };
+            await db.add("customerPhones", customerPhone);
+          }
+        }
+      }
+
+      // Save ID numbers to customerIdentifications store
+      if (formData.idNumbers.length > 0) {
+        // Delete existing identifications for this customer
+        const existingIds = await db.getByIndex<CustomerIdentification>("customerIdentifications", "customerId", customerId);
+        for (const id of existingIds) {
+          await db.delete("customerIdentifications", id.id);
+        }
+        // Add new ID numbers
+        for (const idObj of formData.idNumbers) {
+          if (idObj.number.trim()) {
+            const customerIdRecord: CustomerIdentification = {
+              id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+              customerId,
+              idNumber: idObj.number.trim(),
+              label: idObj.label || "primary",
+              isActive: true,
+              createdAt: new Date().toISOString(),
+            };
+            await db.add("customerIdentifications", customerIdRecord);
+          }
+        }
+      }
+
       setIsDialogOpen(false);
       resetForm();
       loadCustomers();
     } catch (error) {
+      console.error("Error saving customer:", error);
       toast.error("حدث خطأ أثناء حفظ البيانات");
     }
   };
@@ -250,8 +325,35 @@ const Customers = () => {
       previousStatement: customer.previousStatement || 0,
       notes: customer.notes || "",
       salesRepId: customer.salesRepId || "",
+      whatsappGroupId: customer.whatsappGroupId || "",
+      invoiceGroupId: customer.invoiceGroupId || "",
+      collectionGroupId: customer.collectionGroupId || "",
+      // WhatsApp Bot v2 fields
+      customerType: customer.customerType || "registered",
+      additionalPhones: [],
+      idNumbers: [],
+      latitude: customer.latitude || null,
+      longitude: customer.longitude || null,
     });
+    // Load additional phones and ID numbers from IndexedDB
+    loadCustomerAdditionalData(customer.id);
     setIsDialogOpen(true);
+  };
+
+  const loadCustomerAdditionalData = async (customerId: string) => {
+    try {
+      // Load additional phones
+      const phones = await db.getByIndex<CustomerPhone>("customerPhones", "customerId", customerId);
+      const additionalPhonesList = phones.filter(p => p.isActive).map(p => p.phone);
+      setFormData(prev => ({ ...prev, additionalPhones: additionalPhonesList }));
+
+      // Load ID numbers
+      const ids = await db.getByIndex<CustomerIdentification>("customerIdentifications", "customerId", customerId);
+      const idNumbersList = ids.filter(id => id.isActive).map(id => ({ number: id.idNumber, label: id.label }));
+      setFormData(prev => ({ ...prev, idNumbers: idNumbersList }));
+    } catch (error) {
+      console.error("Error loading customer additional data:", error);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -278,8 +380,42 @@ const Customers = () => {
       previousStatement: 0,
       notes: "",
       salesRepId: "",
+      whatsappGroupId: "",
+      invoiceGroupId: "",
+      collectionGroupId: "",
+      // WhatsApp Bot v2 fields
+      customerType: "registered",
+      additionalPhones: [],
+      idNumbers: [],
+      latitude: null,
+      longitude: null,
     });
     setEditingCustomer(null);
+    setWhatsappGroups([]);
+  };
+
+  const handleFetchWhatsAppGroups = async () => {
+    setIsFetchingGroups(true);
+    try {
+      const accounts = await db.getAll<any>("whatsappAccounts");
+      const activeAccount = accounts.find((a: any) => a.isActive && a.status === "connected");
+      if (!activeAccount) {
+        toast.error("يرجى التأكد من وجود حساب واتساب متصل");
+        return;
+      }
+      const groups = await whatsappService.getGroups(activeAccount.id);
+      if (groups.length === 0) {
+        toast.info("لم يتم العثور على مجموعات");
+      } else {
+        setWhatsappGroups(groups);
+        toast.success(`تم جلب ${groups.length} مجموعة`);
+      }
+    } catch (error) {
+      console.error("Error fetching groups:", error);
+      toast.error("فشل جلب المجموعات");
+    } finally {
+      setIsFetchingGroups(false);
+    }
   };
 
   const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -470,9 +606,11 @@ const Customers = () => {
                 ...c,
                 currentBalance: getBalance(c.id, Number(c.currentBalance) || 0),
                 creditDebit: getBalance(c.id, Number(c.currentBalance) || 0) >= 0 ? "دائنة" : "مدينة",
+                salesRepName: getSalesRepName(c.salesRepId),
               }))}
               columns={[
                 { header: "اسم الحساب", key: "name", width: 25 },
+                { header: "المندوب", key: "salesRepName", width: 20 },
                 { header: "الرصيد الحالي", key: "currentBalance", width: 15 },
                 { header: "دائن - مدين", key: "creditDebit", width: 12 },
                 { header: "عنوان", key: "address", width: 30 },
@@ -482,40 +620,7 @@ const Customers = () => {
               sheetName="العملاء"
             />
 
-            {/* أزرار استيراد العملاء */}
-            {can("customers", "create") && (
-              <>
-                <Button
-                  variant="outline"
-                  onClick={downloadCustomerImportTemplate}
-                >
-                  <Download className="ml-2 h-4 w-4" />
-                  تحميل نموذج الاستيراد
-                </Button>
-
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept=".xlsx,.xls"
-                  onChange={handleFileImport}
-                  className="hidden"
-                />
-                <Button
-                  variant="outline"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isImporting}
-                >
-                  {isImporting ? (
-                    <>جاري الاستيراد...</>
-                  ) : (
-                    <>
-                      <Upload className="ml-2 h-4 w-4" />
-                      استيراد عملاء
-                    </>
-                  )}
-                </Button>
-              </>
-            )}
+            {/* أزرار استيراد العملاء - تم إخفاؤها بناءً على طلب العميل */}
 
             {/* Dialog نتيجة الاستيراد */}
             <Dialog open={isImportResultOpen} onOpenChange={setIsImportResultOpen}>
@@ -591,16 +696,225 @@ const Customers = () => {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="phone">رقم الهاتف *</Label>
+                      <Label htmlFor="phone">رقم الهاتف</Label>
                       <Input
                         id="phone"
                         value={formData.phone}
                         onChange={(e) =>
                           setFormData({ ...formData, phone: e.target.value })
                         }
-                        required
+                        placeholder="رقم الموبايل (اختياري)"
                       />
                     </div>
+                  </div>
+
+                  {/* WhatsApp Bot v2: Customer Type Selector */}
+                  <div className="space-y-2">
+                    <Label htmlFor="customerType">نوع العميل</Label>
+                    <Select
+                      value={formData.customerType}
+                      onValueChange={(v) => setFormData({ ...formData, customerType: v as "registered" | "casual" })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="registered">مسجل (Long-Time) - له رقم تعريفي</SelectItem>
+                        <SelectItem value="casual">عادي - بدون رقم تعريفي</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* WhatsApp Bot v2: Additional Phone Numbers */}
+                  <div className="space-y-2">
+                    <Label>أرقام تليفونات إضافية</Label>
+                    {formData.additionalPhones.map((phone, idx) => (
+                      <div key={idx} className="flex gap-2">
+                        <Input
+                          value={phone}
+                          onChange={(e) => {
+                            const newPhones = [...formData.additionalPhones];
+                            newPhones[idx] = e.target.value;
+                            setFormData({ ...formData, additionalPhones: newPhones });
+                          }}
+                          placeholder={`تليفون ${idx + 2}`}
+                        />
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          onClick={() => {
+                            const newPhones = formData.additionalPhones.filter((_, i) => i !== idx);
+                            setFormData({ ...formData, additionalPhones: newPhones });
+                          }}
+                        >
+                          حذف
+                        </Button>
+                      </div>
+                    ))}
+                    {formData.additionalPhones.length < 2 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setFormData({ ...formData, additionalPhones: [...formData.additionalPhones, ""] })}
+                      >
+                        + إضافة رقم تليفون آخر
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* WhatsApp Bot v2: Customer ID Numbers (for registered customers) */}
+                  {formData.customerType === "registered" && (
+                    <div className="space-y-2">
+                      <Label>أرقام التعريف (لعملاء Long-Time)</Label>
+                      {formData.idNumbers.map((idObj, idx) => (
+                        <div key={idx} className="flex gap-2">
+                          <Input
+                            value={idObj.number}
+                            onChange={(e) => {
+                              const newIds = [...formData.idNumbers];
+                              newIds[idx].number = e.target.value;
+                              setFormData({ ...formData, idNumbers: newIds });
+                            }}
+                            placeholder="رقم التعريف"
+                          />
+                          <Select
+                            value={idObj.label}
+                            onValueChange={(v) => {
+                              const newIds = [...formData.idNumbers];
+                              newIds[idx].label = v;
+                              setFormData({ ...formData, idNumbers: newIds });
+                            }}
+                          >
+                            <SelectTrigger className="w-32">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="primary">أساسي</SelectItem>
+                              <SelectItem value="secondary">ثانوي</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            onClick={() => {
+                              const newIds = formData.idNumbers.filter((_, i) => i !== idx);
+                              setFormData({ ...formData, idNumbers: newIds });
+                            }}
+                          >
+                            حذف
+                          </Button>
+                        </div>
+                      ))}
+                      {formData.idNumbers.length < 2 && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setFormData({ ...formData, idNumbers: [...formData.idNumbers, { number: "", label: "primary" }] })}
+                        >
+                          + إضافة رقم تعريف آخر
+                        </Button>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="flex items-center gap-2">
+                        <MessageCircle className="h-4 w-4 text-green-600" />
+                        جروبات واتساب (اختياري)
+                      </Label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleFetchWhatsAppGroups}
+                        disabled={isFetchingGroups}
+                        className="gap-1 shrink-0"
+                      >
+                        {isFetchingGroups ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                        جلب المجموعات
+                      </Button>
+                    </div>
+
+                    {/* جروب الفواتير */}
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">📄 جروب الفواتير</Label>
+                      <div className="flex-1">
+                        {whatsappGroups.length > 0 ? (
+                          <Select
+                            value={formData.invoiceGroupId || "none"}
+                            onValueChange={(value) =>
+                              setFormData({ ...formData, invoiceGroupId: value === "none" ? "" : value })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="اختر جروب للفواتير" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">بدون جروب</SelectItem>
+                              {whatsappGroups.map((group) => (
+                                <SelectItem key={group.id} value={group.id}>
+                                  {group.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Input
+                            value={formData.invoiceGroupId}
+                            onChange={(e) =>
+                              setFormData({ ...formData, invoiceGroupId: e.target.value })
+                            }
+                            placeholder="Group ID للفواتير"
+                            className="font-mono text-sm"
+                          />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* جروب القبض وكشف الحساب */}
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">💰 جروب القبض وكشف الحساب</Label>
+                      <div className="flex-1">
+                        {whatsappGroups.length > 0 ? (
+                          <Select
+                            value={formData.collectionGroupId || "none"}
+                            onValueChange={(value) =>
+                              setFormData({ ...formData, collectionGroupId: value === "none" ? "" : value })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="اختر جروب للقبض وكشف الحساب" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">بدون جروب</SelectItem>
+                              {whatsappGroups.map((group) => (
+                                <SelectItem key={group.id} value={group.id}>
+                                  {group.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Input
+                            value={formData.collectionGroupId}
+                            onChange={(e) =>
+                              setFormData({ ...formData, collectionGroupId: e.target.value })
+                            }
+                            placeholder="Group ID للقبض وكشف الحساب"
+                            className="font-mono text-sm"
+                          />
+                        )}
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      اضغط "جلب المجموعات" لتحميل الجروبات من الواتساب — حدد جروب مختلف للفواتير وللقبض
+                    </p>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
@@ -694,7 +1008,6 @@ const Customers = () => {
                         }
                         placeholder="0.00"
                         step="0.01"
-                        min="0"
                       />
                       <p className="text-xs text-muted-foreground">
                         رصيد سابق من نظام قديم
@@ -732,6 +1045,56 @@ const Customers = () => {
                       }
                     />
                   </div>
+
+                  {/* WhatsApp Bot v2: Location Fields */}
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                      <MapPin className="h-4 w-4" />
+                      الموقع على الخريطة
+                    </Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input
+                        type="number"
+                        step="any"
+                        value={formData.latitude || ""}
+                        onChange={(e) => setFormData({ ...formData, latitude: parseFloat(e.target.value) || null })}
+                        placeholder="خط العرض (Latitude)"
+                      />
+                      <Input
+                        type="number"
+                        step="any"
+                        value={formData.longitude || ""}
+                        onChange={(e) => setFormData({ ...formData, longitude: parseFloat(e.target.value) || null })}
+                        placeholder="خط الطول (Longitude)"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        if (navigator.geolocation) {
+                          navigator.geolocation.getCurrentPosition(
+                            (position) => {
+                              setFormData({
+                                ...formData,
+                                latitude: position.coords.latitude,
+                                longitude: position.coords.longitude,
+                              });
+                              toast.success("تم تحديد الموقع بنجاح");
+                            },
+                            () => {
+                              toast.error("فشل في تحديد الموقع");
+                            }
+                          );
+                        } else {
+                          toast.error("المتصفح لا يدعم تحديد الموقع");
+                        }
+                      }}
+                    >
+                      📍 تحديد موقعي الحالي
+                    </Button>
+                  </div>
+
                   <div className="space-y-2">
                     <Label htmlFor="notes">ملاحظات</Label>
                     <Textarea
@@ -799,11 +1162,22 @@ const Customers = () => {
               ))}
             </SelectContent>
           </Select>
+          <div className="flex items-center gap-2 h-12 px-3 border rounded-md bg-background">
+            <Switch
+              dir="ltr"
+              id="hideZeroBalance"
+              checked={hideZeroBalance}
+              onCheckedChange={setHideZeroBalance}
+            />
+            <Label htmlFor="hideZeroBalance" className="text-sm whitespace-nowrap cursor-pointer">
+              إخفاء الأرصدة الصفرية
+            </Label>
+          </div>
         </div>
 
         {/* Customers Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredCustomers.map((customer) => (
+          {pagination.paginatedItems.map((customer) => (
             <Card
               key={customer.id}
               className="hover:shadow-lg transition-shadow cursor-pointer"
@@ -914,6 +1288,7 @@ const Customers = () => {
             </p>
           </div>
         )}
+        <DataPagination {...pagination} entityName="عميل" />
       </main>
 
       {/* Dialog للدفع من رصيد العميل */}

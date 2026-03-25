@@ -43,6 +43,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 export default function PriceTypes() {
   const [priceTypes, setPriceTypes] = useState<PriceType[]>([]);
@@ -321,6 +323,8 @@ export default function PriceTypes() {
     }
   };
 
+  const pagination = usePagination(priceTypes);
+
   return (
     <div className="min-h-screen bg-background" dir="rtl">
       <POSHeader />
@@ -372,7 +376,7 @@ export default function PriceTypes() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {priceTypes.map((priceType, index) => (
+                  {pagination.paginatedItems.map((priceType, index) => (
                     <TableRow key={priceType.id}>
                       <TableCell>
                         <div className="flex items-center gap-1">
@@ -452,6 +456,7 @@ export default function PriceTypes() {
                 </TableBody>
               </Table>
             )}
+            <DataPagination {...pagination} entityName="نوع تسعير" />
           </CardContent>
         </Card>
 

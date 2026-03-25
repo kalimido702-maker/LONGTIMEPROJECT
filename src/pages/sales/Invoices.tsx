@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { POSHeader } from "@/components/POS/POSHeader";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -45,14 +45,18 @@ import {
     Trash2,
     Edit, // Import Edit icon
     MessageSquare, // Import MessageSquare icon for WhatsApp
+    ChevronRight,
+    ChevronLeft,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom"; // Import useNavigate
-import { db, Invoice, Customer, PaymentMethod, SalesReturn, SalesReturnItem, Product, Shift, SalesRep } from "@/shared/lib/indexedDB";
+import { db, Invoice, Customer, PaymentMethod, SalesReturn, SalesReturnItem, Product, Shift, SalesRep, ProductCategory, Supervisor } from "@/shared/lib/indexedDB";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { printInvoiceReceipt, type InvoiceReceiptData, type InvoiceItem } from "@/lib/printing";
 import { ExcelExportButton } from "@/components/common/ExcelExportButton";
+import { TABLE_SETTINGS } from "@/lib/constants";
+import { getLocalDateString } from "@/lib/utils";
 
 export default function Invoices() {
     const { getSetting } = useSettingsContext();
@@ -68,8 +72,8 @@ export default function Invoices() {
 
     // Filters
     const [searchQuery, setSearchQuery] = useState("");
-    const [dateFrom, setDateFrom] = useState("");
-    const [dateTo, setDateTo] = useState("");
+    const [dateFrom, setDateFrom] = useState(getLocalDateString());
+    const [dateTo, setDateTo] = useState(getLocalDateString());
     const [paymentTypeFilter, setPaymentTypeFilter] = useState<string>("all");
     const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>("all");
 
@@ -82,6 +86,18 @@ export default function Invoices() {
 
     // Delivery Status Filter
     const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<string>("all");
+
+    // Supervisor & Category Filters
+    const [supervisorFilter, setSupervisorFilter] = useState<string>("all");
+    const [categoryFilter, setCategoryFilter] = useState<string>("all");
+    const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
+    const [salesReps, setSalesReps] = useState<SalesRep[]>([]);
+    const [categories, setCategories] = useState<ProductCategory[]>([]);
+    const [products, setProducts] = useState<Product[]>([]);
+
+    // Pagination
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState<number>(TABLE_SETTINGS.DEFAULT_PAGE_SIZE);
 
     // Permissions
     const canEditInvoice = can("invoices", "edit");
@@ -106,6 +122,18 @@ export default function Invoices() {
 
         const allMethods = await db.getAll<PaymentMethod>("paymentMethods");
         setPaymentMethods(allMethods);
+
+        const allSupervisors = await db.getAll<Supervisor>("supervisors");
+        setSupervisors(allSupervisors);
+
+        const allSalesReps = await db.getAll<SalesRep>("salesReps");
+        setSalesReps(allSalesReps);
+
+        const allCategories = await db.getAll<ProductCategory>("productCategories");
+        setCategories(allCategories);
+
+        const allProducts = await db.getAll<Product>("products");
+        setProducts(allProducts);
     };
 
     const getCustomerName = (customerId?: string) => {
@@ -170,13 +198,46 @@ export default function Invoices() {
                 deliveryStatusFilter === "all" || invoice.deliveryStatus === deliveryStatusFilter ||
                 (deliveryStatusFilter === "not_delivered" && !invoice.deliveryStatus);
 
+            // Supervisor filter — match invoices whose salesRepId belongs to this supervisor
+            let matchesSupervisor = true;
+            if (supervisorFilter !== "all") {
+                const repIdsForSupervisor = salesReps
+                    .filter(r => r.supervisorId === supervisorFilter)
+                    .map(r => r.id);
+                const invoiceRepId = invoice.salesRepId || "";
+                // Also check via customer's salesRepId
+                const customerRepId = invoice.customerId
+                    ? customers.find(c => c.id === invoice.customerId)?.salesRepId || ""
+                    : "";
+                matchesSupervisor = repIdsForSupervisor.includes(invoiceRepId)
+                    || repIdsForSupervisor.includes(customerRepId);
+            }
+
+            // Category filter — match invoices containing at least one product in the category
+            let matchesCategory = true;
+            if (categoryFilter !== "all") {
+                const productIdsInCategory = new Set(
+                    products
+                        .filter(p => {
+                            const catId = String(p.categoryId || (p as any).category_id || "");
+                            return catId === categoryFilter || p.category === categoryFilter;
+                        })
+                        .map(p => p.id)
+                );
+                matchesCategory = invoice.items?.some(
+                    item => productIdsInCategory.has(item.productId)
+                ) || false;
+            }
+
             return (
                 matchesSearch &&
                 matchesDateFrom &&
                 matchesDateTo &&
                 matchesPaymentType &&
                 matchesPaymentStatus &&
-                matchesDeliveryStatus
+                matchesDeliveryStatus &&
+                matchesSupervisor &&
+                matchesCategory
             );
 
         }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -188,7 +249,39 @@ export default function Invoices() {
         paymentTypeFilter,
         paymentStatusFilter,
         deliveryStatusFilter,
+        supervisorFilter,
+        categoryFilter,
+        salesReps,
+        customers,
+        products,
     ]);
+
+    // Reset page when filters change
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchQuery, dateFrom, dateTo, paymentTypeFilter, paymentStatusFilter, deliveryStatusFilter, supervisorFilter, categoryFilter]);
+
+    // Pagination calculations
+    const totalPages = Math.ceil(filteredInvoices.length / pageSize);
+    const paginatedInvoices = useMemo(() => {
+        const start = (currentPage - 1) * pageSize;
+        return filteredInvoices.slice(start, start + pageSize);
+    }, [filteredInvoices, currentPage, pageSize]);
+
+    // Generate visible page numbers
+    const getVisiblePages = useCallback(() => {
+        const maxVisible = TABLE_SETTINGS.MAX_VISIBLE_PAGES;
+        const pages: number[] = [];
+        let start = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+        let end = Math.min(totalPages, start + maxVisible - 1);
+        if (end - start + 1 < maxVisible) {
+            start = Math.max(1, end - maxVisible + 1);
+        }
+        for (let i = start; i <= end; i++) {
+            pages.push(i);
+        }
+        return pages;
+    }, [currentPage, totalPages]);
 
     const openInvoiceDetails = (invoice: Invoice) => {
         setSelectedInvoice(invoice);
@@ -302,7 +395,7 @@ export default function Invoices() {
                 const products = await db.getAll<Product>("products");
 
                 for (const item of invoice.items) {
-                    const product = products.find(p => p.id === item.productId || p.id === item.id); // try both IDs
+                    const product = products.find(p => p.id === item.productId || p.id === (item as any).id); // try both IDs
                     if (product) {
                         // Calculate quantity to restore (checking for units/packaging)
                         // If complex units, logic might be needed. Assuming standard quantity here.
@@ -356,9 +449,11 @@ export default function Invoices() {
 
     // إرسال الفاتورة عبر واتساب مع PDF
     const handleSendInvoiceWhatsApp = async (invoice: Invoice) => {
-        const customer = customers.find(c => c.id === invoice.customerId);
-        if (!customer?.phone) {
-            toast.error("العميل ليس لديه رقم هاتف");
+        // Reload customer from DB to get latest group settings
+        const customer = await db.get<Customer>("customers", invoice.customerId || "");
+        const sendTarget = customer?.invoiceGroupId || customer?.whatsappGroupId || customer?.phone;
+        if (!sendTarget) {
+            toast.error("العميل ليس لديه رقم هاتف أو جروب واتساب");
             return;
         }
 
@@ -398,7 +493,7 @@ export default function Invoices() {
                 `*الإجمالي:* ${formatCurrency(invoice.total)}\n\n` +
                 `شركة لونج تايم للصناعات الكهربائية`;
 
-            const phone = customer.phone.replace(/[^0-9]/g, "");
+            const targetNumber = customer!.invoiceGroupId || customer!.whatsappGroupId || customer!.phone.replace(/[^0-9]/g, "");
 
             const accounts = await db.getAll("whatsappAccounts");
             const activeAccount = accounts.find((a: any) => a.isActive && a.status === "connected");
@@ -408,13 +503,13 @@ export default function Invoices() {
 
                 const msgId = await whatsappService.sendMessage(
                     (activeAccount as any).id,
-                    phone,
+                    targetNumber,
                     message,
                     {
                         type: "document",
                         url: base64data,
                         caption: message,
-                        filename: `فاتورة-${invoice.invoiceNumber || invoice.id}.pdf`
+                        filename: `${customer?.name || invoice.customerName || 'عميل'} - ${invoice.invoiceNumber || invoice.id}.pdf`
                     },
                     {
                         invoiceId: invoice.id,
@@ -434,10 +529,15 @@ export default function Invoices() {
                     toast.success("✅ تم إرسال الفاتورة!");
                 }
             } else {
-                // Fallback to wa.me
-                const encodedMessage = encodeURIComponent(message);
-                window.open(`https://wa.me/${phone}?text=${encodedMessage}`, "_blank");
-                toast.info("لا يوجد حساب واتساب متصل، تم فتح واتساب ويب");
+                // Fallback to wa.me (only works with phone numbers, not groups)
+                const phone = (customer!.phone || "").replace(/[^0-9]/g, "");
+                if (phone) {
+                    const encodedMessage = encodeURIComponent(message);
+                    window.open(`https://wa.me/${phone}?text=${encodedMessage}`, "_blank");
+                    toast.info("لا يوجد حساب واتساب متصل، تم فتح واتساب ويب");
+                } else {
+                    toast.error("لا يوجد حساب واتساب متصل ولا يوجد رقم هاتف للعميل");
+                }
             }
         } catch (error) {
             console.error("WhatsApp send error:", error);
@@ -803,10 +903,42 @@ export default function Invoices() {
                                 </SelectContent>
                             </Select>
                         </div>
+
+                        {/* Supervisor Filter */}
+                        <div className="space-y-1">
+                            <Label className="text-xs">المشرف</Label>
+                            <Select value={supervisorFilter} onValueChange={setSupervisorFilter}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="المشرف" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">جميع المشرفين</SelectItem>
+                                    {supervisors.map((sup) => (
+                                        <SelectItem key={sup.id} value={sup.id}>{sup.name}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {/* Category Filter */}
+                        <div className="space-y-1">
+                            <Label className="text-xs">القسم</Label>
+                            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="القسم" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">جميع الأقسام</SelectItem>
+                                    {categories.map((cat) => (
+                                        <SelectItem key={cat.id} value={cat.id}>{cat.nameAr || cat.name}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
                     </div>
 
                     {/* Clear filters button */}
-                    {(searchQuery || dateFrom || dateTo || paymentTypeFilter !== "all" || paymentStatusFilter !== "all" || deliveryStatusFilter !== "all") && (
+                    {(searchQuery || dateFrom || dateTo || paymentTypeFilter !== "all" || paymentStatusFilter !== "all" || deliveryStatusFilter !== "all" || supervisorFilter !== "all" || categoryFilter !== "all") && (
                         <Button
                             variant="ghost"
                             size="sm"
@@ -818,6 +950,8 @@ export default function Invoices() {
                                 setPaymentTypeFilter("all");
                                 setPaymentStatusFilter("all");
                                 setDeliveryStatusFilter("all");
+                                setSupervisorFilter("all");
+                                setCategoryFilter("all");
                             }}
                         >
                             إزالة الفلاتر
@@ -843,7 +977,7 @@ export default function Invoices() {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {filteredInvoices.map((invoice) => (
+                            {paginatedInvoices.map((invoice) => (
                                 <TableRow
                                     key={invoice.id}
                                     className="hover:bg-muted/50"
@@ -968,16 +1102,171 @@ export default function Invoices() {
                         </TableBody>
                     </Table>
                 </Card>
+
+                {/* Pagination Controls */}
+                {filteredInvoices.length > 0 && (
+                    <div className="flex items-center justify-between mt-4 flex-wrap gap-3">
+                        {/* Page size selector */}
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm text-muted-foreground">عرض</span>
+                            <Select
+                                value={pageSize.toString()}
+                                onValueChange={(v) => {
+                                    setPageSize(Number(v));
+                                    setCurrentPage(1);
+                                }}
+                            >
+                                <SelectTrigger className="w-[80px] h-8">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {TABLE_SETTINGS.PAGE_SIZE_OPTIONS.map((size) => (
+                                        <SelectItem key={size} value={size.toString()}>
+                                            {size}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <span className="text-sm text-muted-foreground">
+                                من أصل {filteredInvoices.length} فاتورة
+                            </span>
+                        </div>
+
+                        {/* Page navigation */}
+                        {totalPages > 1 && (
+                            <div className="flex items-center gap-1">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                                    disabled={currentPage === 1}
+                                >
+                                    <ChevronRight className="h-4 w-4" />
+                                    السابق
+                                </Button>
+
+                                {getVisiblePages()[0] > 1 && (
+                                    <>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setCurrentPage(1)}
+                                            className="w-8 h-8 p-0"
+                                        >
+                                            1
+                                        </Button>
+                                        {getVisiblePages()[0] > 2 && (
+                                            <span className="px-1 text-muted-foreground">...</span>
+                                        )}
+                                    </>
+                                )}
+
+                                {getVisiblePages().map((page) => (
+                                    <Button
+                                        key={page}
+                                        variant={page === currentPage ? "default" : "outline"}
+                                        size="sm"
+                                        onClick={() => setCurrentPage(page)}
+                                        className="w-8 h-8 p-0"
+                                    >
+                                        {page}
+                                    </Button>
+                                ))}
+
+                                {getVisiblePages()[getVisiblePages().length - 1] < totalPages && (
+                                    <>
+                                        {getVisiblePages()[getVisiblePages().length - 1] < totalPages - 1 && (
+                                            <span className="px-1 text-muted-foreground">...</span>
+                                        )}
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setCurrentPage(totalPages)}
+                                            className="w-8 h-8 p-0"
+                                        >
+                                            {totalPages}
+                                        </Button>
+                                    </>
+                                )}
+
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                                    disabled={currentPage === totalPages}
+                                >
+                                    التالي
+                                    <ChevronLeft className="h-4 w-4" />
+                                </Button>
+                            </div>
+                        )}
+
+                        {/* Current page info */}
+                        <div className="text-sm text-muted-foreground">
+                            صفحة {currentPage} من {totalPages}
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Invoice Details Dialog */}
             <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
                 <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" dir="rtl">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2 text-2xl">
+                    <DialogHeader className="flex flex-row items-center justify-between gap-4">
+                        <DialogTitle className="flex items-center gap-2 text-2xl shrink-0">
                             <FileText className="h-6 w-6 text-primary" />
-                            تفاصيل الفاتورة #{selectedInvoice?.invoiceNumber || selectedInvoice?.id}
+                            فاتورة #{selectedInvoice?.invoiceNumber || selectedInvoice?.id}
                         </DialogTitle>
+                        {selectedInvoice && (
+                            <div className="flex gap-1.5 items-center flex-wrap justify-end">
+                                {selectedInvoice.customerId && (
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="bg-green-50 hover:bg-green-100 text-green-700 border-green-200 h-8"
+                                        onClick={() => handleSendInvoiceWhatsApp(selectedInvoice)}
+                                    >
+                                        <MessageSquare className="h-3.5 w-3.5 ml-1" />
+                                        واتساب
+                                    </Button>
+                                )}
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8"
+                                    onClick={() => selectedInvoice && handlePrintInvoice(selectedInvoice)}
+                                >
+                                    <Printer className="h-3.5 w-3.5 ml-1" />
+                                    طباعة
+                                </Button>
+                                {canEditInvoice && (
+                                    <Button
+                                        size="sm"
+                                        className="bg-blue-600 hover:bg-blue-700 text-white h-8"
+                                        onClick={() => {
+                                            if (selectedInvoice) {
+                                                setIsDetailsOpen(false);
+                                                navigate(`/pos?invoiceId=${selectedInvoice.id}`);
+                                            }
+                                        }}
+                                    >
+                                        <Edit className="h-3.5 w-3.5 ml-1" />
+                                        تعديل
+                                    </Button>
+                                )}
+                                {canDeleteInvoice && (
+                                    <Button
+                                        size="sm"
+                                        variant="destructive"
+                                        className="h-8"
+                                        onClick={() => selectedInvoice && handleDeleteInvoice(selectedInvoice)}
+                                    >
+                                        <Trash2 className="h-3.5 w-3.5 ml-1" />
+                                        حذف
+                                    </Button>
+                                )}
+                            </div>
+                        )}
                     </DialogHeader>
 
                     {selectedInvoice && (
@@ -1010,7 +1299,7 @@ export default function Invoices() {
                                                     size="icon"
                                                     className="h-6 w-6"
                                                     onClick={() => {
-                                                        setEditInvoiceDate(new Date(selectedInvoice.createdAt).toISOString().split('T')[0]);
+                                                        setEditInvoiceDate(getLocalDateString(new Date(selectedInvoice.createdAt)));
                                                         setIsEditingDate(true);
                                                     }}
                                                 >
@@ -1208,61 +1497,7 @@ export default function Invoices() {
                                 </div>
                             )}
 
-                            {/* Actions */}
-                            <div className="flex gap-2 justify-end border-t pt-4 flex-wrap">
-                                <Button variant="outline" onClick={() => setIsDetailsOpen(false)}>
-                                    إغلاق
-                                </Button>
-                                {selectedInvoice.customerId && (
-                                    <Button
-                                        variant="outline"
-                                        className="bg-green-50 hover:bg-green-100 text-green-700 border-green-200"
-                                        onClick={() => handleSendInvoiceWhatsApp(selectedInvoice)}
-                                    >
-                                        <MessageSquare className="h-4 w-4 ml-2" />
-                                        واتساب
-                                    </Button>
-                                )}
-                                <Button
-                                    variant="outline"
-                                    onClick={() => selectedInvoice && handlePrintInvoice(selectedInvoice)}
-                                >
-                                    <Printer className="h-4 w-4 ml-2" />
-                                    طباعة
-                                </Button>
-                                {canEditInvoice && (
-                                    <Button
-                                        variant="default"
-                                        className="bg-blue-600 hover:bg-blue-700 text-white"
-                                        onClick={() => {
-                                            if (selectedInvoice) {
-                                                navigate(`/pos?invoiceId=${selectedInvoice.id}`);
-                                            }
-                                        }}
-                                    >
-                                        <Edit className="h-4 w-4 ml-2" />
-                                        تعديل الفاتورة
-                                    </Button>
-                                )}
-                                {canDeleteInvoice && (
-                                    <Button
-                                        variant="destructive"
-                                        onClick={() => selectedInvoice && handleDeleteInvoice(selectedInvoice)}
-                                    >
-                                        <Trash2 className="h-4 w-4 ml-2" />
-                                        حذف الفاتورة
-                                    </Button>
-                                )}
-                                {can("returns", "create") && (
-                                <Button
-                                    variant="outline"
-                                    onClick={() => selectedInvoice && handleOpenReturnDialog(selectedInvoice)}
-                                >
-                                    <RotateCcw className="h-4 w-4 ml-2" />
-                                    مرتجع
-                                </Button>
-                                )}
-                            </div>
+
                         </div>
                     )}
                 </DialogContent>

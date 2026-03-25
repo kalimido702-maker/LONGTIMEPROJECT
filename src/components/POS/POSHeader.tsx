@@ -42,6 +42,7 @@ import { db } from "@/shared/lib/indexedDB";
 import { useToast } from "@/hooks/use-toast";
 import { InvoiceWhatsAppDialog } from "@/components/dialogs/InvoiceWhatsAppDialog";
 import { StatementWhatsAppDialog } from "@/components/dialogs/StatementWhatsAppDialog";
+import { CollectionWhatsAppDialog } from "@/components/dialogs/CollectionWhatsAppDialog";
 import { SyncActionsButton } from "@/components/sync/SyncActionsButton";
 
 export const POSHeader = () => {
@@ -55,6 +56,7 @@ export const POSHeader = () => {
   const [dailySummary, setDailySummary] = useState<any>(null);
   const [invoiceWhatsAppOpen, setInvoiceWhatsAppOpen] = useState(false);
   const [statementWhatsAppOpen, setStatementWhatsAppOpen] = useState(false);
+  const [collectionWhatsAppOpen, setCollectionWhatsAppOpen] = useState(false);
   // المميزات المفعلة من الباقة (null = كل المميزات متاحة)
   const [enabledFeatures, setEnabledFeatures] = useState<string[] | null>(null);
   const featuresLoadedRef = useRef(false);
@@ -500,6 +502,10 @@ export const POSHeader = () => {
                   <Send className="ml-2 h-4 w-4" />
                   <span>إرسال كشف حساب</span>
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setCollectionWhatsAppOpen(true)}>
+                  <CreditCard className="ml-2 h-4 w-4" />
+                  <span>إرسال إيصالات القبض</span>
+                </DropdownMenuItem>
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -770,6 +776,10 @@ export const POSHeader = () => {
       <StatementWhatsAppDialog
         open={statementWhatsAppOpen}
         onOpenChange={setStatementWhatsAppOpen}
+      />
+      <CollectionWhatsAppDialog
+        open={collectionWhatsAppOpen}
+        onOpenChange={setCollectionWhatsAppOpen}
       />
     </header>
   );

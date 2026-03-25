@@ -25,6 +25,8 @@ import {
 } from "@/components/ui/select";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePagination } from "@/hooks/usePagination";
+import { DataPagination } from "@/components/ui/DataPagination";
 
 const Promotions = () => {
   const { can } = useAuth();
@@ -122,6 +124,8 @@ const Promotions = () => {
     p.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const pagination = usePagination(filteredPromotions, { resetDeps: [searchTerm] });
+
   const isPromotionActive = (promotion: Promotion) => {
     const now = new Date();
     const start = new Date(promotion.startDate);
@@ -164,7 +168,7 @@ const Promotions = () => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredPromotions.map((promotion) => (
+            {pagination.paginatedItems.map((promotion) => (
               <Card key={promotion.id} className="p-4">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
@@ -235,6 +239,8 @@ const Promotions = () => {
               </Card>
             ))}
           </div>
+
+          <DataPagination {...pagination} entityName="عرض" />
 
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogContent dir="rtl">

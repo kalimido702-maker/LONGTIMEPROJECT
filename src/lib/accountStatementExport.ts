@@ -107,20 +107,24 @@ export async function generateAccountStatement(
         (ret) => String(ret.customerId) === custIdStr
     );
 
-    // Get bonuses from localStorage
+    // Get bonuses from IndexedDB (with localStorage fallback for migration)
     let customerBonuses: any[] = [];
     try {
-        const savedBonuses = localStorage.getItem("pos-bonuses");
-        if (savedBonuses) {
-            const allBonuses = JSON.parse(savedBonuses) as any[];
-            customerBonuses = allBonuses.filter(
-                (bonus) => String(bonus.customerId) === custIdStr
-            );
-            console.log('[AccountStatement] All bonuses in storage:', allBonuses.length);
-            console.log('[AccountStatement] Customer bonuses:', customerBonuses.length, customerBonuses);
-        } else {
-            console.log('[AccountStatement] No bonuses found in localStorage');
+        const allBonuses = await db.getAll<any>("customerBonuses");
+        customerBonuses = allBonuses.filter(
+            (bonus) => String(bonus.customerId) === custIdStr
+        );
+        // Fallback: check localStorage for old data not yet migrated
+        if (customerBonuses.length === 0) {
+            const savedBonuses = localStorage.getItem("pos-bonuses");
+            if (savedBonuses) {
+                const oldBonuses = JSON.parse(savedBonuses) as any[];
+                customerBonuses = oldBonuses.filter(
+                    (bonus) => String(bonus.customerId) === custIdStr
+                );
+            }
         }
+        console.log('[AccountStatement] Customer bonuses:', customerBonuses.length);
     } catch (error) {
         console.error("Error loading bonuses:", error);
     }
@@ -193,6 +197,31 @@ export async function generateAccountStatement(
     const endOfDay = new Date(dateTo);
     endOfDay.setHours(23, 59, 59, 999);
 
+    // First pass: Calculate opening balance from ALL movements BEFORE the date range
+    // This ensures the balance reflects the full history, not just the filtered period
+    let openingBalance = Number(customer.previousStatement) || 0;
+    movements.forEach((mov) => {
+        if (mov.date >= startOfDay) return; // Only process movements BEFORE the range
+
+        switch (mov.type) {
+            case "invoice":
+                openingBalance += Number(mov.data.total) || 0;
+                break;
+            case "payment":
+                openingBalance -= Number(mov.data.amount) || 0;
+                break;
+            case "return":
+                openingBalance -= Number(mov.data.total || mov.data.amount) || 0;
+                break;
+            case "bonus":
+                openingBalance -= Number(mov.data.bonusAmount || mov.data.amount) || 0;
+                break;
+        }
+    });
+
+    // Second pass: Build rows for movements IN the date range, starting from the calculated opening balance
+    runningBalance = openingBalance;
+
     movements.forEach((mov, index) => {
         // Filter by date range (using normalized dates)
         if (mov.date < startOfDay || mov.date > endOfDay) return;
@@ -227,10 +256,21 @@ export async function generateAccountStatement(
                 break;
             case "bonus":
                 credit = Number(mov.data.bonusAmount || mov.data.amount) || 0;
-                movementType = "بونص";
+                const bonusRecordType = mov.data.type || 'bonus';
+                if (bonusRecordType === 'discount') {
+                    movementType = "خصم خاص";
+                    const discountDate = mov.data.createdAt ? new Date(mov.data.createdAt).toLocaleDateString("ar-EG") : "";
+                    notes = mov.data.notes || (discountDate ? `خصم خاص (${discountDate})` : "خصم خاص");
+                } else {
+                    movementType = "بونص";
+                    const bonusDate = mov.data.createdAt ? new Date(mov.data.createdAt).toLocaleDateString("ar-EG") : "";
+                    const periodStart = mov.data.periodStart ? new Date(mov.data.periodStart).toLocaleDateString("ar-EG") : "";
+                    const periodEnd = mov.data.periodEnd ? new Date(mov.data.periodEnd).toLocaleDateString("ar-EG") : "";
+                    const periodStr = periodStart && periodEnd ? ` | من ${periodStart} إلى ${periodEnd}` : "";
+                    notes = `بونص ${mov.data.bonusPercentage || 0}%${bonusDate ? ` (تسجيل: ${bonusDate})` : ""}${periodStr}`;
+                }
                 movementId = mov.data.id;
-                notes = `بونص ${mov.data.bonusPercentage || 0}%`;
-                summary.totalPayments += credit; // Treat bonus as credit like payment
+                // البونص/الخصم تنزل من الرصيد لكن لا تُحسب ضمن إجمالي المدفوعات
                 break;
         }
 
@@ -255,7 +295,7 @@ export async function generateAccountStatement(
         dateTo,
         rows,
         summary,
-        openingBalance: Number(customer.previousStatement) || 0,
+        openingBalance: openingBalance,
         closingBalance: runningBalance,
     };
 }

@@ -1,0 +1,26 @@
+-- Create customer_bonuses table for syncing customer bonus records
+CREATE TABLE IF NOT EXISTS customer_bonuses (
+  id VARCHAR(100) PRIMARY KEY,
+  client_id VARCHAR(36) NOT NULL,
+  branch_id VARCHAR(36),
+  type VARCHAR(20) DEFAULT 'bonus',
+  customer_id VARCHAR(100) NOT NULL,
+  customer_name VARCHAR(255) DEFAULT '',
+  period_start VARCHAR(20) DEFAULT '',
+  period_end VARCHAR(20) DEFAULT '',
+  total_payments DECIMAL(15,2) DEFAULT 0,
+  bonus_percentage DECIMAL(5,2) DEFAULT 0,
+  bonus_amount DECIMAL(15,2) DEFAULT 0,
+  user_id VARCHAR(36) DEFAULT '',
+  user_name VARCHAR(255) DEFAULT '',
+  notes TEXT DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  server_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  sync_version INT DEFAULT 1,
+  is_deleted BOOLEAN DEFAULT FALSE,
+  INDEX idx_customer_bonuses_client (client_id),
+  INDEX idx_customer_bonuses_customer (customer_id),
+  INDEX idx_customer_bonuses_period (period_start, period_end),
+  INDEX idx_customer_bonuses_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
