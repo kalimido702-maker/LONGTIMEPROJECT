@@ -88,7 +88,7 @@ if (!gotTheLock) {
         nodeIntegration: false,
         contextIsolation: true,
         sandbox: false,
-        webSecurity: true,
+        webSecurity: false,
       },
       // cancel view and window and edit buttons
       titleBarStyle: "hiddenInset",
