@@ -12,7 +12,11 @@ import '../widgets/date_filter_widget.dart';
 class PaymentsScreen extends StatefulWidget {
   final String? filterId;
   final bool defaultCurrentMonth;
-  const PaymentsScreen({super.key, this.filterId, this.defaultCurrentMonth = false});
+  const PaymentsScreen({
+    super.key,
+    this.filterId,
+    this.defaultCurrentMonth = false,
+  });
 
   @override
   State<PaymentsScreen> createState() => _PaymentsScreenState();
@@ -88,11 +92,18 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
               onChanged: (v) => setState(() => _searchQuery = v),
               decoration: InputDecoration(
                 hintText: 'بحث في المدفوعات...',
-                prefixIcon: const Icon(LucideIcons.search, size: 20, color: Colors.white70),
+                prefixIcon: const Icon(
+                  LucideIcons.search,
+                  size: 20,
+                  color: Colors.white70,
+                ),
                 filled: true,
                 fillColor: Colors.white.withOpacity(0.15),
                 hintStyle: const TextStyle(color: Colors.white60),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -126,17 +137,28 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                         color: Colors.white.withOpacity(0.2),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(LucideIcons.creditCard, color: Colors.white, size: 20),
+                      child: const Icon(
+                        LucideIcons.creditCard,
+                        color: Colors.white,
+                        size: 20,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     const Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('إجمالي المدفوعات', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                        Text(
+                          'إجمالي المدفوعات',
+                          style: TextStyle(color: Colors.white70, fontSize: 13),
+                        ),
                         SizedBox(height: 2),
                         Text(
                           'سندات القبض',
-                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15),
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                          ),
                         ),
                       ],
                     ),
@@ -172,40 +194,48 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
           // Payments list
           Expanded(
             child: dataProvider.isLoading
-                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                ? const Center(
+                    child: CircularProgressIndicator(color: AppColors.primary),
+                  )
                 : payments.isEmpty
-                    ? _buildEmptyState()
-                    : ListView.separated(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        itemCount: payments.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 8),
-                        itemBuilder: (context, index) {
-                          final payment = payments[index];
-                          return _PaymentCard(
-                            payment: payment,
-                            formatter: formatter,
-                            dateFormatter: dateFormatter,
-                          );
-                        },
-                      ),
+                ? _buildEmptyState()
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: payments.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final payment = payments[index];
+                      return _PaymentCard(
+                        payment: payment,
+                        formatter: formatter,
+                        dateFormatter: dateFormatter,
+                      );
+                    },
+                  ),
           ),
         ],
       ),
-      floatingActionButton: Builder(builder: (context) {
-        final user = context.watch<AuthProvider>().user;
-        final canCreate = user != null &&
-            (user.isAdmin || user.isSalesRep || user.isSalesManager ||
-             user.isGeneralManager || user.hasPermission('create_payments'));
-        if (!canCreate) return const SizedBox.shrink();
-        return FloatingActionButton(
-          onPressed: () async {
-            await context.push('/payments/create');
-            context.read<DataProvider>().loadPayments(refresh: true);
-          },
-          backgroundColor: AppTheme.primaryColor,
-          child: const Icon(LucideIcons.plus, color: Colors.white),
-        );
-      }),
+      floatingActionButton: Builder(
+        builder: (context) {
+          final user = context.watch<AuthProvider>().user;
+          final canCreate =
+              user != null &&
+              (user.isAdmin ||
+                  user.isSalesRep ||
+                  user.isSalesManager ||
+                  user.isGeneralManager ||
+                  user.hasPermission('create_payments'));
+          if (!canCreate) return const SizedBox.shrink();
+          return FloatingActionButton(
+            onPressed: () async {
+              await context.push('/payments/create');
+              context.read<DataProvider>().loadPayments(refresh: true);
+            },
+            backgroundColor: AppColors.primary,
+            child: const Icon(LucideIcons.plus, color: Colors.white),
+          );
+        },
+      ),
     );
   }
 
@@ -218,7 +248,11 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
           const SizedBox(height: 16),
           Text(
             'لا توجد مدفوعات',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.grey[500]),
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey[500],
+            ),
           ),
         ],
       ),
@@ -265,7 +299,11 @@ class _PaymentCard extends StatelessWidget {
               color: AppColors.success.withOpacity(0.1),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(LucideIcons.arrowDownCircle, size: 22, color: AppColors.success),
+            child: const Icon(
+              LucideIcons.arrowDownCircle,
+              size: 22,
+              color: AppColors.success,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -274,13 +312,20 @@ class _PaymentCard extends StatelessWidget {
               children: [
                 Text(
                   payment.customerName ?? 'سند قبض',
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                  ),
                 ),
                 if (parsedDate != null) ...[
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      Icon(LucideIcons.calendar, size: 13, color: Colors.grey[400]),
+                      Icon(
+                        LucideIcons.calendar,
+                        size: 13,
+                        color: Colors.grey[400],
+                      ),
                       const SizedBox(width: 4),
                       Text(
                         dateFormatter.format(parsedDate),

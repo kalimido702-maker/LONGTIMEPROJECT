@@ -13,7 +13,11 @@ import '../widgets/date_filter_widget.dart';
 class InvoicesScreen extends StatefulWidget {
   final String? filterId;
   final bool defaultCurrentMonth;
-  const InvoicesScreen({super.key, this.filterId, this.defaultCurrentMonth = false});
+  const InvoicesScreen({
+    super.key,
+    this.filterId,
+    this.defaultCurrentMonth = false,
+  });
 
   @override
   State<InvoicesScreen> createState() => _InvoicesScreenState();
@@ -110,11 +114,18 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
               },
               decoration: InputDecoration(
                 hintText: 'بحث عن فاتورة...',
-                prefixIcon: const Icon(LucideIcons.search, size: 20, color: Colors.white70),
+                prefixIcon: const Icon(
+                  LucideIcons.search,
+                  size: 20,
+                  color: Colors.white70,
+                ),
                 filled: true,
                 fillColor: Colors.white.withOpacity(0.15),
                 hintStyle: const TextStyle(color: Colors.white60),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -163,41 +174,52 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
           // Invoice list
           Expanded(
             child: dataProvider.isLoading
-                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                ? const Center(
+                    child: CircularProgressIndicator(color: AppColors.primary),
+                  )
                 : invoices.isEmpty
-                    ? _buildEmptyState()
-                    : ListView.separated(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        itemCount: invoices.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 8),
-                        itemBuilder: (context, index) {
-                          final invoice = invoices[index];
-                          return _InvoiceCard(
-                            invoice: invoice,
-                            formatter: formatter,
-                            dateFormatter: dateFormatter,
-                            onTap: () => context.go('/invoices/${invoice.id}'),
-                          );
-                        },
-                      ),
+                ? _buildEmptyState()
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    itemCount: invoices.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final invoice = invoices[index];
+                      return _InvoiceCard(
+                        invoice: invoice,
+                        formatter: formatter,
+                        dateFormatter: dateFormatter,
+                        onTap: () => context.go('/invoices/${invoice.id}'),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
-      floatingActionButton: Builder(builder: (context) {
-        final user = context.watch<AuthProvider>().user;
-        final canCreate = user != null &&
-            (user.isAdmin || user.isSalesRep || user.isSalesManager ||
-             user.isGeneralManager || user.hasPermission('create_invoices'));
-        if (!canCreate) return const SizedBox.shrink();
-        return FloatingActionButton(
-          onPressed: () async {
-            await context.push('/invoices/create');
-            context.read<DataProvider>().loadInvoices(refresh: true);
-          },
-          backgroundColor: AppTheme.primaryColor,
-          child: const Icon(LucideIcons.plus, color: Colors.white),
-        );
-      }),
+      floatingActionButton: Builder(
+        builder: (context) {
+          final user = context.watch<AuthProvider>().user;
+          final canCreate =
+              user != null &&
+              (user.isAdmin ||
+                  user.isSalesRep ||
+                  user.isSalesManager ||
+                  user.isGeneralManager ||
+                  user.hasPermission('create_invoices'));
+          if (!canCreate) return const SizedBox.shrink();
+          return FloatingActionButton(
+            onPressed: () async {
+              await context.push('/invoices/create');
+              context.read<DataProvider>().loadInvoices(refresh: true);
+            },
+            backgroundColor: AppColors.primary,
+            child: const Icon(LucideIcons.plus, color: Colors.white),
+          );
+        },
+      ),
     );
   }
 
@@ -268,7 +290,9 @@ class _FilterChip extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: isSelected ? Colors.white.withOpacity(0.2) : Colors.grey[200],
+                color: isSelected
+                    ? Colors.white.withOpacity(0.2)
+                    : Colors.grey[200],
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
@@ -329,7 +353,11 @@ class _InvoiceCard extends StatelessWidget {
                       color: AppColors.secondary.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(LucideIcons.receipt, size: 20, color: AppColors.secondary),
+                    child: const Icon(
+                      LucideIcons.receipt,
+                      size: 20,
+                      color: AppColors.secondary,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -397,11 +425,18 @@ class _InvoiceCard extends StatelessWidget {
                     if (parsedDate != null)
                       Row(
                         children: [
-                          Icon(LucideIcons.calendar, size: 14, color: Colors.grey[400]),
+                          Icon(
+                            LucideIcons.calendar,
+                            size: 14,
+                            color: Colors.grey[400],
+                          ),
                           const SizedBox(width: 4),
                           Text(
                             dateFormatter.format(parsedDate),
-                            style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[500],
+                            ),
                           ),
                         ],
                       ),

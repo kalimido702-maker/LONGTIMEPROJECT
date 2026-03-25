@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -6,15 +9,15 @@ import '../services/api_service.dart';
 import '../providers/auth_provider.dart';
 import '../config/theme.dart';
 
-class CartItem {
+class _CartItem {
   final String productId;
   final String name;
   final double price;
   double quantity;
   double discount;
-  String? unitName;
+  final String? unitName;
 
-  CartItem({
+  _CartItem({
     required this.productId,
     required this.name,
     required this.price,
@@ -34,85 +37,83 @@ class CreateInvoiceScreen extends StatefulWidget {
 }
 
 class _CreateInvoiceScreenState extends State<CreateInvoiceScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _searchController = TextEditingController();
   final _notesController = TextEditingController();
-  final _discountController = TextEditingController(text: '0');
+  final _searchController = TextEditingController();
+  final _invoiceDiscountController = TextEditingController(text: '0');
 
   bool _isLoading = false;
-  bool _isLoadingProducts = false;
   bool _isSaving = false;
 
-  List<Map<String, dynamic>> _products = [];
+  List<Map<String, dynamic>> _allProducts = [];
+  List<Map<String, dynamic>> _filteredProducts = [];
   List<Map<String, dynamic>> _customers = [];
   List<Map<String, dynamic>> _paymentMethods = [];
-  List<CartItem> _cart = [];
+  List<_CartItem> _cart = [];
 
   Map<String, dynamic>? _selectedCustomer;
   Map<String, dynamic>? _selectedPaymentMethod;
-  String _paymentType = 'cash'; // cash or credit
+  String _paymentType = 'cash';
   DateTime _invoiceDate = DateTime.now();
 
-  final _currencyFormat = NumberFormat('#,##0.00', 'ar');
+  final _fmt = NumberFormat('#,##0.##', 'ar');
 
   @override
   void initState() {
     super.initState();
-    _loadInitialData();
+    _loadData();
+    _searchController.addListener(_filterProducts);
   }
 
   @override
   void dispose() {
-    _searchController.dispose();
     _notesController.dispose();
-    _discountController.dispose();
+    _searchController.dispose();
+    _invoiceDiscountController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadInitialData() async {
+  void _filterProducts() {
+    final q = _searchController.text.toLowerCase();
+    setState(() {
+      _filteredProducts = q.isEmpty
+          ? _allProducts
+          : _allProducts.where((p) =>
+              (p['name'] as String? ?? '').toLowerCase().contains(q) ||
+              (p['barcode'] as String? ?? '').contains(q)).toList();
+    });
+  }
+
+  Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
       final api = ApiService();
-      final results = await Future.wait([
-        api.getProducts(),
-        api.getPaymentMethods(),
-        api.getCustomers(),
-      ]);
+      final products = await api.getProducts(limit: 500);
+      final customersRes = await api.getCustomers();
+      final paymentMethods = await api.getPaymentMethods();
       setState(() {
-        _products = results[0];
-        _paymentMethods = results[1];
-        _customers = results[2]['data'] as List<Map<String, dynamic>>? ??
-            (results[2]['data'] as List).cast<Map<String, dynamic>>();
-        if (_paymentMethods.isNotEmpty) {
-          _selectedPaymentMethod = _paymentMethods.first;
-        }
+        _allProducts = products;
+        _filteredProducts = products;
+        final cd = customersRes['data'] as List? ?? [];
+        _customers = cd.cast<Map<String, dynamic>>();
+        _paymentMethods = paymentMethods;
+        if (_paymentMethods.isNotEmpty) _selectedPaymentMethod = _paymentMethods.first;
       });
     } catch (e) {
-      _showError('فشل تحميل البيانات: $e');
+      _showSnack('فشل تحميل البيانات: $e', isError: true);
     } finally {
       setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _searchProducts(String query) async {
-    if (_isLoadingProducts) return;
-    setState(() => _isLoadingProducts = true);
-    try {
-      final api = ApiService();
-      final products = await api.getProducts(search: query);
-      setState(() => _products = products);
-    } catch (_) {}
-    finally { setState(() => _isLoadingProducts = false); }
-  }
-
   void _addToCart(Map<String, dynamic> product) {
-    final existing = _cart.indexWhere((i) => i.productId == product['id'].toString());
+    final id = product['id'].toString();
+    final existing = _cart.indexWhere((c) => c.productId == id);
     setState(() {
       if (existing >= 0) {
-        _cart[existing].quantity++;
+        _cart[existing].quantity += 1;
       } else {
-        _cart.add(CartItem(
-          productId: product['id'].toString(),
+        _cart.add(_CartItem(
+          productId: id,
           name: product['name'] ?? '',
           price: double.tryParse(product['sale_price'].toString()) ?? 0,
           unitName: product['unit_name'],
@@ -124,59 +125,63 @@ class _CreateInvoiceScreenState extends State<CreateInvoiceScreen> {
   void _removeFromCart(int index) => setState(() => _cart.removeAt(index));
 
   double get _subtotal => _cart.fold(0, (s, i) => s + i.total);
-  double get _invoiceDiscount => double.tryParse(_discountController.text) ?? 0;
+  double get _invoiceDiscount => double.tryParse(_invoiceDiscountController.text) ?? 0;
   double get _netTotal => _subtotal - _invoiceDiscount;
 
-  Future<void> _saveInvoice() async {
-    if (_cart.isEmpty) { _showError('أضف منتجاً على الأقل'); return; }
-    if (_selectedCustomer == null) { _showError('اختر العميل'); return; }
+  String _generateInvoiceNumber() {
+    final now = DateTime.now();
+    return 'INV-${now.year}${now.month.toString().padLeft(2,'0')}${now.day.toString().padLeft(2,'0')}-${now.millisecondsSinceEpoch % 10000}';
+  }
+
+  Future<void> _save() async {
+    if (_cart.isEmpty) { _showSnack('أضف منتجاً على الأقل', isError: true); return; }
     setState(() => _isSaving = true);
     try {
       final api = ApiService();
-      final auth = Provider.of<AuthProvider>(context, listen: false);
-      final invoiceNumber = 'MOB-${DateTime.now().millisecondsSinceEpoch}';
-      final data = {
-        'invoiceNumber': invoiceNumber,
-        'invoiceDate': _invoiceDate.toIso8601String(),
-        'customerId': _selectedCustomer!['id'].toString(),
-        'customerName': _selectedCustomer!['name'],
-        'total': _subtotal,
+      final paidAmount = _paymentType == 'cash' ? _netTotal : 0.0;
+      await api.createInvoice({
+        'invoice_number': _generateInvoiceNumber(),
+        'invoice_date': _invoiceDate.toIso8601String(),
+        'customer_id': _selectedCustomer?['id'],
+        'customer_name': _selectedCustomer?['name'],
+        'subtotal': _subtotal,
         'discount': _invoiceDiscount,
-        'netTotal': _netTotal,
-        'paidAmount': _paymentType == 'cash' ? _netTotal : 0.0,
-        'remainingAmount': _paymentType == 'cash' ? 0.0 : _netTotal,
-        'paymentStatus': _paymentType == 'cash' ? 'paid' : 'unpaid',
-        'paymentType': _paymentType,
-        'notes': _notesController.text,
-        'items': _cart.map((i) => {
-          'id': 'item-${DateTime.now().microsecondsSinceEpoch}-${i.productId}',
-          'productId': i.productId,
-          'name': i.name,
-          'quantity': i.quantity,
-          'price': i.price,
-          'discount': i.discount,
-          'total': i.total,
-          'unitName': i.unitName ?? '',
+        'net_total': _netTotal,
+        'total': _netTotal,
+        'paid_amount': paidAmount,
+        'remaining_amount': _netTotal - paidAmount,
+        'payment_status': paidAmount >= _netTotal ? 'paid' : (_paymentType == 'cash' ? 'partial' : 'unpaid'),
+        'payment_type': _paymentType,
+        'payment_method_id': _selectedPaymentMethod?['id'],
+        'payment_method_name': _selectedPaymentMethod?['name'],
+        'notes': _notesController.text.trim(),
+        'items': _cart.map((c) => {
+          'product_id': c.productId,
+          'name': c.name,
+          'quantity': c.quantity,
+          'unit_price': c.price,
+          'price': c.price,
+          'discount': c.discount,
+          'total': c.total,
+          'unit_name': c.unitName,
         }).toList(),
-      };
-      await api.createInvoice(data);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم إنشاء الفاتورة بنجاح'), backgroundColor: Colors.green),
-        );
-        Navigator.of(context).pop(true);
-      }
+      });
+      _showSnack('تم إنشاء الفاتورة بنجاح');
+      if (mounted) context.pop();
     } catch (e) {
-      _showError('فشل إنشاء الفاتورة: $e');
+      _showSnack('فشل إنشاء الفاتورة: $e', isError: true);
     } finally {
-      setState(() => _isSaving = false);
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
-  void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.red),
-    );
+  void _showSnack(String msg, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg, style: GoogleFonts.cairo()),
+      backgroundColor: isError ? AppColors.error : AppColors.success,
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
   @override
@@ -184,81 +189,85 @@ class _CreateInvoiceScreenState extends State<CreateInvoiceScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('فاتورة بيع جديدة'),
+        leading: IconButton(
+          icon: const Icon(LucideIcons.arrowRight),
+          onPressed: () => context.pop(),
+        ),
         actions: [
-          if (_isSaving)
-            const Padding(padding: EdgeInsets.all(16), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
-          else
-            TextButton.icon(
-              onPressed: _saveInvoice,
-              icon: const Icon(LucideIcons.save, size: 18),
-              label: const Text('حفظ'),
-            ),
+          TextButton(
+            onPressed: _isSaving || _cart.isEmpty ? null : _save,
+            child: _isSaving
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : Text('حفظ', style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16)),
+          ),
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
           : Column(
               children: [
-                // Customer & date
-                _buildHeader(),
-                const Divider(height: 1),
-                // Product search
-                _buildProductSearch(),
-                const Divider(height: 1),
-                // Cart
-                Expanded(child: _buildCart()),
-                // Summary
-                _buildSummary(),
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      _buildInfoCard(),
+                      const SizedBox(height: 12),
+                      _buildProductSearch(),
+                      const SizedBox(height: 12),
+                      if (_cart.isNotEmpty) _buildCart(),
+                      if (_cart.isNotEmpty) const SizedBox(height: 12),
+                      if (_cart.isNotEmpty) _buildTotals(),
+                    ],
+                  ),
+                ),
               ],
             ),
     );
   }
 
-  Widget _buildHeader() {
-    return Padding(
-      padding: const EdgeInsets.all(12),
+  Widget _buildInfoCard() {
+    return _Card(
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Customer picker
+          Text('معلومات الفاتورة', style: GoogleFonts.cairo(fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.textPrimary)),
+          const SizedBox(height: 12),
+          // Customer
           DropdownButtonFormField<Map<String, dynamic>>(
-            decoration: const InputDecoration(labelText: 'العميل', border: OutlineInputBorder(), isDense: true),
             value: _selectedCustomer,
+            decoration: InputDecoration(labelText: 'العميل (اختياري)', prefixIcon: const Icon(LucideIcons.user, size: 18)),
             items: _customers.map((c) => DropdownMenuItem(
               value: c,
-              child: Text(c['name']?.toString() ?? ''),
+              child: Text(c['name'] ?? '', style: GoogleFonts.cairo()),
             )).toList(),
             onChanged: (v) => setState(() => _selectedCustomer = v),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
+          // Payment type
           Row(
             children: [
-              // Payment type
-              Expanded(
-                child: SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(value: 'cash', label: Text('نقدي')),
-                    ButtonSegment(value: 'credit', label: Text('آجل')),
-                  ],
-                  selected: {_paymentType},
-                  onSelectionChanged: (s) => setState(() => _paymentType = s.first),
-                ),
-              ),
+              Expanded(child: _TypeChip(label: 'نقدي', icon: LucideIcons.banknote, selected: _paymentType == 'cash', onTap: () => setState(() => _paymentType = 'cash'))),
               const SizedBox(width: 8),
-              // Date
-              TextButton.icon(
-                icon: const Icon(LucideIcons.calendar, size: 16),
-                label: Text(DateFormat('dd/MM/yyyy').format(_invoiceDate)),
-                onPressed: () async {
-                  final d = await showDatePicker(
-                    context: context,
-                    initialDate: _invoiceDate,
-                    firstDate: DateTime(2020),
-                    lastDate: DateTime(2030),
-                  );
-                  if (d != null) setState(() => _invoiceDate = d);
-                },
-              ),
+              Expanded(child: _TypeChip(label: 'آجل', icon: LucideIcons.clock, selected: _paymentType == 'credit', onTap: () => setState(() => _paymentType = 'credit'))),
             ],
+          ),
+          const SizedBox(height: 12),
+          // Payment method
+          if (_paymentMethods.isNotEmpty)
+            DropdownButtonFormField<Map<String, dynamic>>(
+              value: _selectedPaymentMethod,
+              decoration: InputDecoration(labelText: 'طريقة الدفع', prefixIcon: const Icon(LucideIcons.creditCard, size: 18)),
+              items: _paymentMethods.map((m) => DropdownMenuItem(
+                value: m,
+                child: Text(m['name'] ?? '', style: GoogleFonts.cairo()),
+              )).toList(),
+              onChanged: (v) => setState(() => _selectedPaymentMethod = v),
+            ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _notesController,
+            decoration: const InputDecoration(labelText: 'ملاحظات', prefixIcon: Icon(LucideIcons.fileText, size: 18)),
+            maxLines: 2,
           ),
         ],
       ),
@@ -266,117 +275,216 @@ class _CreateInvoiceScreenState extends State<CreateInvoiceScreen> {
   }
 
   Widget _buildProductSearch() {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: TextField(
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('إضافة منتجات', style: GoogleFonts.cairo(fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.textPrimary)),
+          const SizedBox(height: 10),
+          TextField(
             controller: _searchController,
-            decoration: InputDecoration(
-              hintText: 'ابحث عن منتج...',
-              prefixIcon: const Icon(LucideIcons.search, size: 18),
-              border: const OutlineInputBorder(),
-              isDense: true,
-              suffixIcon: _isLoadingProducts ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : null,
+            decoration: const InputDecoration(
+              hintText: 'بحث باسم المنتج أو الباركود...',
+              prefixIcon: Icon(LucideIcons.search, size: 18),
             ),
-            onChanged: (v) => _searchProducts(v),
           ),
-        ),
-        SizedBox(
-          height: 120,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            itemCount: _products.length,
-            itemBuilder: (context, index) {
-              final p = _products[index];
-              return GestureDetector(
-                onTap: () => _addToCart(p),
-                child: Container(
-                  width: 110,
-                  margin: const EdgeInsets.only(left: 8),
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey.shade300),
-                    borderRadius: BorderRadius.circular(8),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 200,
+            child: _filteredProducts.isEmpty
+                ? Center(child: Text('لا توجد منتجات', style: GoogleFonts.cairo(color: AppColors.textMuted)))
+                : ListView.separated(
+                    itemCount: _filteredProducts.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, i) {
+                      final p = _filteredProducts[i];
+                      final price = double.tryParse(p['sale_price'].toString()) ?? 0;
+                      return ListTile(
+                        dense: true,
+                        title: Text(p['name'] ?? '', style: GoogleFonts.cairo(fontSize: 14, fontWeight: FontWeight.w600)),
+                        subtitle: Text('${_fmt.format(price)} جنيه', style: GoogleFonts.cairo(fontSize: 12, color: AppColors.textSecondary)),
+                        trailing: IconButton(
+                          icon: const Icon(LucideIcons.plusCircle, color: AppColors.primary),
+                          onPressed: () => _addToCart(p),
+                        ),
+                        onTap: () => _addToCart(p),
+                      );
+                    },
                   ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(LucideIcons.package, size: 24),
-                      const SizedBox(height: 4),
-                      Text(p['name']?.toString() ?? '', textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
-                      const SizedBox(height: 4),
-                      Text('${_currencyFormat.format(double.tryParse(p['sale_price'].toString()) ?? 0)}', style: const TextStyle(fontSize: 11, color: Colors.green, fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                ),
-              );
-            },
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
   Widget _buildCart() {
-    if (_cart.isEmpty) {
-      return const Center(child: Text('لم تضف منتجات بعد', style: TextStyle(color: Colors.grey)));
-    }
-    return ListView.builder(
-      itemCount: _cart.length,
-      itemBuilder: (context, index) {
-        final item = _cart[index];
-        return ListTile(
-          dense: true,
-          title: Text(item.name),
-          subtitle: Text('${item.price} × ${item.quantity} = ${_currencyFormat.format(item.total)}'),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(icon: const Icon(LucideIcons.minus, size: 16), onPressed: () {
-                setState(() { if (item.quantity > 1) item.quantity--; else _cart.removeAt(index); });
-              }),
-              Text('${item.quantity}'),
-              IconButton(icon: const Icon(LucideIcons.plus, size: 16), onPressed: () => setState(() => item.quantity++)),
-              IconButton(icon: const Icon(LucideIcons.trash2, size: 16, color: Colors.red), onPressed: () => _removeFromCart(index)),
-            ],
-          ),
-        );
-      },
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('الأصناف المضافة', style: GoogleFonts.cairo(fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.textPrimary)),
+          const SizedBox(height: 8),
+          ..._cart.asMap().entries.map((e) {
+            final i = e.key;
+            final item = e.value;
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(child: Text(item.name, style: GoogleFonts.cairo(fontWeight: FontWeight.w600, fontSize: 14))),
+                      IconButton(icon: const Icon(LucideIcons.trash2, size: 18, color: AppColors.error), onPressed: () => _removeFromCart(i), padding: EdgeInsets.zero, constraints: const BoxConstraints()),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _QtyButton(icon: LucideIcons.minus, onTap: () => setState(() { if (item.quantity > 1) item.quantity -= 1; else _removeFromCart(i); })),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 50,
+                        child: TextFormField(
+                          initialValue: item.quantity.toString(),
+                          textAlign: TextAlign.center,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                          style: GoogleFonts.cairo(fontWeight: FontWeight.w700),
+                          decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 4), isDense: true),
+                          onChanged: (v) => setState(() => item.quantity = double.tryParse(v) ?? 1),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _QtyButton(icon: LucideIcons.plus, onTap: () => setState(() => item.quantity += 1)),
+                      const Spacer(),
+                      Text('${_fmt.format(item.total)} جنيه', style: GoogleFonts.cairo(fontWeight: FontWeight.w700, color: AppColors.primary)),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
     );
   }
 
-  Widget _buildSummary() {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade50,
-        border: Border(top: BorderSide(color: Colors.grey.shade300)),
-      ),
+  Widget _buildTotals() {
+    return _Card(
       child: Column(
         children: [
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            const Text('المجموع:'), Text(_currencyFormat.format(_subtotal), style: const TextStyle(fontWeight: FontWeight.bold)),
-          ]),
-          const SizedBox(height: 4),
-          Row(children: [
-            const Text('خصم: '),
-            const SizedBox(width: 8),
-            SizedBox(width: 80, child: TextField(
-              controller: _discountController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
-              onChanged: (_) => setState(() {}),
-            )),
-          ]),
-          const SizedBox(height: 4),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            const Text('الصافي:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            Text(_currencyFormat.format(_netTotal), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.green)),
-          ]),
+          _TotalRow(label: 'الإجمالي', value: '${_fmt.format(_subtotal)} جنيه'),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Text('خصم الفاتورة', style: GoogleFonts.cairo(color: AppColors.textSecondary)),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 90,
+                child: TextField(
+                  controller: _invoiceDiscountController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                  decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 10), suffix: Text('ج')),
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+            ],
+          ),
+          const Divider(height: 20),
+          _TotalRow(label: 'الصافي', value: '${_fmt.format(_netTotal)} جنيه', isBold: true, color: AppColors.primary),
         ],
       ),
+    );
+  }
+}
+
+class _Card extends StatelessWidget {
+  final Widget child;
+  const _Card({required this.child});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 2))],
+      ),
+      child: child,
+    );
+  }
+}
+
+class _TypeChip extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+  const _TypeChip({required this.label, required this.icon, required this.selected, required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.primary : AppColors.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: selected ? AppColors.primary : AppColors.border),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 16, color: selected ? Colors.white : AppColors.textSecondary),
+            const SizedBox(width: 6),
+            Text(label, style: GoogleFonts.cairo(color: selected ? Colors.white : AppColors.textSecondary, fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _QtyButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  const _QtyButton({required this.icon, required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(6), border: Border.all(color: AppColors.border)),
+        child: Icon(icon, size: 16, color: AppColors.primary),
+      ),
+    );
+  }
+}
+
+class _TotalRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool isBold;
+  final Color? color;
+  const _TotalRow({required this.label, required this.value, this.isBold = false, this.color});
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: GoogleFonts.cairo(color: AppColors.textSecondary, fontSize: 14)),
+        Text(value, style: GoogleFonts.cairo(fontWeight: isBold ? FontWeight.w700 : FontWeight.w600, fontSize: isBold ? 16 : 14, color: color ?? AppColors.textPrimary)),
+      ],
     );
   }
 }
