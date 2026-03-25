@@ -13,6 +13,7 @@ import { EventEmitter } from 'events';
 import { FastifyClient } from '../http/FastifyClient';
 import { WebSocketClient, ConnectionState } from '../http/WebSocketClient';
 import { getDatabaseService } from '../database/DatabaseService';
+import { getStoreName, getTableName, SYNCABLE_TABLES } from './syncConstants';
 
 // Types
 export interface SyncRecord {
@@ -64,84 +65,7 @@ export interface SmartSyncConfig {
 
 type SyncStatus = 'idle' | 'syncing' | 'pulling' | 'pushing' | 'offline' | 'error';
 
-// Syncable tables configuration - all tables that should sync to server
-const SYNCABLE_TABLES = [
-    // Core products & inventory
-    'products',
-    'product_categories',
-    'product_units',
-    'units',
-    'price_types',
-    'warehouses',
-    // People
-    'customers',
-    'suppliers',
-    'employees',
-    'supervisors',     // Added
-    'sales_reps',      // Added (snake_case for backend)
-    // Users & Permissions (synced from backend)
-    'users',
-    'roles',
-    // Sales
-    'invoices',
-    'invoice_items',
-    'sales_returns',
-    // Purchases
-    'purchases',
-    'purchase_items',
-    'purchase_returns',
-    // Finance
-    'expenses',
-    'expense_categories',
-    'expense_items',
-    'deposits',
-    'deposit_sources',
-    'payments',
-    'payment_methods',
-    'supervisor_bonuses',
-    'customer_bonuses',
-    // Operations
-    'shifts',
-    // Settings & Audit
-    'settings',
-    'audit_logs',
-    // WhatsApp
-    'whatsapp_accounts',
-];
-
-// Mapping from snake_case table names to camelCase IndexedDB store names
-const TABLE_TO_STORE_MAP: Record<string, string> = {
-    'product_categories': 'productCategories',
-    'product_units': 'productUnits',
-    'price_types': 'priceTypes',
-    'invoice_items': 'invoiceItems',
-    'sales_returns': 'salesReturns',
-    'purchase_items': 'purchaseItems',
-    'purchase_returns': 'purchaseReturns',
-    'expense_categories': 'expenseCategories',
-    'expense_items': 'expenseItems',
-    'deposit_sources': 'depositSources',
-    'payment_methods': 'paymentMethods',
-    'audit_logs': 'auditLogs',
-    'sales_reps': 'salesReps',    // Added
-    'supervisor_bonuses': 'supervisorBonuses',  // Added
-    'customer_bonuses': 'customerBonuses',  // Added
-    'whatsapp_accounts': 'whatsappAccounts',  // Added
-};
-
-// Helper function to get the store name from table name
-function getStoreName(tableName: string): string {
-    return TABLE_TO_STORE_MAP[tableName] || tableName;
-}
-
-// Helper function to get the table name from store name (reverse mapping)
-function getTableName(storeName: string): string {
-    const reverseMap = Object.entries(TABLE_TO_STORE_MAP).reduce((acc, [table, store]) => {
-        acc[store] = table;
-        return acc;
-    }, {} as Record<string, string>);
-    return reverseMap[storeName] || storeName;
-}
+// SYNCABLE_TABLES, getStoreName, getTableName are imported from syncConstants
 
 export class SmartSyncManager extends EventEmitter {
     private httpClient: FastifyClient;

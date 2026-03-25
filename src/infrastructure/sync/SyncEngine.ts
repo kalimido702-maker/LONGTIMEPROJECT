@@ -8,25 +8,7 @@ import {
 import { SyncQueue, getSyncQueue, SyncQueueItem } from "./SyncQueue";
 import { getDatabaseService } from "../database/DatabaseService";
 
-// Mapping from snake_case table names to camelCase IndexedDB store names
-const TABLE_TO_STORE: Record<string, string> = {
-    'product_categories': 'productCategories',
-    'product_units': 'productUnits',
-    'price_types': 'priceTypes',
-    'invoice_items': 'invoiceItems',
-    'sales_returns': 'salesReturns',
-    'purchase_items': 'purchaseItems',
-    'purchase_returns': 'purchaseReturns',
-    'expense_categories': 'expenseCategories',
-    'expense_items': 'expenseItems',
-    'deposit_sources': 'depositSources',
-    'payment_methods': 'paymentMethods',
-    'audit_logs': 'auditLogs',
-    'sales_reps': 'salesReps',
-    'supervisor_bonuses': 'supervisorBonuses',
-    'customer_bonuses': 'customerBonuses',
-    'whatsapp_accounts': 'whatsappAccounts',
-};
+import { TABLE_TO_STORE_MAP as TABLE_TO_STORE } from './syncConstants';
 
 export enum SyncStatus {
   IDLE = "idle",

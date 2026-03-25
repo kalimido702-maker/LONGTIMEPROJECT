@@ -1,8 +1,9 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { db } from "../config/database-factory.js";
 import { logger } from "../config/logger.js";
-import { RowDataPacket } from "mysql2/promise";
+import { RowDataPacket, ResultSetHeader } from "mysql2/promise";
 import { randomUUID } from "crypto";
+import bcrypt from "bcrypt";
 
 /**
  * Mobile API Routes
@@ -1708,6 +1709,264 @@ export async function mobileRoutes(server: FastifyInstance) {
       } catch (error) {
         logger.error({ error }, "Failed to fetch linked profiles");
         return reply.code(500).send({ error: "Failed to fetch linked profiles" });
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────
+  // GET /api/mobile/products
+  // Get products list for invoice creation
+  // ─────────────────────────────────────────────────────
+  server.get(
+    "/products",
+    { preHandler: [server.authenticate] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { clientId, branchId } = request.user!;
+        const { search, category_id, limit = 100, offset = 0 } = request.query as any;
+
+        let where = ["p.client_id = ?", "p.is_deleted = 0", "p.is_active = 1"];
+        const params: any[] = [clientId];
+
+        if (branchId) { where.push("(p.branch_id = ? OR p.branch_id IS NULL)"); params.push(branchId); }
+        if (search) { where.push("(p.name LIKE ? OR p.barcode LIKE ?)"); params.push(`%${search}%`, `%${search}%`); }
+        if (category_id) { where.push("p.category_id = ?"); params.push(category_id); }
+
+        const [rows] = await db.query<RowDataPacket[]>(
+          `SELECT p.id, p.name, p.barcode, p.sale_price, p.purchase_price,
+                  p.stock_quantity, p.category_id, c.name as category_name,
+                  p.unit_id, u.name as unit_name, p.units_per_carton,
+                  p.image_url
+           FROM products p
+           LEFT JOIN product_categories c ON p.category_id = c.id
+           LEFT JOIN product_units u ON p.unit_id = u.id
+           WHERE ${where.join(" AND ")}
+           ORDER BY p.name ASC
+           LIMIT ? OFFSET ?`,
+          [...params, Number(limit), Number(offset)]
+        );
+
+        return reply.code(200).send({ data: rows });
+      } catch (error) {
+        logger.error({ error }, "Failed to fetch products for mobile");
+        return reply.code(500).send({ error: "Failed to fetch products" });
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────
+  // GET /api/mobile/payment-methods
+  // ─────────────────────────────────────────────────────
+  server.get(
+    "/payment-methods",
+    { preHandler: [server.authenticate] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { clientId, branchId } = request.user!;
+        const [rows] = await db.query<RowDataPacket[]>(
+          `SELECT id, name, type FROM payment_methods
+           WHERE client_id = ? AND (branch_id = ? OR branch_id IS NULL) AND is_deleted = 0
+           ORDER BY name ASC`,
+          [clientId, branchId]
+        );
+        return reply.code(200).send({ data: rows });
+      } catch (error) {
+        return reply.code(500).send({ error: "Failed to fetch payment methods" });
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────
+  // POST /api/mobile/invoices
+  // Create a new sales invoice from mobile
+  // ─────────────────────────────────────────────────────
+  server.post(
+    "/invoices",
+    { preHandler: [server.authenticate] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const connection = await db.getConnection();
+      try {
+        const { clientId, branchId, userId } = request.user!;
+        const body = request.body as any;
+
+        const { customerId, items, paidAmount = 0, paymentMethodId, notes, invoiceDate, salesRepId, discount = 0, paymentType = 'cash' } = body;
+
+        if (!items || !Array.isArray(items) || items.length === 0) {
+          return reply.code(400).send({ error: "يجب إضافة منتج واحد على الأقل" });
+        }
+
+        await connection.beginTransaction();
+
+        // Generate invoice number
+        const [lastInv] = await connection.query<RowDataPacket[]>(
+          "SELECT invoice_number FROM invoices WHERE client_id = ? ORDER BY created_at DESC LIMIT 1",
+          [clientId]
+        );
+        let nextNum = 1;
+        if (lastInv.length > 0) {
+          const match = lastInv[0].invoice_number?.match(/(\d+)$/);
+          if (match) nextNum = parseInt(match[1]) + 1;
+        }
+        const invoiceNumber = `INV-${String(nextNum).padStart(6, '0')}`;
+        const invoiceId = randomUUID();
+        const now = invoiceDate || new Date().toISOString();
+
+        // Calculate totals
+        let subtotal = 0;
+        const processedItems: any[] = [];
+        for (const item of items) {
+          const lineTotal = (item.quantity * item.price) - (item.discount || 0);
+          subtotal += lineTotal;
+          processedItems.push({ ...item, total: lineTotal, id: randomUUID() });
+        }
+        const netTotal = subtotal - discount;
+        const remainingAmount = Math.max(0, netTotal - paidAmount);
+        const paymentStatus = remainingAmount <= 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid';
+
+        // Get customer name
+        let customerName = null;
+        if (customerId) {
+          const [custRows] = await connection.query<RowDataPacket[]>("SELECT name FROM customers WHERE id = ?", [customerId]);
+          if (custRows.length > 0) customerName = custRows[0].name;
+        }
+
+        // Get payment method name
+        let paymentMethodName = null;
+        if (paymentMethodId) {
+          const [pmRows] = await connection.query<RowDataPacket[]>("SELECT name FROM payment_methods WHERE id = ?", [paymentMethodId]);
+          if (pmRows.length > 0) paymentMethodName = pmRows[0].name;
+        }
+
+        const itemsJson = JSON.stringify(processedItems);
+
+        await connection.query(
+          `INSERT INTO invoices (id, client_id, branch_id, invoice_number, invoice_date,
+            customer_id, customer_name, subtotal, discount, tax, total, net_total,
+            paid_amount, remaining_amount, payment_status, payment_type,
+            payment_method_id, payment_method_name, notes, items_json, created_by, sales_rep_id,
+            local_updated_at, is_synced)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 1)`,
+          [invoiceId, clientId, branchId, invoiceNumber, now,
+           customerId || null, customerName, subtotal, discount, subtotal, netTotal,
+           paidAmount, remainingAmount, paymentStatus, paymentType,
+           paymentMethodId || null, paymentMethodName, notes || null, itemsJson, userId, salesRepId || null]
+        );
+
+        // Update customer balance if customer exists
+        if (customerId && remainingAmount > 0) {
+          await connection.query(
+            "UPDATE customers SET balance = balance + ? WHERE id = ?",
+            [remainingAmount, customerId]
+          );
+        }
+
+        // Insert payment record if paid
+        if (paidAmount > 0) {
+          await connection.query(
+            `INSERT INTO payments (id, client_id, branch_id, invoice_id, customer_id, customer_name,
+              amount, payment_method_id, payment_method_name, payment_date, payment_type, user_id, local_updated_at, is_synced)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 1)`,
+            [randomUUID(), clientId, branchId, invoiceId, customerId || null, customerName,
+             paidAmount, paymentMethodId || null, paymentMethodName, now, paymentType, userId]
+          );
+        }
+
+        await connection.commit();
+        return reply.code(201).send({ success: true, invoiceId, invoiceNumber });
+      } catch (error) {
+        await connection.rollback();
+        const msg = error instanceof Error ? error.message : String(error);
+        logger.error({ error }, "Failed to create mobile invoice");
+        return reply.code(500).send({ error: "فشل إنشاء الفاتورة", details: msg });
+      } finally {
+        connection.release();
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────
+  // POST /api/mobile/payments
+  // Add a receipt/collection payment from mobile
+  // ─────────────────────────────────────────────────────
+  server.post(
+    "/payments",
+    { preHandler: [server.authenticate] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const connection = await db.getConnection();
+      try {
+        const { clientId, branchId, userId } = request.user!;
+        const body = request.body as any;
+        const { customerId, invoiceId, amount, paymentMethodId, notes, paymentDate, paymentType = 'cash', referenceNumber } = body;
+
+        if (!customerId && !invoiceId) {
+          return reply.code(400).send({ error: "يجب تحديد العميل أو الفاتورة" });
+        }
+        if (!amount || amount <= 0) {
+          return reply.code(400).send({ error: "المبلغ يجب أن يكون أكبر من صفر" });
+        }
+
+        await connection.beginTransaction();
+
+        // Get customer info
+        let customerName = null;
+        let resolvedCustomerId = customerId;
+        if (customerId) {
+          const [custRows] = await connection.query<RowDataPacket[]>("SELECT name FROM customers WHERE id = ?", [customerId]);
+          if (custRows.length > 0) customerName = custRows[0].name;
+        }
+
+        // Get payment method name
+        let paymentMethodName = null;
+        if (paymentMethodId) {
+          const [pmRows] = await connection.query<RowDataPacket[]>("SELECT name FROM payment_methods WHERE id = ?", [paymentMethodId]);
+          if (pmRows.length > 0) paymentMethodName = pmRows[0].name;
+        }
+
+        const paymentId = randomUUID();
+        const now = paymentDate || new Date().toISOString();
+
+        await connection.query(
+          `INSERT INTO payments (id, client_id, branch_id, invoice_id, customer_id, customer_name,
+            amount, payment_method_id, payment_method_name, payment_date, payment_type,
+            reference_number, notes, user_id, local_updated_at, is_synced)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 1)`,
+          [paymentId, clientId, branchId, invoiceId || null, resolvedCustomerId || null, customerName,
+           amount, paymentMethodId || null, paymentMethodName, now, paymentType,
+           referenceNumber || null, notes || null, userId]
+        );
+
+        // Update invoice paid amount if invoiceId provided
+        if (invoiceId) {
+          await connection.query(
+            `UPDATE invoices SET
+               paid_amount = paid_amount + ?,
+               remaining_amount = GREATEST(0, remaining_amount - ?),
+               payment_status = CASE
+                 WHEN (remaining_amount - ?) <= 0 THEN 'paid'
+                 WHEN (paid_amount + ?) > 0 THEN 'partial'
+                 ELSE payment_status END
+             WHERE id = ? AND client_id = ?`,
+            [amount, amount, amount, amount, invoiceId, clientId]
+          );
+        }
+
+        // Update customer balance
+        if (resolvedCustomerId) {
+          await connection.query(
+            "UPDATE customers SET balance = GREATEST(0, balance - ?) WHERE id = ?",
+            [amount, resolvedCustomerId]
+          );
+        }
+
+        await connection.commit();
+        return reply.code(201).send({ success: true, paymentId });
+      } catch (error) {
+        await connection.rollback();
+        const msg = error instanceof Error ? error.message : String(error);
+        logger.error({ error }, "Failed to create mobile payment");
+        return reply.code(500).send({ error: "فشل إضافة القبض", details: msg });
+      } finally {
+        connection.release();
       }
     }
   );

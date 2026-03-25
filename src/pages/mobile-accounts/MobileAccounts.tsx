@@ -163,6 +163,12 @@ const MobileAccounts = () => {
   const [resetAccount, setResetAccount] = useState<MobileAccount | null>(null);
   const [newPassword, setNewPassword] = useState("");
 
+  // Edit username dialog
+  const [editUsernameDialogOpen, setEditUsernameDialogOpen] = useState(false);
+  const [editUsernameAccount, setEditUsernameAccount] = useState<MobileAccount | null>(null);
+  const [newUsername, setNewUsername] = useState("");
+  const [savingUsername, setSavingUsername] = useState(false);
+
   // Bulk create dialog
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
   const [bulkEntityType, setBulkEntityType] = useState<EntityType>('customer');
@@ -492,6 +498,41 @@ const MobileAccounts = () => {
         description: "فشل في تغيير كلمة المرور",
         variant: "destructive",
       });
+    }
+  };
+
+  // ============================================================
+  // Edit Username
+  // ============================================================
+
+  const openEditUsernameDialog = (account: MobileAccount) => {
+    setEditUsernameAccount(account);
+    setNewUsername(account.username);
+    setEditUsernameDialogOpen(true);
+  };
+
+  const handleEditUsername = async () => {
+    if (!editUsernameAccount || !newUsername.trim()) return;
+    setSavingUsername(true);
+    try {
+      const httpClient = getFastifyClient();
+      await httpClient.put(`/api/mobile/accounts/${editUsernameAccount.id}`, {
+        username: newUsername.trim(),
+      });
+      toast({
+        title: "تم بنجاح",
+        description: `تم تغيير اسم المستخدم إلى ${newUsername.trim()}`,
+      });
+      setEditUsernameDialogOpen(false);
+      loadAccounts();
+    } catch (error: any) {
+      toast({
+        title: "خطأ",
+        description: error?.response?.data?.error || "فشل في تغيير اسم المستخدم",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingUsername(false);
     }
   };
 
@@ -889,6 +930,14 @@ const MobileAccounts = () => {
                           <Button
                             variant="ghost"
                             size="icon"
+                            title="تعديل اسم المستخدم"
+                            onClick={() => openEditUsernameDialog(account)}
+                          >
+                            <UserCheck className="h-4 w-4 text-purple-500" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             title="تغيير كلمة المرور"
                             onClick={() => openResetDialog(account)}
                           >
@@ -1178,6 +1227,45 @@ const MobileAccounts = () => {
             </Button>
             <Button onClick={handleResetPassword} disabled={!newPassword}>
               تغيير كلمة المرور
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ============================================ */}
+      {/* Edit Username Dialog */}
+      {/* ============================================ */}
+      <Dialog open={editUsernameDialogOpen} onOpenChange={setEditUsernameDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              <UserCheck className="h-5 w-5 inline ml-2 text-purple-500" />
+              تعديل اسم المستخدم
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              الحساب: <span className="font-medium">{editUsernameAccount?.full_name}</span>
+            </p>
+            <div className="space-y-1">
+              <Label>اسم المستخدم الجديد</Label>
+              <Input
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+                placeholder="أدخل اسم المستخدم"
+                dir="ltr"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditUsernameDialogOpen(false)}>
+              إلغاء
+            </Button>
+            <Button
+              onClick={handleEditUsername}
+              disabled={!newUsername.trim() || newUsername.trim() === editUsernameAccount?.username || savingUsername}
+            >
+              {savingUsername ? "جاري الحفظ..." : "حفظ"}
             </Button>
           </DialogFooter>
         </DialogContent>

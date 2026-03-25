@@ -23,7 +23,6 @@ CREATE TABLE IF NOT EXISTS customer_identification_numbers (
     label VARCHAR(50) DEFAULT 'primary',
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
     INDEX idx_customer_id (customer_id),
     INDEX idx_id_number (id_number),
     INDEX idx_is_active (is_active)
@@ -42,7 +41,6 @@ CREATE TABLE IF NOT EXISTS traders (
     longitude DECIMAL(11, 8),
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
     INDEX idx_client_id (client_id),
     INDEX idx_phone (phone),
     INDEX idx_is_active (is_active)
@@ -71,7 +69,6 @@ CREATE TABLE IF NOT EXISTS customer_phones (
     label VARCHAR(50) DEFAULT 'mobile',
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
     INDEX idx_customer_id (customer_id),
     INDEX idx_phone (phone),
     INDEX idx_is_active (is_active)

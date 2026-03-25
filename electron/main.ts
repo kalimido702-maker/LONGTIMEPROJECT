@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, dialog } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, dialog, session } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -88,7 +88,7 @@ if (!gotTheLock) {
         nodeIntegration: false,
         contextIsolation: true,
         sandbox: false,
-        webSecurity: !app.isPackaged, // تعطيل web security في packaged app
+        webSecurity: true,
       },
       // cancel view and window and edit buttons
       titleBarStyle: "hiddenInset",
@@ -138,6 +138,18 @@ if (!gotTheLock) {
 
   // عند استعداد التطبيق
   app.whenReady().then(() => {
+    // Allow HTTP requests from file:// (needed for non-HTTPS backend)
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [
+            "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: http: ws: https: wss:"
+          ],
+        },
+      });
+    });
+
     // Register License IPC handlers
     registerLicenseHandlers();
     // Register WhatsApp IPC handlers

@@ -183,11 +183,24 @@ class NotificationService {
     }
   }
 
+  /// Mark notification as read on the backend
+  static Future<void> _markNotificationRead(Map<String, dynamic> data) async {
+    final notificationId = data['notificationId'] as String? ?? '';
+    if (notificationId.isEmpty) return;
+    try {
+      final api = ApiService();
+      await api.post('/api/notifications/$notificationId/mark-read', data: {});
+    } catch (_) {}
+  }
+
   /// Navigate based on notification data
   static void _handleNotificationNavigation(Map<String, dynamic> data) {
     final type = data['type'] as String? ?? '';
     final referenceId = data['referenceId'] as String? ?? '';
     // referenceType available in data['referenceType'] if needed
+
+    // Mark as read when user taps the notification
+    _markNotificationRead(data);
 
     final context = rootNavigatorKey.currentContext;
     if (context == null) return;

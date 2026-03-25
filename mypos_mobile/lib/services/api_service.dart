@@ -374,6 +374,54 @@ class ApiService {
   }
 
   // ============================================================
+  // Products
+  // ============================================================
+
+  Future<List<Map<String, dynamic>>> getProducts({
+    String? search,
+    String? categoryId,
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    final response = await _dio.get('/api/mobile/products', queryParameters: {
+      if (search != null && search.isNotEmpty) 'search': search,
+      if (categoryId != null) 'category_id': categoryId,
+      'limit': limit,
+      'offset': offset,
+    });
+    final data = response.data['data'] as List? ?? [];
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  // ============================================================
+  // Payment Methods
+  // ============================================================
+
+  Future<List<Map<String, dynamic>>> getPaymentMethods() async {
+    final response = await _dio.get('/api/mobile/payment-methods');
+    final data = response.data['data'] as List? ?? [];
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  // ============================================================
+  // Create Invoice
+  // ============================================================
+
+  Future<Map<String, dynamic>> createInvoice(Map<String, dynamic> data) async {
+    final response = await _dio.post('/api/mobile/invoices', data: data);
+    return response.data as Map<String, dynamic>;
+  }
+
+  // ============================================================
+  // Create Payment (Receipt)
+  // ============================================================
+
+  Future<Map<String, dynamic>> createPayment(Map<String, dynamic> data) async {
+    final response = await _dio.post('/api/mobile/payments', data: data);
+    return response.data as Map<String, dynamic>;
+  }
+
+  // ============================================================
   // Generic helpers
   // ============================================================
 

@@ -23,6 +23,7 @@ export interface NotificationPayload {
   title: string;
   body: string;
   type: NotificationType;
+  imageUrl?: string | null;
   referenceId?: string | null;
   referenceType?: string | null;
   data?: Record<string, string>;
@@ -99,6 +100,7 @@ class NotificationService {
       title,
       body,
       type,
+      imageUrl,
       referenceId,
       referenceType,
       data,
@@ -153,7 +155,7 @@ class NotificationService {
         referenceType: referenceType || "",
         notificationId,
         ...data,
-      });
+      }, imageUrl);
     } catch (error) {
       logger.error({ error }, "Failed to send push notification");
     }
@@ -399,7 +401,8 @@ class NotificationService {
     tokens: string[],
     title: string,
     body: string,
-    data: Record<string, string>
+    data: Record<string, string>,
+    imageUrl?: string | null
   ): Promise<void> {
     if (tokens.length === 0) return;
 
@@ -409,6 +412,7 @@ class NotificationService {
       notification: {
         title,
         body,
+        ...(imageUrl ? { imageUrl } : {}),
       },
       data,
       android: {
@@ -417,6 +421,7 @@ class NotificationService {
           channelId: "mypos_notifications",
           sound: "default",
           clickAction: "FLUTTER_NOTIFICATION_CLICK",
+          ...(imageUrl ? { imageUrl } : {}),
         },
       },
       apns: {
@@ -427,6 +432,7 @@ class NotificationService {
             badge: 1,
           },
         },
+        ...(imageUrl ? { fcmOptions: { imageUrl } } : {}),
       },
     };
 
@@ -490,7 +496,8 @@ class NotificationService {
     title: string,
     body: string,
     type: NotificationType = "info",
-    data?: Record<string, string>
+    data?: Record<string, string>,
+    imageUrl?: string | null
   ): Promise<void> {
     try {
       // Get all active tokens for this client/branch
@@ -515,7 +522,7 @@ class NotificationService {
       await this.sendPushToTokens(tokens, title, body, {
         type,
         ...data,
-      });
+      }, imageUrl);
 
       logger.info(
         { clientId, branchId, tokenCount: tokens.length },

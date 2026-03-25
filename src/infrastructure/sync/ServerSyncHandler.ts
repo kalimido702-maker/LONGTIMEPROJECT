@@ -1,36 +1,7 @@
 import { SyncEngine } from "./SyncEngine";
 import { getDatabaseService } from "../database/DatabaseService";
 
-// Mapping from snake_case table names (server) to camelCase store names (IndexedDB)
-const TABLE_TO_STORE_MAP: Record<string, string> = {
-    'product_categories': 'productCategories',
-    'product_units': 'productUnits',
-    'price_types': 'priceTypes',
-    'invoice_items': 'invoiceItems',
-    'sales_returns': 'salesReturns',
-    'purchase_items': 'purchaseItems',
-    'purchase_returns': 'purchaseReturns',
-    'expense_categories': 'expenseCategories',
-    'expense_items': 'expenseItems',
-    'deposit_sources': 'depositSources',
-    'payment_methods': 'paymentMethods',
-    'audit_logs': 'auditLogs',
-    'cash_movements': 'cashMovements',
-    'employee_advances': 'employeeAdvances',
-    'employee_deductions': 'employeeDeductions',
-    'whatsapp_accounts': 'whatsappAccounts',
-    'whatsapp_messages': 'whatsappMessages',
-    'whatsapp_campaigns': 'whatsappCampaigns',
-    'whatsapp_tasks': 'whatsappTasks',
-    'product_stock': 'productStock',
-    'purchase_payments': 'purchasePayments',
-    'restaurant_tables': 'tables',
-    'sales_reps': 'salesReps',
-};
-
-function getStoreName(tableName: string): string {
-    return TABLE_TO_STORE_MAP[tableName] || tableName;
-}
+import { getStoreName } from './syncConstants';
 
 /**
  * ServerSyncHandler - Handles incoming sync updates from the server

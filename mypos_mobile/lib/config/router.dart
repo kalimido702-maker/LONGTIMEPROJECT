@@ -18,6 +18,8 @@ import '../screens/supervisors_screen.dart';
 import '../screens/supervisor_detail_screen.dart';
 import '../screens/shell_screen.dart';
 import '../screens/profile_screen.dart';
+import '../screens/create_invoice_screen.dart';
+import '../screens/create_payment_screen.dart';
 
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
@@ -73,6 +75,22 @@ GoRouter createRouter(AuthProvider authProvider) {
                 ),
               ),
             ],
+          ),
+          GoRoute(
+            path: '/invoices/create',
+            parentNavigatorKey: rootNavigatorKey,
+            builder: (context, state) => const CreateInvoiceScreen(),
+          ),
+          GoRoute(
+            path: '/payments/create',
+            parentNavigatorKey: rootNavigatorKey,
+            builder: (context, state) {
+              final extra = state.extra as Map<String, dynamic>?;
+              return CreatePaymentScreen(
+                customer: extra?['customer'],
+                invoice: extra?['invoice'],
+              );
+            },
           ),
           GoRoute(
             path: '/payments',

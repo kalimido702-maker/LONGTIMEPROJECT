@@ -33,6 +33,7 @@ interface BulkCreateAccountBody {
 }
 
 interface UpdateAccountBody {
+  username?: string;
   password?: string;
   isActive?: boolean;
   parentUserId?: string | null;
@@ -681,6 +682,23 @@ export async function mobileAccountRoutes(server: FastifyInstance) {
 
         const updates: string[] = [];
         const params: any[] = [];
+
+        if (body.username) {
+          const newUsername = body.username.trim();
+          if (newUsername.length < 3) {
+            return reply.code(400).send({ error: "اسم المستخدم يجب أن يكون 3 أحرف على الأقل" });
+          }
+          // Check uniqueness (exclude current account)
+          const [usernameCheck] = await db.query<RowDataPacket[]>(
+            "SELECT id FROM users WHERE username = ? AND id != ? AND is_deleted = 0",
+            [newUsername, id]
+          );
+          if (usernameCheck.length > 0) {
+            return reply.code(400).send({ error: `اسم المستخدم "${newUsername}" مستخدم بالفعل` });
+          }
+          updates.push("username = ?");
+          params.push(newUsername);
+        }
 
         if (body.password) {
           const passwordHash = await bcrypt.hash(body.password, 10);

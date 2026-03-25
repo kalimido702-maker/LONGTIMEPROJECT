@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 import '../config/theme.dart';
+import '../providers/auth_provider.dart';
 import '../providers/data_provider.dart';
 import '../models/payment.dart';
 import '../widgets/date_filter_widget.dart';
@@ -189,6 +191,21 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
           ),
         ],
       ),
+      floatingActionButton: Builder(builder: (context) {
+        final user = context.watch<AuthProvider>().user;
+        final canCreate = user != null &&
+            (user.isAdmin || user.isSalesRep || user.isSalesManager ||
+             user.isGeneralManager || user.hasPermission('create_payments'));
+        if (!canCreate) return const SizedBox.shrink();
+        return FloatingActionButton(
+          onPressed: () async {
+            await context.push('/payments/create');
+            context.read<DataProvider>().loadPayments(refresh: true);
+          },
+          backgroundColor: AppTheme.primaryColor,
+          child: const Icon(LucideIcons.plus, color: Colors.white),
+        );
+      }),
     );
   }
 

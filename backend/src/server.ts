@@ -4,6 +4,8 @@ import fastifyCors from "@fastify/cors";
 import fastifyRateLimit from "@fastify/rate-limit";
 import fastifyWebsocket from "@fastify/websocket";
 import fastifyMultipart from "@fastify/multipart";
+import { resolve } from "path";
+import { createReadStream, existsSync } from "fs";
 import { env } from "./config/env.js";
 import { jwtConfig } from "./config/jwt.js";
 import logger from "./config/logger.js";
@@ -44,6 +46,7 @@ import { salesRepRoutes } from "./routes/salesReps.js";
 import { mobileRoutes } from "./routes/mobile.js";
 import { mobileAccountRoutes } from "./routes/mobile-accounts.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
+import { notificationRoutes } from "./routes/notifications.js";
 import {
   initializeWhatsAppService,
   shutdownWhatsAppService,
@@ -95,6 +98,21 @@ async function registerPlugins() {
     limits: {
       fileSize: 500 * 1024 * 1024, // 500MB max file size
     },
+  });
+
+  // Serve uploaded notification images
+  fastify.get("/uploads/notification-images/:filename", async (request, reply) => {
+    const { filename } = request.params as { filename: string };
+    // Prevent path traversal
+    if (filename.includes("..") || filename.includes("/")) {
+      return reply.code(400).send({ error: "Invalid filename" });
+    }
+    const filePath = resolve(process.cwd(), "data/notification-images", filename);
+    if (!existsSync(filePath)) return reply.code(404).send({ error: "Not found" });
+    const ext = filename.split(".").pop()?.toLowerCase() || "jpg";
+    const mimeMap: Record<string, string> = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp" };
+    reply.header("Content-Type", mimeMap[ext] || "application/octet-stream");
+    return reply.send(createReadStream(filePath));
   });
 
   // WebSocket
@@ -190,6 +208,11 @@ async function registerRoutes() {
   await fastify.register(adminLicensesRoutes, { prefix: `${env.API_PREFIX}/admin/licenses` });
   await fastify.register(adminBranchesRoutes, { prefix: `${env.API_PREFIX}/admin/branches` });
   await fastify.register(adminPackagesRoutes, { prefix: `${env.API_PREFIX}/admin/packages` });
+
+  // Notifications routes
+  await fastify.register(notificationRoutes, {
+    prefix: `${env.API_PREFIX}/notifications`,
+  });
 
   // WhatsApp routes
   await fastify.register(whatsappRoutes, {
