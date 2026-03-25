@@ -58,14 +58,12 @@ class _CreatePaymentScreenState extends State<CreatePaymentScreen> {
     setState(() => _isLoading = true);
     try {
       final api = ApiService();
-      final results = await Future.wait([
-        api.getCustomers(),
-        api.getPaymentMethods(),
-      ]);
+      final customersRes = await api.getCustomers();
+      final paymentMethods = await api.getPaymentMethods();
       setState(() {
-        final customersData = results[0]['data'] as List? ?? [];
+        final customersData = customersRes['data'] as List? ?? [];
         _customers = customersData.cast<Map<String, dynamic>>();
-        _paymentMethods = results[1];
+        _paymentMethods = paymentMethods;
         if (_paymentMethods.isNotEmpty) _selectedPaymentMethod = _paymentMethods.first;
         if (widget.customer != null) {
           _selectedCustomer = _customers.firstWhere(
