@@ -264,7 +264,7 @@ const WhatsAppManagement = () => {
           if (localAcc) {
             await db.update("whatsappAccounts", merged);
           } else {
-            await db.add("whatsappAccounts", merged);
+            await db.update("whatsappAccounts", merged);
           }
           localMap.delete(serverAcc.id);
         }
