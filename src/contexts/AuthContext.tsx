@@ -131,6 +131,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  // Hash password using SHA-256 for local storage
+  const hashPassword = async (password: string): Promise<string> => {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password + "_HPOS_SALT_2024");
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  };
+
   const login = async (
     username: string,
     password: string
@@ -165,6 +174,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             wsClient.connect();
           }
 
+          // Hash password for local fallback auth
+          const passwordHash = await hashPassword(password);
+
           // Get or create local user record
           const users = await db.getAll<User>("users");
           let localUser = users.find((u) => u.username === username);
@@ -175,13 +187,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               id: backendUser.id || username,
               username: backendUser.username || username,
               name: backendUser.name || username,
-              password: "", // Don't store password locally
+              password: passwordHash, // Store hashed password for offline fallback
               role: backendUser.role || "cashier",
               roleId: backendUser.roleId || "cashier",
               active: true,
               createdAt: new Date().toISOString(),
             };
             await db.add("users", localUser);
+          } else {
+            // Update existing user with fresh password hash and backend data
+            localUser = {
+              ...localUser,
+              password: passwordHash,
+              name: backendUser.name || localUser.name,
+              role: backendUser.role || localUser.role,
+              roleId: backendUser.roleId || localUser.roleId,
+              active: true,
+            };
+            await db.update("users", localUser);
           }
 
           setUser(localUser);
@@ -197,13 +220,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           backendError?.message || backendError
         );
 
-        // Fallback to local authentication
+        // Fallback to local authentication using stored password hash
         const users = await db.getAll<User>("users");
+        const passwordHash = await hashPassword(password);
         const foundUser = users.find(
-          (u) => u.username === username && u.password === password && u.active
+          (u) =>
+            u.username === username &&
+            u.active &&
+            (u.password === passwordHash || u.password === password)
         );
 
         if (foundUser) {
+          // Update password to hash format if it was plaintext
+          if (foundUser.password === password && foundUser.password !== passwordHash) {
+            foundUser.password = passwordHash;
+            await db.update("users", foundUser);
+          }
+
           setUser(foundUser);
           localStorage.setItem("currentUserId", foundUser.id);
           await loadUserRole(foundUser);
