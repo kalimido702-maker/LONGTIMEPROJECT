@@ -215,82 +215,114 @@ if (!gotTheLock) {
         timeout?: number;
       }
     ) => {
-      try {
-        const { default: http } = await import("http");
-        const { default: https } = await import("https");
-        const { URL } = await import("url");
+      const http = await import("http");
+      const https = await import("https");
+      const { URL } = await import("url");
 
-        const url = new URL(options.url);
-        const isHttps = url.protocol === "https:";
-        const client = isHttps ? https : http;
-        const bodyStr = options.body ? JSON.stringify(options.body) : undefined;
+      const MAX_REDIRECTS = 5;
 
+      const doRequest = (
+        requestUrl: string,
+        method: string,
+        bodyStr: string | undefined,
+        redirectCount: number
+      ): Promise<{ success: boolean; status: number; data?: any; error?: string }> => {
         return new Promise((resolve) => {
-          const req = client.request(
-            {
-              hostname: url.hostname,
-              port: url.port || (isHttps ? 443 : 80),
-              path: url.pathname + url.search,
-              method: options.method || "GET",
-              headers: {
-                "Content-Type": "application/json",
-                ...(options.headers || {}),
-                ...(bodyStr
-                  ? { "Content-Length": Buffer.byteLength(bodyStr) }
-                  : {}),
+          try {
+            const url = new URL(requestUrl);
+            const isHttps = url.protocol === "https:";
+            const client = isHttps ? https.default : http.default;
+
+            const req = client.request(
+              {
+                hostname: url.hostname,
+                port: url.port || (isHttps ? 443 : 80),
+                path: url.pathname + url.search,
+                method: method,
+                headers: {
+                  "Content-Type": "application/json",
+                  "Accept": "application/json",
+                  "User-Agent": "HPOS-Desktop/1.0",
+                  ...(options.headers || {}),
+                  ...(bodyStr
+                    ? { "Content-Length": String(Buffer.byteLength(bodyStr)) }
+                    : {}),
+                },
+                timeout: options.timeout || 30000,
               },
-              timeout: options.timeout || 30000,
-            },
-            (res) => {
-              let data = "";
-              res.on("data", (chunk: Buffer) => {
-                data += chunk.toString();
-              });
-              res.on("end", () => {
-                let parsed: any = data;
-                try {
-                  parsed = JSON.parse(data);
-                } catch {
-                  // keep as string
+              (res) => {
+                // Handle redirects (301, 302, 307, 308)
+                const statusCode = res.statusCode || 0;
+                if (
+                  [301, 302, 307, 308].includes(statusCode) &&
+                  res.headers.location &&
+                  redirectCount < MAX_REDIRECTS
+                ) {
+                  // 307/308 preserve method, 301/302 convert to GET
+                  const newMethod = [307, 308].includes(statusCode) ? method : "GET";
+                  const newBody = [307, 308].includes(statusCode) ? bodyStr : undefined;
+                  const redirectUrl = new URL(res.headers.location, requestUrl).toString();
+                  
+                  // Consume the response body before redirecting
+                  res.resume();
+                  
+                  resolve(doRequest(redirectUrl, newMethod, newBody, redirectCount + 1));
+                  return;
                 }
-                resolve({
-                  success: true,
-                  status: res.statusCode,
-                  data: parsed,
+
+                let data = "";
+                res.on("data", (chunk: Buffer) => {
+                  data += chunk.toString();
                 });
+                res.on("end", () => {
+                  let parsed: any = data;
+                  try {
+                    parsed = JSON.parse(data);
+                  } catch {
+                    // keep as string
+                  }
+                  resolve({
+                    success: true,
+                    status: statusCode,
+                    data: parsed,
+                  });
+                });
+              }
+            );
+
+            req.on("error", (err: Error) => {
+              resolve({
+                success: false,
+                status: 0,
+                error: err.message,
               });
+            });
+
+            req.on("timeout", () => {
+              req.destroy();
+              resolve({
+                success: false,
+                status: 0,
+                error: "Request timed out",
+              });
+            });
+
+            if (bodyStr) {
+              req.write(bodyStr);
             }
-          );
-
-          req.on("error", (err: Error) => {
+            req.end();
+          } catch (err: any) {
             resolve({
               success: false,
               status: 0,
-              error: err.message,
+              error: err.message || "Unknown error",
             });
-          });
-
-          req.on("timeout", () => {
-            req.destroy();
-            resolve({
-              success: false,
-              status: 0,
-              error: "Request timed out",
-            });
-          });
-
-          if (bodyStr) {
-            req.write(bodyStr);
           }
-          req.end();
         });
-      } catch (err: any) {
-        return {
-          success: false,
-          status: 0,
-          error: err.message || "Unknown error",
-        };
-      }
+      };
+
+      const bodyStr = options.body ? JSON.stringify(options.body) : undefined;
+      return doRequest(options.url, options.method || "GET", bodyStr, 0);
     }
   );
 
