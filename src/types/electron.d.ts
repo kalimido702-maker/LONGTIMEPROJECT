@@ -130,6 +130,20 @@ declare global {
           error?: string;
         }>;
       };
+      http: {
+        request: (options: {
+          url: string;
+          method: string;
+          headers?: Record<string, string>;
+          body?: any;
+          timeout?: number;
+        }) => Promise<{
+          success: boolean;
+          status: number;
+          data?: any;
+          error?: string;
+        }>;
+      };
     };
   }
 }

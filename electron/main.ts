@@ -200,6 +200,100 @@ if (!gotTheLock) {
 
   // ==================== IPC Handlers ====================
 
+  // ==================== HTTP Proxy ====================
+  // Proxy HTTP requests through Node.js main process to bypass
+  // Chromium restrictions on POST/WS from file:// protocol (Windows)
+  ipcMain.handle(
+    "http:request",
+    async (
+      _event,
+      options: {
+        url: string;
+        method: string;
+        headers?: Record<string, string>;
+        body?: any;
+        timeout?: number;
+      }
+    ) => {
+      try {
+        const { default: http } = await import("http");
+        const { default: https } = await import("https");
+        const { URL } = await import("url");
+
+        const url = new URL(options.url);
+        const isHttps = url.protocol === "https:";
+        const client = isHttps ? https : http;
+        const bodyStr = options.body ? JSON.stringify(options.body) : undefined;
+
+        return new Promise((resolve) => {
+          const req = client.request(
+            {
+              hostname: url.hostname,
+              port: url.port || (isHttps ? 443 : 80),
+              path: url.pathname + url.search,
+              method: options.method || "GET",
+              headers: {
+                "Content-Type": "application/json",
+                ...(options.headers || {}),
+                ...(bodyStr
+                  ? { "Content-Length": Buffer.byteLength(bodyStr) }
+                  : {}),
+              },
+              timeout: options.timeout || 30000,
+            },
+            (res) => {
+              let data = "";
+              res.on("data", (chunk: Buffer) => {
+                data += chunk.toString();
+              });
+              res.on("end", () => {
+                let parsed: any = data;
+                try {
+                  parsed = JSON.parse(data);
+                } catch {
+                  // keep as string
+                }
+                resolve({
+                  success: true,
+                  status: res.statusCode,
+                  data: parsed,
+                });
+              });
+            }
+          );
+
+          req.on("error", (err: Error) => {
+            resolve({
+              success: false,
+              status: 0,
+              error: err.message,
+            });
+          });
+
+          req.on("timeout", () => {
+            req.destroy();
+            resolve({
+              success: false,
+              status: 0,
+              error: "Request timed out",
+            });
+          });
+
+          if (bodyStr) {
+            req.write(bodyStr);
+          }
+          req.end();
+        });
+      } catch (err: any) {
+        return {
+          success: false,
+          status: 0,
+          error: err.message || "Unknown error",
+        };
+      }
+    }
+  );
+
   // معلومات التطبيق
   ipcMain.handle("get-app-version", () => {
     return app.getVersion();
