@@ -3,9 +3,66 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { SettingsProvider } from "@/contexts/SettingsContext";
+import { Button } from "@/components/ui/button";
+import { XCircle } from "lucide-react";
+
+// Lazy-load LogViewer for global shortcut
+const LogViewer = lazy(() => import("@/pages/admin/LogViewer"));
+
+/**
+ * GlobalLogViewerShortcut - يشتغل في كل مكان حتى صفحة تسجيل الدخول
+ * Ctrl+Shift+L (أو Cmd+Shift+L على macOS)
+ */
+function GlobalLogViewerShortcut() {
+  const [showLogViewer, setShowLogViewer] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isModifier = e.ctrlKey || e.metaKey;
+      if (isModifier && e.shiftKey && (e.key === 'L' || e.key === 'l' || e.code === 'KeyL')) {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowLogViewer((prev) => !prev);
+      }
+      if (e.key === 'Escape' && showLogViewer) {
+        setShowLogViewer(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [showLogViewer]);
+
+  if (!showLogViewer) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-background">
+      <div className="absolute top-2 left-2 z-10">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setShowLogViewer(false)}
+          className="text-muted-foreground hover:text-foreground"
+        >
+          <XCircle className="h-5 w-5 ml-1" />
+          إغلاق (Esc)
+        </Button>
+      </div>
+      <Suspense
+        fallback={
+          <div className="flex items-center justify-center h-full">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+        }
+      >
+        <LogViewer />
+      </Suspense>
+    </div>
+  );
+}
 
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { AppProvider } from "@/contexts/AppContext";
@@ -137,6 +194,8 @@ const App = () => {
       <TooltipProvider>
         <Toaster />
         <Sonner />
+        {/* سجلات النظام - Ctrl+Shift+L يشتغل في كل مكان */}
+        <GlobalLogViewerShortcut />
         <HashRouter>
           <LicenseGuard>
             <AppProvider>
