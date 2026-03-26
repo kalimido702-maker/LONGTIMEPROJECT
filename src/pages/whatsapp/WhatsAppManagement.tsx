@@ -228,7 +228,7 @@ const WhatsAppManagement = () => {
         serverAccounts = serverData.map((sa) => ({
           id: sa.id,
           name: sa.name,
-          phone: sa.phone || "",
+          phone: sa.phone || `_pending_${sa.id}`,
           status: (sa.liveStatus?.status || sa.status || "disconnected") as WhatsAppAccount["status"],
           dailyLimit: sa.daily_limit || 100,
           dailySent: sa.daily_sent || 0,
@@ -345,7 +345,7 @@ const WhatsAppManagement = () => {
       const account: WhatsAppAccount = {
         id: Date.now().toString(),
         name: newAccount.name,
-        phone: "", // سيتم تحديثه تلقائياً عند الربط
+        phone: `_pending_${Date.now()}`, // placeholder فريد — سيتم تحديثه عند الربط
         status: "disconnected",
         dailyLimit: newAccount.dailyLimit,
         dailySent: 0,
