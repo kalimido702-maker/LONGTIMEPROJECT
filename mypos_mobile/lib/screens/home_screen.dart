@@ -346,7 +346,66 @@ class _HomeScreenState extends State<HomeScreen> {
     final isGeneralManager = user.isGeneralManager;
     final isSupervisor = user.isSupervisor;
 
+    final canCreateInvoice = user.isAdmin ||
+        user.isSalesRep ||
+        user.isSalesManager ||
+        user.isGeneralManager ||
+        user.hasPermission('create_invoices');
+
+    final canCreatePayment = user.isAdmin ||
+        user.isSalesRep ||
+        user.isSalesManager ||
+        user.isGeneralManager ||
+        user.hasPermission('create_payments');
+
     return [
+      // أزرار الإجراءات السريعة
+      if (canCreateInvoice || canCreatePayment) ...[                          
+        Row(
+          children: [
+            if (canCreateInvoice)
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    await context.push('/invoices/create');
+                    dataProvider.loadInvoices(refresh: true);
+                  },
+                  icon: const Icon(LucideIcons.plus, size: 18),
+                  label: const Text('فاتورة جديدة'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+            if (canCreateInvoice && canCreatePayment) const SizedBox(width: 12),
+            if (canCreatePayment)
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    await context.push('/payments/create');
+                    dataProvider.loadPayments(refresh: true);
+                  },
+                  icon: const Icon(LucideIcons.wallet, size: 18),
+                  label: const Text('إضافة قبض'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.success,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 16),
+      ],
       // ── Admin or General Manager: supervisors + reps + customers summary ──
       if (isAdmin || isGeneralManager) ...[
         _buildSummaryRow(

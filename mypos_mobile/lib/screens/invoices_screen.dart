@@ -6,7 +6,6 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
 import '../config/theme.dart';
 import '../providers/data_provider.dart';
-import '../providers/auth_provider.dart';
 import '../models/invoice.dart';
 import '../widgets/date_filter_widget.dart';
 
@@ -199,27 +198,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
           ),
         ],
       ),
-      floatingActionButton: Builder(
-        builder: (context) {
-          final user = context.watch<AuthProvider>().user;
-          final canCreate =
-              user != null &&
-              (user.isAdmin ||
-                  user.isSalesRep ||
-                  user.isSalesManager ||
-                  user.isGeneralManager ||
-                  user.hasPermission('create_invoices'));
-          if (!canCreate) return const SizedBox.shrink();
-          return FloatingActionButton(
-            onPressed: () async {
-              await context.push('/invoices/create');
-              context.read<DataProvider>().loadInvoices(refresh: true);
-            },
-            backgroundColor: AppColors.primary,
-            child: const Icon(LucideIcons.plus, color: Colors.white),
-          );
-        },
-      ),
+
     );
   }
 
@@ -326,10 +305,6 @@ class _InvoiceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isPaid = invoice.isPaid;
-    final statusColor = isPaid ? AppColors.success : AppColors.warning;
-    // final statusText = isPaid ? 'مدفوعة' : 'غير مدفوعة';
-
     DateTime? parsedDate;
     try {
       parsedDate = DateTime.parse(invoice.createdAt ?? '');
