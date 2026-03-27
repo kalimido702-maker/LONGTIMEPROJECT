@@ -35,6 +35,7 @@ COPY --from=builder /app/dist ./dist
 
 # Copy database migrations
 COPY --from=builder /app/src/database ./src/database
+COPY --from=builder /app/src/database/migrations ./dist/database/migrations
 
 # Create logs directory
 RUN mkdir -p logs data

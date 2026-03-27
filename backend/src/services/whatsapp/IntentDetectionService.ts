@@ -243,6 +243,77 @@ export async function detectIntent(message: string): Promise<IntentResult> {
 }
 
 /**
+ * Answer a general inquiry using AI with company context.
+ * Used when the sender asks something outside the bot's structured commands.
+ * Works for both registered and unregistered customers.
+ *
+ * @param message   - the user's question
+ * @param companyInfo - owner-provided context (products, hours, address, etc.)
+ */
+export async function answerGeneralInquiry(
+  message: string,
+  companyInfo: string,
+): Promise<string> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiUrl = process.env.OPENROUTER_API_URL || 'https://openrouter.ai/api/v1/chat/completions';
+
+  if (!apiKey) {
+    logger.warn('answerGeneralInquiry: No OPENROUTER_API_KEY - returning fallback');
+    return 'عذراً، لا يمكنني الإجابة على هذا السؤال حالياً.\nتواصل معنا مباشرة للمساعدة 🙏';
+  }
+
+  const systemPrompt = companyInfo
+    ? `أنت مساعد ذكي لشركة على واتساب. تعامل مع العملاء بأدب واحترافية.
+استخدم المعلومات التالية للرد على استفسارات العملاء:
+
+${companyInfo}
+
+قواعد:
+- رد دائماً باللغة العربية بأسلوب ودود ومختصر
+- لا تخترع معلومات غير موجودة في السياق أعلاه
+- إذا لم تعرف الإجابة قل ذلك بصراحة واطلب التواصل المباشر`
+    : `أنت مساعد ذكي على واتساب. رد على استفسارات العملاء باللغة العربية بأسلوب ودود ومختصر.
+إذا لم تعرف الإجابة اطلب التواصل المباشر مع الشركة.`;
+
+  try {
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'HTTP-Referer': process.env.APP_URL || 'https://mypos.app',
+        'X-Title': 'MYPOS WhatsApp Bot',
+      },
+      body: JSON.stringify({
+        model: process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: message },
+        ],
+        temperature: 0.7,
+        max_tokens: 300,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`OpenRouter API error: ${response.status}`);
+    }
+
+    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const content = data.choices?.[0]?.message?.content?.trim();
+
+    if (!content) throw new Error('Empty AI response');
+
+    logger.info({ messageSnippet: message.slice(0, 40) }, 'answerGeneralInquiry: AI reply generated');
+    return content;
+  } catch (error) {
+    logger.error({ error }, 'answerGeneralInquiry: AI call failed');
+    return 'عذراً، حدث خطأ مؤقت.\nاتصل بنا مباشرة للمساعدة 🙏';
+  }
+}
+
+
+/**
  * Find customer by ID number (national ID / driver license / etc.)
  */
 export async function findCustomerByIdNumber(

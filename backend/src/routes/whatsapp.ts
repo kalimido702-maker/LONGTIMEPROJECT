@@ -72,7 +72,7 @@ export async function whatsappRoutes(server: FastifyInstance): Promise<void> {
 
     const rows = await query<any>(
       `SELECT id, name, phone, status, daily_limit, daily_sent, anti_spam_delay,
-              is_active, last_reset_date, created_at, last_connected_at
+              is_active, bot_enabled, last_reset_date, created_at, last_connected_at
        FROM whatsapp_accounts
        WHERE client_id = ? AND is_deleted = 0
        ORDER BY created_at DESC`,
@@ -147,6 +147,14 @@ export async function whatsappRoutes(server: FastifyInstance): Promise<void> {
       if (updates.antiSpamDelay !== undefined) {
         setClauses.push("anti_spam_delay = ?");
         values.push(updates.antiSpamDelay);
+      }
+      if ((updates as any).isActive !== undefined) {
+        setClauses.push("is_active = ?");
+        values.push((updates as any).isActive ? 1 : 0);
+      }
+      if ((updates as any).botEnabled !== undefined) {
+        setClauses.push("bot_enabled = ?");
+        values.push((updates as any).botEnabled ? 1 : 0);
       }
 
       if (setClauses.length === 0) {
@@ -345,6 +353,29 @@ export async function whatsappRoutes(server: FastifyInstance): Promise<void> {
    */
   server.get("/bot/settings", async (request: FastifyRequest, reply: FastifyReply) => {
     const { clientId } = request.user!;
+
+    // جلب من DB أولاً لضمان البيانات مدمجة بعد إعادة تشغيل السيرفر
+    try {
+      const rows = await query<any>(
+        `SELECT * FROM whatsapp_bot_settings WHERE client_id = ? LIMIT 1`,
+        [String(clientId)],
+      );
+      if (rows[0]) {
+        const dbSettings: BotSettings = {
+          enabled: Boolean(rows[0].enabled),
+          allowedSenders: rows[0].allowed_senders || 'all',
+          welcomeMessage: rows[0].welcome_message || '',
+          unknownCommandMessage: rows[0].unknown_command_message || '',
+          companyInfo: rows[0].company_info || undefined,
+        };
+        // تحديث الذاكرة بالبيانات المحملة من DB
+        saveBotSettings(String(clientId), dbSettings);
+        return reply.send({ data: dbSettings });
+      }
+    } catch (dbErr) {
+      logger.warn({ dbErr, clientId }, 'Failed to load bot settings from DB');
+    }
+
     const settings = getBotSettings(String(clientId));
     return reply.send({ data: settings });
   });
@@ -358,7 +389,35 @@ export async function whatsappRoutes(server: FastifyInstance): Promise<void> {
       const { clientId } = request.user!;
       const settings = request.body;
 
+      // حفظ في الذاكرة
       saveBotSettings(String(clientId), settings);
+
+      // حفظ في DB ليبقى بعد إعادة تشغيل السيرفر
+      try {
+        await query(
+          `INSERT INTO whatsapp_bot_settings
+             (client_id, enabled, allowed_senders, welcome_message, unknown_command_message, company_info, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, NOW())
+           ON DUPLICATE KEY UPDATE
+             enabled = VALUES(enabled),
+             allowed_senders = VALUES(allowed_senders),
+             welcome_message = VALUES(welcome_message),
+             unknown_command_message = VALUES(unknown_command_message),
+             company_info = VALUES(company_info),
+             updated_at = NOW()`,
+          [
+            String(clientId),
+            settings.enabled ? 1 : 0,
+            settings.allowedSenders,
+            settings.welcomeMessage,
+            settings.unknownCommandMessage,
+            settings.companyInfo || null,
+          ],
+        );
+      } catch (dbErr) {
+        logger.error({ dbErr, clientId }, 'Failed to persist bot settings to DB');
+      }
+
       return reply.send({ message: "✅ تم حفظ الإعدادات" });
     },
   );

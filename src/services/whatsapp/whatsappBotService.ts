@@ -35,6 +35,8 @@ export interface BotSettings {
     allowedSenders: "all" | "customers" | "supervisors" | "salesreps";
     welcomeMessage: string;
     unknownCommandMessage: string;
+    /** معلومات الشركة - تُستخدم كـ context للـ AI */
+    companyInfo?: string;
 }
 
 const DEFAULT_SETTINGS: BotSettings = {

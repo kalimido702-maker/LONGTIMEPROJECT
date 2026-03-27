@@ -71,6 +71,7 @@ export interface WhatsAppAccount {
   lastResetDate: string;
   antiSpamDelay: number;
   isActive: boolean;
+  botEnabled: boolean;
   createdAt: string;
   lastConnectedAt?: string;
 }

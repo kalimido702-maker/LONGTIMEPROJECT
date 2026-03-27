@@ -29,6 +29,7 @@ import { logger } from "../../config/logger.js";
 import { BotReply, BotSettings, IntentResult } from "./types.js";
 import {
   detectIntent,
+  answerGeneralInquiry,
   findCustomerByPhoneEnhanced,
   findCustomerByIdNumber,
   findNearestTraders,
@@ -59,6 +60,31 @@ export function saveBotSettings(clientId: string, settings: BotSettings): void {
 }
 
 /**
+ * تحميل إعدادات البوت من قاعدة البيانات وتخزينها في الذاكرة
+ * يُستدعى تلقائياً عند أول رسالة لكل عميل (lazy loading)
+ */
+async function loadBotSettingsFromDB(clientId: string): Promise<void> {
+  try {
+    const rows = await query<any>(
+      `SELECT * FROM whatsapp_bot_settings WHERE client_id = ? LIMIT 1`,
+      [clientId],
+    );
+    if (rows[0]) {
+      botSettingsMap.set(clientId, {
+        enabled: Boolean(rows[0].enabled),
+        allowedSenders: rows[0].allowed_senders || DEFAULT_SETTINGS.allowedSenders,
+        welcomeMessage: rows[0].welcome_message || DEFAULT_SETTINGS.welcomeMessage,
+        unknownCommandMessage: rows[0].unknown_command_message || DEFAULT_SETTINGS.unknownCommandMessage,
+        companyInfo: rows[0].company_info || undefined,
+      });
+      logger.info({ clientId }, 'BotService: settings loaded from DB');
+    }
+  } catch (e) {
+    logger.warn({ clientId, error: e }, 'BotService: failed to load settings from DB, using defaults');
+  }
+}
+
+/**
  * معالجة رسالة واردة واستخراج الرد المناسب
  * Phase 2+3: Tries regex first (backward compatibility), then AI intent detection
  */
@@ -70,8 +96,13 @@ export async function handleBotMessage(
 ): Promise<BotReply | null> {
   logger.info({ clientId, senderPhone, messageText }, "BOTSERVICE_DEBUG: handleBotMessage called");
 
+  // تحميل الإعدادات من DB إذا لم تكن محملة بعد (lazy loading)
+  if (!botSettingsMap.has(clientId)) {
+    await loadBotSettingsFromDB(clientId);
+  }
+
   const settings = getBotSettings(clientId);
-  logger.info({ clientId, settings }, "BOTSERVICE_DEBUG: Bot settings");
+  logger.info({ clientId, settingsEnabled: settings.enabled, hasCompanyInfo: !!settings.companyInfo }, "BOTSERVICE_DEBUG: Bot settings");
   
   if (!settings.enabled) {
     logger.warn({ clientId }, "BOTSERVICE_DEBUG: Bot is DISABLED");
@@ -121,7 +152,7 @@ export async function handleBotMessage(
   try {
     const intent = await detectIntent(message);
     logger.info({ intent, senderPhone, clientId }, "AI intent detected");
-    return await handleAIIntent(clientId, branchId, senderPhone, intent);
+    return await handleAIIntent(clientId, branchId, senderPhone, intent, settings);
   } catch (error) {
     logger.error({ error }, "AI intent detection failed");
     return { text: settings.unknownCommandMessage };
@@ -135,11 +166,12 @@ async function handleAIIntent(
   branchId: string | null,
   senderPhone: string,
   intent: IntentResult,
+  settings: BotSettings,
 ): Promise<BotReply> {
   const { intent: intentType, entities, confidence } = intent;
 
-  // If confidence is low, use general fallback
-  if (confidence < 0.5) {
+  // If confidence is very low and no company info available, use fallback
+  if (confidence < 0.4 && !settings.companyInfo) {
     return {
       text: `🤔 لم أفهم طلبك بشكل واضح.\nاكتب *مساعدة* لمعرفة الأوامر المتاحة`,
     };
@@ -212,13 +244,21 @@ async function handleAIIntent(
         text: `📍 أرسل اسم منطقتك لمعرفة أقرب تاجر\nمثال: "أنا من الهرم" أو "في مدينة نصر"`,
       };
 
-    case "general_inquiry":
-      return {
-        text: `🤔 للاستفسارات:\n• اكتب *مساعدة* للأوامر المتاحة\n• فاتورة رقم XXXX لعرض فاتورة\n• المديونية لعرض الرصيد`,
-      };
+    case "general_inquiry": {
+      // رد بالذكاء الاصطناعي باستخدام معلومات الشركة إن وجدت
+      const companyCtx = settings.companyInfo || '';
+      logger.info({ clientId, senderPhone, hasCompanyInfo: !!companyCtx }, 'Handling general_inquiry with AI');
+      const aiAnswer = await answerGeneralInquiry(intent.rawMessage, companyCtx);
+      return { text: aiAnswer };
+    }
 
     case "unknown":
     default:
+      // إذا كانت هناك معلومات شركة، اسأل AI كذلك
+      if (settings.companyInfo) {
+        const aiAnswer = await answerGeneralInquiry(intent.rawMessage, settings.companyInfo);
+        return { text: aiAnswer };
+      }
       return {
         text: `❌ لم أفهم طلبك\nاكتب *مساعدة* لمعرفة الأوامر المتاحة`,
       };
