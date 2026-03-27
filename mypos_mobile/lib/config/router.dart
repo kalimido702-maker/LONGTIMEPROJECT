@@ -68,6 +68,11 @@ GoRouter createRouter(AuthProvider authProvider) {
             },
             routes: [
               GoRoute(
+                path: 'create',
+                parentNavigatorKey: rootNavigatorKey,
+                builder: (context, state) => const CreateInvoiceScreen(),
+              ),
+              GoRoute(
                 path: ':id',
                 parentNavigatorKey: rootNavigatorKey,
                 builder: (context, state) => InvoiceDetailScreen(
@@ -75,22 +80,6 @@ GoRouter createRouter(AuthProvider authProvider) {
                 ),
               ),
             ],
-          ),
-          GoRoute(
-            path: '/invoices/create',
-            parentNavigatorKey: rootNavigatorKey,
-            builder: (context, state) => const CreateInvoiceScreen(),
-          ),
-          GoRoute(
-            path: '/payments/create',
-            parentNavigatorKey: rootNavigatorKey,
-            builder: (context, state) {
-              final extra = state.extra as Map<String, dynamic>?;
-              return CreatePaymentScreen(
-                customer: extra?['customer'],
-                invoice: extra?['invoice'],
-              );
-            },
           ),
           GoRoute(
             path: '/payments',
@@ -102,6 +91,19 @@ GoRouter createRouter(AuthProvider authProvider) {
                 child: PaymentsScreen(filterId: filterId, defaultCurrentMonth: isGM),
               );
             },
+            routes: [
+              GoRoute(
+                path: 'create',
+                parentNavigatorKey: rootNavigatorKey,
+                builder: (context, state) {
+                  final extra = state.extra as Map<String, dynamic>?;
+                  return CreatePaymentScreen(
+                    customer: extra?['customer'],
+                    invoice: extra?['invoice'],
+                  );
+                },
+              ),
+            ],
           ),
           GoRoute(
             path: '/returns',
