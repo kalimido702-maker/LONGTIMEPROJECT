@@ -10,7 +10,8 @@ import {
     Printer,
     Shield,
     LogOut,
-    LayoutGrid
+    LayoutGrid,
+    Plus
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,7 @@ import { useSettingsContext } from "@/contexts/SettingsContext";
 
 const Home = () => {
     const { addTab } = useTabs();
-    const { logout, user } = useAuth();
+    const { logout, user, can } = useAuth();
     const { getSetting } = useSettingsContext();
     const storeName = getSetting("storeName") || "نظام إدارة المبيعات";
 
@@ -96,10 +97,18 @@ const Home = () => {
                         </p>
                     </div>
                     <div className="flex gap-2">
-                        <Button variant="outline" onClick={() => addTab("/pos")}>
-                            <ShoppingCart className="ml-2 h-4 w-4" />
-                            نقطة البيع
-                        </Button>
+                        {(can("invoices", "create") || can("invoices", "view")) && (
+                            <Button onClick={() => addTab("/pos")} className="gap-2 bg-blue-600 hover:bg-blue-700 text-white">
+                                <Plus className="h-4 w-4" />
+                                فاتورة جديدة
+                            </Button>
+                        )}
+                        {can("collections", "create") && (
+                            <Button onClick={() => addTab("/collections")} className="gap-2 bg-green-600 hover:bg-green-700 text-white">
+                                <Wallet className="h-4 w-4" />
+                                إضافة قبض
+                            </Button>
+                        )}
                     </div>
                 </div>
 

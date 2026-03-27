@@ -25,6 +25,10 @@ const migrations: Migration[] = [
     name: "031_sub_accounts",
     path: join(__dirname, "migrations", "031_sub_accounts.sql"),
   },
+  {
+    name: "034_whatsapp_bot_per_account_company_info",
+    path: join(__dirname, "migrations", "034_whatsapp_bot_per_account_company_info.sql"),
+  },
   // Add more migrations here
 ];
 
@@ -61,8 +65,14 @@ export async function runMigrations(): Promise<void> {
         const sql = readFileSync(migration.path, "utf8");
         const statements = sql
           .split(";")
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0 && !s.startsWith("--"));
+          .map((s) =>
+            s
+              .split("\n")
+              .filter((line) => !line.trim().startsWith("--"))
+              .join("\n")
+              .trim()
+          )
+          .filter((s) => s.length > 0);
 
         for (const statement of statements) {
           if (statement.toLowerCase().includes("insert into migrations")) {
@@ -88,8 +98,8 @@ export async function runMigrations(): Promise<void> {
         );
 
         logger.info(`✅ Migration ${migration.name} completed`);
-      } catch (error) {
-        logger.error({ error }, `❌ Migration ${migration.name} failed`);
+      } catch (error: any) {
+        logger.error(`❌ Migration ${migration.name} failed: ${error?.message || error?.sqlMessage || String(error)} (code: ${error?.code})`);
         throw error;
       } finally {
         connection.release();
@@ -97,8 +107,8 @@ export async function runMigrations(): Promise<void> {
     }
 
     logger.info("✅ All migrations completed successfully");
-  } catch (error) {
-    logger.error({ error }, "Migration error");
+  } catch (error: any) {
+    logger.error(`Migration error: ${error?.message || error?.sqlMessage || String(error)} (code: ${error?.code})`);
     throw error;
   }
 }

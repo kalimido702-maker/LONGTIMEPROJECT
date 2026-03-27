@@ -88,7 +88,7 @@ if (!gotTheLock) {
         nodeIntegration: false,
         contextIsolation: true,
         sandbox: false,
-        webSecurity: true,
+        webSecurity: false,
       },
       // cancel view and window and edit buttons
       titleBarStyle: "hiddenInset",
@@ -199,6 +199,132 @@ if (!gotTheLock) {
   });
 
   // ==================== IPC Handlers ====================
+
+  // ==================== HTTP Proxy ====================
+  // Proxy HTTP requests through Node.js main process to bypass
+  // Chromium restrictions on POST/WS from file:// protocol (Windows)
+  ipcMain.handle(
+    "http:request",
+    async (
+      _event,
+      options: {
+        url: string;
+        method: string;
+        headers?: Record<string, string>;
+        body?: any;
+        timeout?: number;
+      }
+    ) => {
+      const http = await import("http");
+      const https = await import("https");
+      const { URL } = await import("url");
+
+      const MAX_REDIRECTS = 5;
+
+      const doRequest = (
+        requestUrl: string,
+        method: string,
+        bodyStr: string | undefined,
+        redirectCount: number
+      ): Promise<{ success: boolean; status: number; data?: any; error?: string }> => {
+        return new Promise((resolve) => {
+          try {
+            const url = new URL(requestUrl);
+            const isHttps = url.protocol === "https:";
+            const client = isHttps ? https.default : http.default;
+
+            const req = client.request(
+              {
+                hostname: url.hostname,
+                port: url.port || (isHttps ? 443 : 80),
+                path: url.pathname + url.search,
+                method: method,
+                headers: {
+                  "Content-Type": "application/json",
+                  "Accept": "application/json",
+                  "User-Agent": "HPOS-Desktop/1.0",
+                  ...(options.headers || {}),
+                  ...(bodyStr
+                    ? { "Content-Length": String(Buffer.byteLength(bodyStr)) }
+                    : {}),
+                },
+                timeout: options.timeout || 30000,
+              },
+              (res) => {
+                // Handle redirects (301, 302, 307, 308)
+                const statusCode = res.statusCode || 0;
+                if (
+                  [301, 302, 307, 308].includes(statusCode) &&
+                  res.headers.location &&
+                  redirectCount < MAX_REDIRECTS
+                ) {
+                  // 307/308 preserve method, 301/302 convert to GET
+                  const newMethod = [307, 308].includes(statusCode) ? method : "GET";
+                  const newBody = [307, 308].includes(statusCode) ? bodyStr : undefined;
+                  const redirectUrl = new URL(res.headers.location, requestUrl).toString();
+                  
+                  // Consume the response body before redirecting
+                  res.resume();
+                  
+                  resolve(doRequest(redirectUrl, newMethod, newBody, redirectCount + 1));
+                  return;
+                }
+
+                let data = "";
+                res.on("data", (chunk: Buffer) => {
+                  data += chunk.toString();
+                });
+                res.on("end", () => {
+                  let parsed: any = data;
+                  try {
+                    parsed = JSON.parse(data);
+                  } catch {
+                    // keep as string
+                  }
+                  resolve({
+                    success: true,
+                    status: statusCode,
+                    data: parsed,
+                  });
+                });
+              }
+            );
+
+            req.on("error", (err: Error) => {
+              resolve({
+                success: false,
+                status: 0,
+                error: err.message,
+              });
+            });
+
+            req.on("timeout", () => {
+              req.destroy();
+              resolve({
+                success: false,
+                status: 0,
+                error: "Request timed out",
+              });
+            });
+
+            if (bodyStr) {
+              req.write(bodyStr);
+            }
+            req.end();
+          } catch (err: any) {
+            resolve({
+              success: false,
+              status: 0,
+              error: err.message || "Unknown error",
+            });
+          }
+        });
+      };
+
+      const bodyStr = options.body ? JSON.stringify(options.body) : undefined;
+      return doRequest(options.url, options.method || "GET", bodyStr, 0);
+    }
+  );
 
   // معلومات التطبيق
   ipcMain.handle("get-app-version", () => {

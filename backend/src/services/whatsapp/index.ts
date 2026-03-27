@@ -99,6 +99,25 @@ export function initializeWhatsAppService(): void {
         timestamp: new Date().toISOString(),
       });
 
+      // التحقق من تفعيل البوت لهذا الحساب تحديداً
+      try {
+        const accRows = await query<{ bot_enabled: number }>(
+          "SELECT bot_enabled FROM whatsapp_accounts WHERE id = ? AND client_id = ? AND is_deleted = 0 LIMIT 1",
+          [accountId, clientId],
+        );
+        if (accRows.length === 0) {
+          logger.warn({ clientId, accountId }, "Account not found - skipping bot");
+          return;
+        }
+        if (!accRows[0].bot_enabled) {
+          logger.info({ clientId, accountId }, "Bot disabled for this account - skipping");
+          return;
+        }
+      } catch (checkErr) {
+        logger.error({ checkErr, clientId, accountId }, "Failed to check account bot_enabled - skipping bot for safety");
+        return;
+      }
+
       // معالجة البوت
       try {
         logger.info({ clientId, senderPhone, messageText }, "INDEX_DEBUG: Calling handleBotMessage");

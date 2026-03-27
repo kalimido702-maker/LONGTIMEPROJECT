@@ -141,8 +141,19 @@ const WhatsAppManagement = () => {
   // Track last notified status per account to prevent repeated toasts
   const lastNotifiedStatusRef = useRef<Record<string, string>>({});
 
-  // Bot settings state
+  // Bot settings state - loaded from server
   const [botSettings, setBotSettings] = useState<BotSettings>(getBotSettings());
+
+  // Load bot settings from server on mount
+  useEffect(() => {
+    whatsappApi.getBotSettings().then((serverSettings) => {
+      const merged = { ...getBotSettings(), ...serverSettings };
+      setBotSettings(merged);
+      saveBotSettings(merged);
+    }).catch(() => {
+      // server unavailable - use local settings
+    });
+  }, []);
 
   useEffect(() => {
     loadAccounts();
@@ -228,13 +239,14 @@ const WhatsAppManagement = () => {
         serverAccounts = serverData.map((sa) => ({
           id: sa.id,
           name: sa.name,
-          phone: sa.phone || "",
+          phone: sa.phone || `_pending_${sa.id}`,
           status: (sa.liveStatus?.status || sa.status || "disconnected") as WhatsAppAccount["status"],
           dailyLimit: sa.daily_limit || 100,
           dailySent: sa.daily_sent || 0,
           lastResetDate: sa.last_reset_date || new Date().toISOString(),
           antiSpamDelay: sa.anti_spam_delay || 3000,
           isActive: sa.is_active ?? false,
+          botEnabled: sa.bot_enabled ?? true,
           createdAt: sa.created_at || new Date().toISOString(),
           lastConnectedAt: sa.last_connected_at,
         }));
@@ -264,7 +276,7 @@ const WhatsAppManagement = () => {
           if (localAcc) {
             await db.update("whatsappAccounts", merged);
           } else {
-            await db.add("whatsappAccounts", merged);
+            await db.update("whatsappAccounts", merged);
           }
           localMap.delete(serverAcc.id);
         }
@@ -345,7 +357,7 @@ const WhatsAppManagement = () => {
       const account: WhatsAppAccount = {
         id: Date.now().toString(),
         name: newAccount.name,
-        phone: "", // سيتم تحديثه تلقائياً عند الربط
+        phone: `_pending_${Date.now()}`, // placeholder فريد — سيتم تحديثه عند الربط
         status: "disconnected",
         dailyLimit: newAccount.dailyLimit,
         dailySent: 0,
@@ -512,10 +524,34 @@ const WhatsAppManagement = () => {
       return;
     }
 
-    account.isActive = !account.isActive;
+    const newIsActive = !account.isActive;
+    account.isActive = newIsActive;
+
+    // Update server database
+    try {
+      await whatsappApi.updateAccount(account.id, { isActive: newIsActive });
+    } catch (e) {
+      console.warn("[WhatsApp] Server toggle failed:", e);
+    }
+
     await db.update("whatsappAccounts", account);
     await loadAccounts();
-    toast({ title: account.isActive ? "تم التفعيل" : "تم التعطيل" });
+    toast({ title: newIsActive ? "تم التفعيل" : "تم التعطيل" });
+  };
+
+  const handleToggleBotEnabled = async (account: WhatsAppAccount) => {
+    const newBotEnabled = !account.botEnabled;
+    account.botEnabled = newBotEnabled;
+
+    try {
+      await whatsappApi.updateAccount(account.id, { botEnabled: newBotEnabled });
+    } catch (e) {
+      console.warn("[WhatsApp] Server bot toggle failed:", e);
+    }
+
+    await db.update("whatsappAccounts", account);
+    await loadAccounts();
+    toast({ title: newBotEnabled ? "🤖 تم تفعيل البوت للحساب" : "⏸️ تم إيقاف البوت للحساب" });
   };
 
   const handleDelete = async (id: string) => {
@@ -531,6 +567,15 @@ const WhatsAppManagement = () => {
       // Disconnect from WhatsApp if connected
       if ((window as any).electronAPI?.whatsapp) {
         await (window as any).electronAPI.whatsapp.disconnect(id);
+      } else {
+        try { await whatsappApi.disconnect(id); } catch {}
+      }
+
+      // Delete from server database
+      try {
+        await whatsappApi.deleteAccount(id);
+      } catch (e) {
+        console.warn("[WhatsApp] Server delete failed, continuing with local delete:", e);
       }
 
       // Clean up notification tracking
@@ -777,21 +822,22 @@ const WhatsAppManagement = () => {
               بوت الواتساب - الرد التلقائي
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between mb-4">
+          <CardContent className="space-y-5">
+            {/* Global bot toggle */}
+            <div className="flex items-center justify-between">
               <div>
-                <p className="font-medium">تفعيل البوت</p>
+                <p className="font-medium">تفعيل البوت (عام)</p>
                 <p className="text-sm text-muted-foreground">
-                  الرد التلقائي على رسائل العملاء (فواتير، كشف حساب، مديونية)
+                  الرد التلقائي على رسائل العملاء (فواتير، كشف حساب، مديونية، استفسارات)
                 </p>
               </div>
               <Switch
                 checked={botSettings.enabled}
-                onCheckedChange={(checked) => {
+                onCheckedChange={async (checked) => {
                   const newSettings = { ...botSettings, enabled: checked };
                   setBotSettings(newSettings);
                   saveBotSettings(newSettings);
-                  // Sync to main process
+                  try { await whatsappApi.updateBotSettings(newSettings); } catch {}
                   (window as any).electronAPI?.whatsapp?.botSetEnabled?.(checked);
                   toast({
                     title: checked ? "🤖 تم تفعيل البوت" : "⏸️ تم إيقاف البوت",
@@ -799,7 +845,32 @@ const WhatsAppManagement = () => {
                 }}
               />
             </div>
-            
+
+            {/* Company info */}
+            <div className="space-y-2">
+              <Label className="font-medium flex items-center gap-2">
+                🏢 معلومات الشركة (للرد على الاستفسارات العامة بالذكاء الاصطناعي)
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                أدخل تفاصيل شركتك (المنتجات، ساعات العمل، العنوان، أرقام التواصل، الأسعار...). البوت سيستخدم هذه المعلومات للرد على أي استفسار من العملاء المسجلين وغير المسجلين.
+              </p>
+              <textarea
+                className="w-full min-h-[110px] rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-y"
+                placeholder={`مثال:\nاسم الشركة: شركة ABC للمواد الغذائية\nساعات العمل: 9 صباحاً - 9 مساءً\nالعنوان: القاهرة، شارع التحرير\nالمنتجات: زيت، سكر، دقيق، أرز\nالتواصل: 01001234567`}
+                value={botSettings.companyInfo || ""}
+                onChange={(e) => {
+                  setBotSettings({ ...botSettings, companyInfo: e.target.value });
+                }}
+                onBlur={async () => {
+                  saveBotSettings(botSettings);
+                  try { await whatsappApi.updateBotSettings(botSettings); } catch {}
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                💡 كلما كانت المعلومات أوضح وأكثر تفصيلاً، كان رد البوت أدق وأفضل.
+              </p>
+            </div>
+
             {botSettings.enabled && (
               <div className="bg-muted/50 rounded-lg p-4 space-y-2">
                 <p className="text-sm font-semibold mb-2">📋 الأوامر المدعومة:</p>
@@ -825,8 +896,8 @@ const WhatsAppManagement = () => {
                     <span className="text-muted-foreground">الرصيد الحالي</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge variant="secondary" className="text-xs">مساعدة</Badge>
-                    <span className="text-muted-foreground">قائمة الأوامر</span>
+                    <Badge variant="secondary" className="text-xs">أي استفسار</Badge>
+                    <span className="text-muted-foreground">رد ذكي بمعلومات الشركة</span>
                   </div>
                 </div>
               </div>
@@ -904,6 +975,7 @@ const WhatsAppManagement = () => {
                     <TableHead>المرسل اليوم</TableHead>
                     <TableHead>التأخير</TableHead>
                     <TableHead>نشط</TableHead>
+                    <TableHead>البوت</TableHead>
                     <TableHead>آخر اتصال</TableHead>
                     <TableHead>إجراءات</TableHead>
                   </TableRow>
@@ -929,6 +1001,14 @@ const WhatsAppManagement = () => {
                           checked={account.isActive}
                           onCheckedChange={() => handleToggleActive(account)}
                           disabled={account.status !== "connected"}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Switch
+                          dir="ltr"
+                          checked={account.botEnabled ?? true}
+                          onCheckedChange={() => handleToggleBotEnabled(account)}
+                          title={account.botEnabled ? "البوت مفعّل لهذا الحساب" : "البوت موقوف لهذا الحساب"}
                         />
                       </TableCell>
                       <TableCell>

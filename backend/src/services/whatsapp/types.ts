@@ -120,6 +120,8 @@ export interface BotSettings {
   allowedSenders: "all" | "customers" | "supervisors" | "salesreps";
   welcomeMessage: string;
   unknownCommandMessage: string;
+  /** معلومات الشركة - تُستخدم كـ context للـ AI عند الرد على الاستفسارات العامة */
+  companyInfo?: string;
 }
 
 export interface BotReply {

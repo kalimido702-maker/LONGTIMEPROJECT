@@ -350,10 +350,10 @@ class WhatsAppMessageService {
       return phone;
     }
 
-    // تحويل @lid إلى @s.whatsapp.net (LID هو شكل مجهول الهوية من واتساب)
+    // @lid هو معرّف داخلي من واتساب — نتركه كما هو بدون تحويل
+    // تحويله إلى @s.whatsapp.net يُرسل الرسالة لرقم عشوائي خاطئ
     if (phone.includes("@lid")) {
-      const cleaned = phone.replace("@lid", "@s.whatsapp.net");
-      return cleaned;
+      return phone;
     }
 
     let cleaned = phone.replace(/\D/g, "");

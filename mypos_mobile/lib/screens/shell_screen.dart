@@ -54,6 +54,8 @@ class ShellScreen extends StatelessWidget {
   ];
   static const _adminRoutes = [
     '/home',
+    '/invoices',
+    '/payments',
     '/supervisors',
     '/sales-reps',
     '/customers',
@@ -61,13 +63,14 @@ class ShellScreen extends StatelessWidget {
   ];
   static const _generalManagerRoutes = [
     '/home',
+    '/invoices',
+    '/payments',
     '/supervisors',
     '/sales-reps',
     '/customers',
-    '/invoices',
     '/payments',
   ];
-  static const _salesManagerRoutes = ['/home', '/invoices'];
+  static const _salesManagerRoutes = ['/home', '/invoices', '/payments'];
 
   List<String> _routes(BuildContext context, _NavVariant v, User? user) {
     if (v == _NavVariant.employee && user != null) {
@@ -354,7 +357,7 @@ class ShellScreen extends StatelessWidget {
     ),
   ];
 
-  // ── Admin: الرئيسية | المشرفين | المندوبين | العملاء | الإشعارات
+  // ── Admin: الرئيسية | الفواتير | المدفوعات | المشرفين | المندوبين | العملاء | الإشعارات
   static const _adminDestinations = [
     NavigationDestination(
       icon: Icon(LucideIcons.home, size: 22),
@@ -362,21 +365,23 @@ class ShellScreen extends StatelessWidget {
       label: 'الرئيسية',
     ),
     NavigationDestination(
+      icon: Icon(LucideIcons.fileText, size: 22),
+      selectedIcon: Icon(LucideIcons.fileText, size: 22, color: AppColors.primary),
+      label: 'الفواتير',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.creditCard, size: 22),
+      selectedIcon: Icon(LucideIcons.creditCard, size: 22, color: AppColors.primary),
+      label: 'المدفوعات',
+    ),
+    NavigationDestination(
       icon: Icon(LucideIcons.shield, size: 22),
-      selectedIcon: Icon(
-        LucideIcons.shield,
-        size: 22,
-        color: AppColors.primary,
-      ),
+      selectedIcon: Icon(LucideIcons.shield, size: 22, color: AppColors.primary),
       label: 'المشرفين',
     ),
     NavigationDestination(
       icon: Icon(LucideIcons.briefcase, size: 22),
-      selectedIcon: Icon(
-        LucideIcons.briefcase,
-        size: 22,
-        color: AppColors.primary,
-      ),
+      selectedIcon: Icon(LucideIcons.briefcase, size: 22, color: AppColors.primary),
       label: 'المندوبين',
     ),
     NavigationDestination(
@@ -391,7 +396,7 @@ class ShellScreen extends StatelessWidget {
     ),
   ];
 
-  // ── General Manager: الرئيسية | المشرفين | المندوبين | العملاء | الفواتير | المدفوعات
+  // ── General Manager: الرئيسية | الفواتير | المدفوعات | المشرفين | المندوبين | العملاء | الإشعارات
   static const _generalManagerDestinations = [
     NavigationDestination(
       icon: Icon(LucideIcons.home, size: 22),
@@ -399,21 +404,23 @@ class ShellScreen extends StatelessWidget {
       label: 'الرئيسية',
     ),
     NavigationDestination(
+      icon: Icon(LucideIcons.fileText, size: 22),
+      selectedIcon: Icon(LucideIcons.fileText, size: 22, color: AppColors.primary),
+      label: 'الفواتير',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.creditCard, size: 22),
+      selectedIcon: Icon(LucideIcons.creditCard, size: 22, color: AppColors.primary),
+      label: 'المدفوعات',
+    ),
+    NavigationDestination(
       icon: Icon(LucideIcons.shield, size: 22),
-      selectedIcon: Icon(
-        LucideIcons.shield,
-        size: 22,
-        color: AppColors.primary,
-      ),
+      selectedIcon: Icon(LucideIcons.shield, size: 22, color: AppColors.primary),
       label: 'المشرفين',
     ),
     NavigationDestination(
       icon: Icon(LucideIcons.briefcase, size: 22),
-      selectedIcon: Icon(
-        LucideIcons.briefcase,
-        size: 22,
-        color: AppColors.primary,
-      ),
+      selectedIcon: Icon(LucideIcons.briefcase, size: 22, color: AppColors.primary),
       label: 'المندوبين',
     ),
     NavigationDestination(
@@ -421,27 +428,9 @@ class ShellScreen extends StatelessWidget {
       selectedIcon: Icon(LucideIcons.users, size: 22, color: AppColors.primary),
       label: 'العملاء',
     ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.fileText, size: 22),
-      selectedIcon: Icon(
-        LucideIcons.fileText,
-        size: 22,
-        color: AppColors.primary,
-      ),
-      label: 'الفواتير',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.creditCard, size: 22),
-      selectedIcon: Icon(
-        LucideIcons.creditCard,
-        size: 22,
-        color: AppColors.primary,
-      ),
-      label: 'المدفوعات',
-    ),
   ];
 
-  // ── Sales Manager: الرئيسية | الفواتير
+  // ── Sales Manager: الرئيسية | الفواتير | المدفوعات
   static const _salesManagerDestinations = [
     NavigationDestination(
       icon: Icon(LucideIcons.home, size: 22),
@@ -450,12 +439,13 @@ class ShellScreen extends StatelessWidget {
     ),
     NavigationDestination(
       icon: Icon(LucideIcons.fileText, size: 22),
-      selectedIcon: Icon(
-        LucideIcons.fileText,
-        size: 22,
-        color: AppColors.primary,
-      ),
+      selectedIcon: Icon(LucideIcons.fileText, size: 22, color: AppColors.primary),
       label: 'الفواتير',
+    ),
+    NavigationDestination(
+      icon: Icon(LucideIcons.creditCard, size: 22),
+      selectedIcon: Icon(LucideIcons.creditCard, size: 22, color: AppColors.primary),
+      label: 'المدفوعات',
     ),
   ];
 }

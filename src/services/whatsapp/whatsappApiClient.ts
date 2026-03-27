@@ -61,6 +61,7 @@ export interface BotSettings {
   allowedSenders: "all" | "customers" | "supervisors" | "salesreps";
   welcomeMessage: string;
   unknownCommandMessage: string;
+  companyInfo?: string;
 }
 
 // ─── API Client ──────────────────────────────────────────────────
@@ -93,7 +94,7 @@ class WhatsAppApiClient {
 
   async updateAccount(
     accountId: string,
-    updates: { name?: string; phone?: string; dailyLimit?: number; antiSpamDelay?: number },
+    updates: { name?: string; phone?: string; dailyLimit?: number; antiSpamDelay?: number; isActive?: boolean; botEnabled?: boolean },
   ): Promise<void> {
     await this.client.put(`${API_PREFIX}/accounts/${accountId}`, updates);
   }

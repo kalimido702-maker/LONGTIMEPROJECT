@@ -137,6 +137,7 @@ export default function Collections() {
     const [editNotes, setEditNotes] = useState("");
     const [editPaymentMethodId, setEditPaymentMethodId] = useState("");
     const [editDate, setEditDate] = useState("");
+    const [showCreateDialog, setShowCreateDialog] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -571,6 +572,7 @@ export default function Collections() {
             // إعادة تحميل البيانات
             await loadData();
 
+            setShowCreateDialog(false);
             // التركيز على حقل البحث
             setCustomerSearchOpen(true);
         } catch (error) {
@@ -1313,6 +1315,12 @@ export default function Collections() {
                     </h1>
                     {/* Global Search and Advanced Filters */}
                     <div className="flex items-center gap-2">
+                        {canCreateCollection && (
+                            <Button onClick={() => setShowCreateDialog(true)} className="gap-2">
+                                <Plus className="h-4 w-4" />
+                                قبض جديد
+                            </Button>
+                        )}
                         <div className="relative w-64">
                             <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
                             <Input
@@ -1509,15 +1517,18 @@ export default function Collections() {
                     </Card>
                 </div>
 
-                <div className={`grid grid-cols-1 ${canCreateCollection ? 'lg:grid-cols-3' : ''} gap-6`}>
-                    {/* نموذج القبض السريع */}
+                <div className="grid grid-cols-1 gap-6">
+                    {/* نافذة إضافة قبض */}
+                    <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+                        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto" dir="rtl">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2">
+                                <Plus className="h-5 w-5 text-primary" />
+                                قبض جديد
+                            </DialogTitle>
+                        </DialogHeader>
                     {canCreateCollection && (
-                    <Card className="p-6 lg:col-span-1">
-                        <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                            <Plus className="h-5 w-5" />
-                            قبض جديد
-                        </h2>
-
+                    <div className="pt-2">
                         <form onSubmit={handleSubmit} className="space-y-4">
                             {/* المبلغ */}
                             <div className="space-y-2">
@@ -1711,11 +1722,13 @@ export default function Collections() {
                                 )}
                             </Button>
                         </form>
-                    </Card>
+                    </div>
                     )}
+                        </DialogContent>
+                    </Dialog>
 
                     {/* آخر عمليات القبض */}
-                    <Card className={`p-6 ${canCreateCollection ? 'lg:col-span-2' : 'lg:col-span-3'}`}>
+                    <Card className="p-6">
                         <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
                             <History className="h-5 w-5" />
                             آخر عمليات القبض

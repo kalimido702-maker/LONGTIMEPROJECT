@@ -131,79 +131,162 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  // Hash password using SHA-256 for local storage
+  const hashPassword = async (password: string): Promise<string> => {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password + "_HPOS_SALT_2024");
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  };
+
+  // Helper: process successful backend login response
+  const handleBackendLoginSuccess = async (
+    response: { accessToken: string; refreshToken: string; user: any },
+    username: string,
+    password: string
+  ): Promise<boolean> => {
+    try {
+      const { getFastifyClient } = await import("@/infrastructure/http");
+      const { getWebSocketClient } = await import("@/infrastructure/http");
+      const httpClient = getFastifyClient();
+
+      const { accessToken, refreshToken, user: backendUser } = response;
+
+      // Store JWT tokens
+      httpClient.setAuth({ accessToken, refreshToken });
+
+      // Connect WebSocket
+      const wsClient = getWebSocketClient();
+      if (wsClient && !wsClient.isConnected()) {
+        wsClient.connect();
+      }
+
+      // Hash password for local fallback
+      const passwordHash = await hashPassword(password);
+
+      // Get or create local user record
+      const users = await db.getAll<User>("users");
+      let localUser = users.find((u) => u.username === username);
+
+      if (!localUser) {
+        localUser = {
+          id: backendUser.id || username,
+          username: backendUser.username || username,
+          name: backendUser.name || username,
+          password: passwordHash,
+          role: backendUser.role || "cashier",
+          roleId: backendUser.roleId || "cashier",
+          active: true,
+          createdAt: new Date().toISOString(),
+        };
+        await db.add("users", localUser);
+      } else {
+        localUser = {
+          ...localUser,
+          password: passwordHash,
+          name: backendUser.name || localUser.name,
+          role: backendUser.role || localUser.role,
+          roleId: backendUser.roleId || localUser.roleId,
+          active: true,
+        };
+        await db.update("users", localUser);
+      }
+
+      setUser(localUser);
+      localStorage.setItem("currentUserId", localUser.id);
+      await loadUserRole(localUser);
+      return true;
+    } catch (err) {
+      console.error("Error processing backend login:", err);
+      return false;
+    }
+  };
+
   const login = async (
     username: string,
     password: string
   ): Promise<boolean> => {
     try {
-      // First try Backend API authentication
+      // === Strategy 1: Axios POST (works in dev & most environments) ===
       try {
         const { getFastifyClient } = await import("@/infrastructure/http");
-        const { getWebSocketClient } = await import("@/infrastructure/http");
         const httpClient = getFastifyClient();
 
-        // Call backend login API
         const response = await httpClient.post<{
           accessToken: string;
           refreshToken: string;
           expiresIn: string;
           user: any;
         }>("/api/auth/login", {
-          username, // Backend expects username field
+          username,
           password,
         });
 
         if (response) {
-          const { accessToken, refreshToken, user: backendUser } = response;
-
-          // Store JWT tokens in FastifyClient
-          httpClient.setAuth({ accessToken, refreshToken });
-
-          // Set auth for WebSocket
-          const wsClient = getWebSocketClient();
-          if (wsClient && !wsClient.isConnected()) {
-            wsClient.connect();
+          const success = await handleBackendLoginSuccess(response, username, password);
+          if (success) {
+            console.log("✅ Backend authentication successful (Axios)");
+            return true;
           }
-
-          // Get or create local user record
-          const users = await db.getAll<User>("users");
-          let localUser = users.find((u) => u.username === username);
-
-          if (!localUser) {
-            // Create local user from backend data
-            localUser = {
-              id: backendUser.id || username,
-              username: backendUser.username || username,
-              name: backendUser.name || username,
-              password: "", // Don't store password locally
-              role: backendUser.role || "cashier",
-              roleId: backendUser.roleId || "cashier",
-              active: true,
-              createdAt: new Date().toISOString(),
-            };
-            await db.add("users", localUser);
-          }
-
-          setUser(localUser);
-          localStorage.setItem("currentUserId", localUser.id);
-          await loadUserRole(localUser);
-
-          console.log("✅ Backend authentication successful");
-          return true;
         }
-      } catch (backendError: any) {
+      } catch (axiosError: any) {
         console.warn(
-          "Backend authentication failed, falling back to local:",
-          backendError?.message || backendError
+          "Axios login failed:",
+          axiosError?.message || axiosError
         );
 
-        // Fallback to local authentication
+        // === Strategy 2: IPC HTTP Proxy (bypasses Chromium restrictions on Windows) ===
+        if (window.electronAPI?.http?.request) {
+          try {
+            const apiUrl =
+              import.meta.env.VITE_API_BASE_URL || "http://13coffee.net:3030";
+
+            console.log("[Login] Trying IPC HTTP proxy to:", apiUrl);
+            const ipcResult = await window.electronAPI.http.request({
+              url: `${apiUrl}/api/auth/login`,
+              method: "POST",
+              body: { username, password },
+            });
+
+            if (ipcResult.success && ipcResult.status === 200 && ipcResult.data) {
+              const success = await handleBackendLoginSuccess(
+                ipcResult.data,
+                username,
+                password
+              );
+              if (success) {
+                console.log("✅ Backend authentication successful (IPC proxy)");
+                return true;
+              }
+            } else if (ipcResult.status === 401) {
+              console.warn("[Login] IPC proxy: Invalid credentials");
+              // Don't fall through to local - credentials are wrong
+              return false;
+            } else {
+              console.warn("[Login] IPC proxy failed:", ipcResult.error || ipcResult.status);
+            }
+          } catch (ipcError: any) {
+            console.warn("IPC proxy login failed:", ipcError?.message || ipcError);
+          }
+        }
+
+        // === Strategy 3: Local auth fallback (offline mode) ===
         const users = await db.getAll<User>("users");
+        const passwordHash = await hashPassword(password);
         const foundUser = users.find(
-          (u) => u.username === username && u.password === password && u.active
+          (u) =>
+            u.username === username &&
+            u.active &&
+            (u.password === passwordHash || u.password === password)
         );
 
         if (foundUser) {
+          if (foundUser.password === password && foundUser.password !== passwordHash) {
+            foundUser.password = passwordHash;
+            await db.update("users", foundUser);
+          }
+
           setUser(foundUser);
           localStorage.setItem("currentUserId", foundUser.id);
           await loadUserRole(foundUser);

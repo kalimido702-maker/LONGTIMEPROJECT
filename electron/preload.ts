@@ -128,6 +128,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     },
   },
 
+  // HTTP Proxy - bypass Chromium restrictions on POST from file://
+  http: {
+    request: (options: {
+      url: string;
+      method: string;
+      headers?: Record<string, string>;
+      body?: any;
+      timeout?: number;
+    }) => ipcRenderer.invoke("http:request", options),
+  },
+
   // Google Drive APIs
   drive: {
     saveCredentials: (credentials: { clientId: string; clientSecret: string }) =>
@@ -307,6 +318,20 @@ declare global {
         onUpdateDownloaded: (callback: (info: { version: string; releaseDate: string }) => void) => void;
         onError: (callback: (error: { message: string }) => void) => void;
         removeAllListeners: () => void;
+      };
+      http: {
+        request: (options: {
+          url: string;
+          method: string;
+          headers?: Record<string, string>;
+          body?: any;
+          timeout?: number;
+        }) => Promise<{
+          success: boolean;
+          status: number;
+          data?: any;
+          error?: string;
+        }>;
       };
       drive: {
         saveCredentials: (credentials: { clientId: string; clientSecret: string }) => Promise<{ success: boolean; error?: string }>;
