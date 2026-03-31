@@ -110,8 +110,8 @@ class NotificationService {
     const notificationId = randomUUID();
     try {
       await db.query(
-        `INSERT INTO notifications (id, client_id, branch_id, user_id, customer_id, title, body, type, reference_id, reference_type)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO notifications (id, client_id, branch_id, user_id, customer_id, title, body, type, reference_id, reference_type, image_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           notificationId,
           clientId,
@@ -123,11 +123,42 @@ class NotificationService {
           type,
           referenceId || null,
           referenceType || null,
+          imageUrl || null,
         ]
       );
     } catch (error) {
-      logger.error({ error, payload }, "Failed to save notification to DB");
-      // Continue — still try to send push even if DB fails
+      // Backward compatibility: some databases may not have image_url yet.
+      const msg = String((error as any)?.message || error || "");
+      const missingImageColumn =
+        (msg.includes("Unknown column") && msg.includes("image_url")) ||
+        (msg.includes("no column named") && msg.includes("image_url"));
+
+      if (missingImageColumn) {
+        try {
+          await db.query(
+            `INSERT INTO notifications (id, client_id, branch_id, user_id, customer_id, title, body, type, reference_id, reference_type)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              notificationId,
+              clientId,
+              branchId || null,
+              userId || null,
+              customerId || null,
+              title,
+              body,
+              type,
+              referenceId || null,
+              referenceType || null,
+            ]
+          );
+        } catch (fallbackError) {
+          logger.error({ error: fallbackError, payload }, "Failed to save notification to DB");
+          // Continue — still try to send push even if DB fails
+        }
+      } else {
+        logger.error({ error, payload }, "Failed to save notification to DB");
+        // Continue — still try to send push even if DB fails
+      }
     }
 
     // 2. Send push notification via FCM

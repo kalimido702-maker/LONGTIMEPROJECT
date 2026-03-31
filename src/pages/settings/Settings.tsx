@@ -52,6 +52,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Palette, Moon, Sun, Printer, Bug } from "lucide-react";
 import { PrintSettingsTab } from "@/components/settings/PrintSettingsTab";
+import { InvoiceTemplateEditor } from "@/components/settings/InvoiceTemplateEditor";
 import { getSmartSync } from "@/infrastructure/sync/SmartSyncManager";
 import { getFastifyClient } from "@/infrastructure";
 
@@ -285,6 +286,7 @@ const Settings = () => {
           <TabsList>
             <TabsTrigger value="general">عام</TabsTrigger>
             <TabsTrigger value="print">الطباعة</TabsTrigger>
+            <TabsTrigger value="invoice-template">تصميم الفاتورة</TabsTrigger>
             <TabsTrigger value="theme">الثيمات والألوان</TabsTrigger>
             <TabsTrigger value="store">بيانات المتجر</TabsTrigger>
             <TabsTrigger value="whatsapp">واتساب</TabsTrigger>
@@ -438,6 +440,10 @@ const Settings = () => {
 
           {/* Print Settings Tab */}          <TabsContent value="print">
             <PrintSettingsTab />
+          </TabsContent>
+
+          <TabsContent value="invoice-template">
+            <InvoiceTemplateEditor />
           </TabsContent>
 
           <TabsContent value="theme">

@@ -77,6 +77,12 @@ import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import { getChartColors } from "@/lib/theme.config";
 import { useTheme } from "next-themes";
+import {
+  printCustomerDebtReport,
+  printCollectionReport,
+  printCustomerInvoicesReport,
+  printCustomerPaymentsReport,
+} from "@/lib/reportPrintService";
 
 const Reports = () => {
   const { getSetting } = useSettingsContext();
@@ -468,18 +474,21 @@ const Reports = () => {
   const topCustomersByPayments = useMemo(() => {
     const customerPaymentsMap = new Map<
       string,
-      { name: string; totalPaid: number; count: number; phone: string }
+      { name: string; totalPaid: number; count: number; phone: string; supervisorName: string }
     >();
 
     filteredPayments.forEach((pay: any) => {
       const custId = String(pay.customerId);
       if (!custId) return;
       const customer = customers.find((c) => String(c.id) === custId);
+      const rep = customer ? salesReps.find((r) => r.id === (customer as any).salesRepId) : undefined;
+      const supervisor = rep ? supervisors.find((s) => s.id === rep.supervisorId) : undefined;
       const existing = customerPaymentsMap.get(custId) || {
         name: pay.customerName || customer?.name || "غير محدد",
         totalPaid: 0,
         count: 0,
         phone: customer?.phone || "-",
+        supervisorName: supervisor?.name || "-",
       };
 
       customerPaymentsMap.set(custId, {
@@ -487,29 +496,79 @@ const Reports = () => {
         totalPaid: existing.totalPaid + Number(pay.amount || 0),
         count: existing.count + 1,
         phone: customer?.phone || existing.phone,
+        supervisorName: existing.supervisorName,
       });
     });
 
     return Array.from(customerPaymentsMap.values())
       .sort((a, b) => b.totalPaid - a.totalPaid);
 
-  }, [filteredPayments, customers]);
+  }, [filteredPayments, customers, salesReps, supervisors]);
+
+  // سجلات القبض الفردية (لتقرير #15)
+  const collectionRecords = useMemo(() => {
+    return filteredPayments.map((pay: any) => {
+      const custId = String(pay.customerId);
+      const customer = customers.find((c) => String(c.id) === custId);
+      const rep = customer ? salesReps.find((r) => r.id === (customer as any).salesRepId) : undefined;
+      const supervisor = rep ? supervisors.find((s) => s.id === rep.supervisorId) : undefined;
+      return {
+        customerName: pay.customerName || customer?.name || "غير محدد",
+        amount: Number(pay.amount || 0),
+        currentBalance: customer ? getBalance(customer.id, Number(customer.currentBalance || 0)) : 0,
+        operationId: pay.id || "-",
+        date: formatDate(pay.createdAt || pay.paymentDate || ""),
+        notes: pay.notes || "-",
+        supervisorName: supervisor?.name || "-",
+      };
+    });
+  }, [filteredPayments, customers, salesReps, supervisors, getBalance]);
+
+  // ملخص فواتير العملاء مجمعة حسب العميل (لتقرير #14)
+  const customerInvoicesSummary = useMemo(() => {
+    const map = new Map<string, { customerName: string; invoiceCount: number; invoiceValue: number; supervisorName: string }>();
+    filteredInvoices.forEach((inv) => {
+      const custId = inv.customerId || "cash";
+      const customer = customers.find((c) => c.id === custId);
+      const rep = customer ? salesReps.find((r) => r.id === (customer as any).salesRepId) : undefined;
+      const supervisor = rep ? supervisors.find((s) => s.id === rep.supervisorId) : undefined;
+      const existing = map.get(custId) || {
+        customerName: inv.customerName || customer?.name || "عميل نقدي",
+        invoiceCount: 0,
+        invoiceValue: 0,
+        supervisorName: supervisor?.name || "-",
+      };
+      map.set(custId, {
+        customerName: customer?.name || existing.customerName,
+        invoiceCount: existing.invoiceCount + 1,
+        invoiceValue: existing.invoiceValue + Number(inv.total || 0),
+        supervisorName: existing.supervisorName,
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => b.invoiceCount - a.invoiceCount);
+  }, [filteredInvoices, customers, salesReps, supervisors]);
 
   // العملاء الأكثر ديون
   const topCustomersByDebt = useMemo(() => {
     return customers
       .filter((c) => getBalance(c.id, Number(c.currentBalance || 0)) > 0)
-      .map((c) => ({
-        id: c.id,
-        name: c.name,
-        phone: c.phone || "-",
-        debt: getBalance(c.id, Number(c.currentBalance) || 0),
-        creditLimit: Number(c.creditLimit) || 0,
-      }))
+      .map((c) => {
+        const rep = salesReps.find((r) => r.id === (c as any).salesRepId);
+        const supervisor = rep ? supervisors.find((s) => s.id === rep.supervisorId) : undefined;
+        return {
+          id: c.id,
+          name: c.name,
+          phone: c.phone || "-",
+          debt: getBalance(c.id, Number(c.currentBalance) || 0),
+          creditLimit: Number(c.creditLimit) || 0,
+          supervisorName: supervisor?.name || "-",
+          salesRepName: rep?.name || "-",
+        };
+      })
       .sort((a, b) => b.debt - a.debt)
       .sort((a, b) => b.debt - a.debt);
 
-  }, [customers, getBalance]);
+  }, [customers, getBalance, salesReps, supervisors]);
 
   // مبيعات حسب الفئات
   const salesByCategory = useMemo(() => {
@@ -542,6 +601,8 @@ const Reports = () => {
   const productsPagination = usePagination(topProducts, { resetDeps: [startDate, endDate, selectedEmployee, selectedPaymentMethod, selectedCategory, selectedCustomer, selectedSupervisor, selectedSalesRep] });
   const customersPagination = usePagination(topCustomers, { resetDeps: [startDate, endDate, selectedEmployee, selectedPaymentMethod, selectedCategory, selectedCustomer, selectedSupervisor, selectedSalesRep] });
   const paymentsPagination = usePagination(topCustomersByPayments, { resetDeps: [startDate, endDate, selectedEmployee, selectedPaymentMethod, selectedCategory, selectedCustomer, selectedSupervisor, selectedSalesRep] });
+  const collectionsPagination = usePagination(collectionRecords, { resetDeps: [startDate, endDate, selectedEmployee, selectedPaymentMethod, selectedCategory, selectedCustomer, selectedSupervisor, selectedSalesRep] });
+  const customerInvoicesPagination = usePagination(customerInvoicesSummary, { resetDeps: [startDate, endDate, selectedEmployee, selectedPaymentMethod, selectedCategory, selectedCustomer, selectedSupervisor, selectedSalesRep] });
   const debtsPagination = usePagination(topCustomersByDebt, { resetDeps: [startDate, endDate, selectedEmployee, selectedPaymentMethod, selectedCategory, selectedCustomer, selectedSupervisor, selectedSalesRep] });
   const invoicesPagination = usePagination(filteredInvoices, { resetDeps: [startDate, endDate, selectedEmployee, selectedPaymentMethod, selectedCategory, selectedCustomer, selectedSupervisor, selectedSalesRep] });
   const categoriesPagination = usePagination(salesByCategory, { resetDeps: [startDate, endDate, selectedEmployee, selectedPaymentMethod, selectedCategory, selectedCustomer, selectedSupervisor, selectedSalesRep] });
@@ -1056,12 +1117,14 @@ const Reports = () => {
 
         {/* Detailed Tables */}
         <Tabs defaultValue="products" className="w-full">
-          <TabsList className="grid w-full grid-cols-6">
+          <TabsList className="grid w-full grid-cols-8">
             <TabsTrigger value="products">المنتجات</TabsTrigger>
             <TabsTrigger value="customers">العملاء</TabsTrigger>
             <TabsTrigger value="payments">المدفوعات</TabsTrigger>
-            <TabsTrigger value="debts">الديون</TabsTrigger>
+            <TabsTrigger value="collections">القبض</TabsTrigger>
+            <TabsTrigger value="debts">المديونية</TabsTrigger>
             <TabsTrigger value="invoices">الفواتير</TabsTrigger>
+            <TabsTrigger value="customerInvoices">فواتير العملاء</TabsTrigger>
             <TabsTrigger value="categories">الأقسام</TabsTrigger>
           </TabsList>
 
@@ -1209,53 +1272,79 @@ const Reports = () => {
           <TabsContent value="payments" className="space-y-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>المدفوعات ({topCustomersByPayments.length})</CardTitle>
-                <ExportButtons
-                  title="تقرير المدفوعات"
-                  subtitle={`من ${formatDate(startDate)} إلى ${formatDate(
-                    endDate
-                  )}`}
-                  fileName={`customers-payments-${startDate}-${endDate}`}
-                  data={topCustomersByPayments}
-                  columns={[
-                    { header: "اسم العميل", dataKey: "name" },
-                    { header: "رقم الهاتف", dataKey: "phone" },
-                    { header: "عدد المدفوعات", dataKey: "count" },
-                    { header: "إجمالي المدفوع", dataKey: "totalPaid" },
-                  ]}
-                  summary={[
-                    { label: "إجمالي المدفوعات", value: topCustomersByPayments.reduce((sum, c) => sum + c.totalPaid, 0) },
-                    { label: "عدد العملاء", value: topCustomersByPayments.length },
-                  ]}
-                />
+                <CardTitle>مدفوعات العملاء ({topCustomersByPayments.length})</CardTitle>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      printCustomerPaymentsReport(
+                        topCustomersByPayments.map((c) => ({
+                          customerName: c.name,
+                          paymentCount: c.count,
+                          paymentValue: c.totalPaid,
+                          supervisorName: c.supervisorName,
+                        })),
+                        {
+                          dateFrom: formatDate(startDate),
+                          dateTo: formatDate(endDate),
+                          totalPayments: topCustomersByPayments.reduce((sum, c) => sum + c.totalPaid, 0),
+                          totalCustomers: topCustomersByPayments.length,
+                          totalOperations: topCustomersByPayments.reduce((sum, c) => sum + c.count, 0),
+                        }
+                      );
+                    }}
+                  >
+                    <FileText className="h-4 w-4 ml-1" />
+                    طباعة التقرير
+                  </Button>
+                  <ExportButtons
+                    title="مدفوعات العملاء"
+                    subtitle={`من ${formatDate(startDate)} إلى ${formatDate(endDate)}`}
+                    fileName={`customers-payments-${startDate}-${endDate}`}
+                    data={topCustomersByPayments.map((c) => ({
+                      customerName: c.name,
+                      paymentCount: c.count,
+                      paymentValue: c.totalPaid,
+                      supervisorName: c.supervisorName,
+                    }))}
+                    columns={[
+                      { header: "اسم العميل", dataKey: "customerName" },
+                      { header: "عدد عمليات الدفع", dataKey: "paymentCount" },
+                      { header: "قيمة المدفوعات", dataKey: "paymentValue" },
+                      { header: "المشرف", dataKey: "supervisorName" },
+                    ]}
+                    summary={[
+                      { label: "إجمالي المدفوعات", value: topCustomersByPayments.reduce((sum, c) => sum + c.totalPaid, 0) },
+                      { label: "عدد العملاء", value: topCustomersByPayments.length },
+                      { label: "عدد العمليات", value: topCustomersByPayments.reduce((sum, c) => sum + c.count, 0) },
+                    ]}
+                  />
+                </div>
               </CardHeader>
               <CardContent>
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>#</TableHead>
                       <TableHead>اسم العميل</TableHead>
-                      <TableHead>رقم الهاتف</TableHead>
-                      <TableHead className="text-center">
-                        عدد المدفوعات
-                      </TableHead>
-                      <TableHead className="text-right">إجمالي المدفوع</TableHead>
+                      <TableHead className="text-center">عدد عمليات الدفع</TableHead>
+                      <TableHead className="text-center">قيمة المدفوعات</TableHead>
+                      <TableHead className="text-center">المشرف</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {paymentsPagination.paginatedItems.map((customer, index) => (
                       <TableRow key={index}>
-                        <TableCell>{(paymentsPagination.currentPage - 1) * paymentsPagination.pageSize + index + 1}</TableCell>
                         <TableCell className="font-medium">
                           {customer.name}
                         </TableCell>
-                        <TableCell>{customer.phone}</TableCell>
                         <TableCell className="text-center">
                           {customer.count}
                         </TableCell>
-                        <TableCell className="text-right font-bold text-green-600">
+                        <TableCell className="text-center font-bold text-green-600">
                           {formatCurrency(customer.totalPaid)}
                         </TableCell>
+                        <TableCell className="text-center">{customer.supervisorName}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -1276,52 +1365,164 @@ const Reports = () => {
             </Card>
           </TabsContent>
 
-          <TabsContent value="debts" className="space-y-4">
+          <TabsContent value="collections" className="space-y-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>الديون ({topCustomersByDebt.length})</CardTitle>
-                <ExportButtons
-                  title="تقرير الديون"
-                  subtitle={`حتى ${formatDate(endDate)}`}
-                  fileName={`customers-debts-${endDate}`}
-                  data={topCustomersByDebt}
-                  columns={[
-                    { header: "اسم العميل", dataKey: "name" },
-                    { header: "رقم الهاتف", dataKey: "phone" },
-                    { header: "الحد الائتماني", dataKey: "creditLimit" },
-                    { header: "الرصيد المستحق", dataKey: "debt" },
-                  ]}
-                  summary={[
-                    { label: "إجمالي الديون", value: topCustomersByDebt.reduce((sum, c) => sum + c.debt, 0) },
-                    { label: "عدد العملاء المدينين", value: topCustomersByDebt.length },
-                  ]}
-                />
+                <CardTitle>عمليات القبض ({collectionRecords.length})</CardTitle>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      printCollectionReport(
+                        collectionRecords,
+                        {
+                          dateFrom: formatDate(startDate),
+                          dateTo: formatDate(endDate),
+                          totalOperations: collectionRecords.length,
+                          totalAmount: collectionRecords.reduce((sum, c) => sum + c.amount, 0),
+                        }
+                      );
+                    }}
+                  >
+                    <FileText className="h-4 w-4 ml-1" />
+                    طباعة التقرير
+                  </Button>
+                  <ExportButtons
+                    title="تقرير عمليات القبض"
+                    subtitle={`من ${formatDate(startDate)} إلى ${formatDate(endDate)}`}
+                    fileName={`collections-${startDate}-${endDate}`}
+                    data={collectionRecords}
+                    columns={[
+                      { header: "اسم العميل", dataKey: "customerName" },
+                      { header: "المبلغ", dataKey: "amount" },
+                      { header: "رصيد العميل الحالي", dataKey: "currentBalance" },
+                      { header: "رقم العملية", dataKey: "operationId" },
+                      { header: "التاريخ", dataKey: "date" },
+                      { header: "ملاحظات", dataKey: "notes" },
+                      { header: "المشرف", dataKey: "supervisorName" },
+                    ]}
+                    summary={[
+                      { label: "إجمالي العمليات", value: collectionRecords.length },
+                      { label: "إجمالي المبلغ", value: collectionRecords.reduce((sum, c) => sum + c.amount, 0) },
+                    ]}
+                    orientation="landscape"
+                  />
+                </div>
               </CardHeader>
               <CardContent>
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>#</TableHead>
                       <TableHead>اسم العميل</TableHead>
-                      <TableHead>رقم الهاتف</TableHead>
-                      <TableHead className="text-center">الحد الائتماني</TableHead>
-                      <TableHead className="text-right">الرصيد المستحق</TableHead>
+                      <TableHead className="text-center">المبلغ</TableHead>
+                      <TableHead className="text-center">رصيد العميل الحالي</TableHead>
+                      <TableHead className="text-center">رقم العملية</TableHead>
+                      <TableHead className="text-center">التاريخ</TableHead>
+                      <TableHead className="text-center">ملاحظات</TableHead>
+                      <TableHead className="text-center">المشرف</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {collectionsPagination.paginatedItems.map((record, index) => (
+                      <TableRow key={index}>
+                        <TableCell className="font-medium">{record.customerName}</TableCell>
+                        <TableCell className="text-center">{formatCurrency(record.amount)}</TableCell>
+                        <TableCell className="text-center">{formatCurrency(record.currentBalance)}</TableCell>
+                        <TableCell className="text-center text-xs">{record.operationId}</TableCell>
+                        <TableCell className="text-center">{record.date}</TableCell>
+                        <TableCell className="text-center">{record.notes}</TableCell>
+                        <TableCell className="text-center">{record.supervisorName}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                <DataPagination
+                  currentPage={collectionsPagination.currentPage}
+                  totalPages={collectionsPagination.totalPages}
+                  totalItems={collectionsPagination.totalItems}
+                  pageSize={collectionsPagination.pageSize}
+                  entityName="عملية"
+                  getVisiblePages={collectionsPagination.getVisiblePages}
+                  goToPage={collectionsPagination.goToPage}
+                  goToNext={collectionsPagination.goToNext}
+                  goToPrev={collectionsPagination.goToPrev}
+                  changePageSize={collectionsPagination.changePageSize}
+                />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="debts" className="space-y-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>مديونية العملاء ({topCustomersByDebt.length})</CardTitle>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      printCustomerDebtReport(
+                        topCustomersByDebt.map((c) => ({
+                          name: c.name,
+                          balance: c.debt,
+                          supervisorName: c.supervisorName,
+                          salesRepName: c.salesRepName,
+                        })),
+                        {
+                          supervisorFilter: selectedSupervisor !== "all" ? supervisors.find(s => s.id === selectedSupervisor)?.name : undefined,
+                          totalDebt: topCustomersByDebt.reduce((sum, c) => sum + c.debt, 0),
+                        }
+                      );
+                    }}
+                  >
+                    <FileText className="h-4 w-4 ml-1" />
+                    طباعة التقرير
+                  </Button>
+                  <ExportButtons
+                    title="تقرير مديونية العملاء"
+                    subtitle={`حتى ${formatDate(endDate)}`}
+                    fileName={`customers-debts-${endDate}`}
+                    data={topCustomersByDebt.map((c) => ({
+                      name: c.name,
+                      balance: c.debt,
+                      supervisorName: c.supervisorName,
+                      salesRepName: c.salesRepName,
+                    }))}
+                    columns={[
+                      { header: "اسم الحساب", dataKey: "name" },
+                      { header: "الرصيد الحالي", dataKey: "balance" },
+                      { header: "المشرف", dataKey: "supervisorName" },
+                      { header: "المندوب", dataKey: "salesRepName" },
+                    ]}
+                    summary={[
+                      { label: "إجمالي المديونية", value: topCustomersByDebt.reduce((sum, c) => sum + c.debt, 0) },
+                      { label: "عدد العملاء المدينين", value: topCustomersByDebt.length },
+                    ]}
+                  />
+                </div>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>اسم الحساب</TableHead>
+                      <TableHead className="text-center">الرصيد الحالي</TableHead>
+                      <TableHead className="text-center">المشرف</TableHead>
+                      <TableHead className="text-center">المندوب</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {debtsPagination.paginatedItems.map((customer, index) => (
                       <TableRow key={index}>
-                        <TableCell>{(debtsPagination.currentPage - 1) * debtsPagination.pageSize + index + 1}</TableCell>
                         <TableCell className="font-medium">
                           {customer.name}
                         </TableCell>
-                        <TableCell>{customer.phone}</TableCell>
-                        <TableCell className="text-center">
-                          {formatCurrency(customer.creditLimit)}
-                        </TableCell>
-                        <TableCell className="text-right font-bold text-red-600">
+                        <TableCell className="text-center font-bold text-red-600">
                           {formatCurrency(customer.debt)}
                         </TableCell>
+                        <TableCell className="text-center">{customer.supervisorName}</TableCell>
+                        <TableCell className="text-center">{customer.salesRepName}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -1439,6 +1640,86 @@ const Reports = () => {
                   goToNext={invoicesPagination.goToNext}
                   goToPrev={invoicesPagination.goToPrev}
                   changePageSize={invoicesPagination.changePageSize}
+                />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="customerInvoices" className="space-y-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>فواتير العملاء ({customerInvoicesSummary.length})</CardTitle>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      printCustomerInvoicesReport(
+                        customerInvoicesSummary,
+                        {
+                          dateFrom: formatDate(startDate),
+                          dateTo: formatDate(endDate),
+                          totalSales: customerInvoicesSummary.reduce((sum, c) => sum + c.invoiceValue, 0),
+                          totalCustomers: customerInvoicesSummary.length,
+                        }
+                      );
+                    }}
+                  >
+                    <FileText className="h-4 w-4 ml-1" />
+                    طباعة التقرير
+                  </Button>
+                  <ExportButtons
+                    title="فواتير العملاء"
+                    subtitle={`من ${formatDate(startDate)} إلى ${formatDate(endDate)}`}
+                    fileName={`customer-invoices-${startDate}-${endDate}`}
+                    data={customerInvoicesSummary}
+                    columns={[
+                      { header: "اسم العميل", dataKey: "customerName" },
+                      { header: "عدد الفواتير", dataKey: "invoiceCount" },
+                      { header: "قيمة الفوتير", dataKey: "invoiceValue" },
+                      { header: "المشرف", dataKey: "supervisorName" },
+                    ]}
+                    summary={[
+                      { label: "إجمالي المبيعات", value: customerInvoicesSummary.reduce((sum, c) => sum + c.invoiceValue, 0) },
+                      { label: "عدد العملاء", value: customerInvoicesSummary.length },
+                    ]}
+                  />
+                </div>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>اسم العميل</TableHead>
+                      <TableHead className="text-center">عدد الفواتير</TableHead>
+                      <TableHead className="text-center">قيمة الفوتير</TableHead>
+                      <TableHead className="text-center">المشرف</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {customerInvoicesPagination.paginatedItems.map((item, index) => (
+                      <TableRow key={index}>
+                        <TableCell className="font-medium">{item.customerName}</TableCell>
+                        <TableCell className="text-center">{item.invoiceCount}</TableCell>
+                        <TableCell className="text-center font-bold text-green-600">
+                          {formatCurrency(item.invoiceValue)}
+                        </TableCell>
+                        <TableCell className="text-center">{item.supervisorName}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                <DataPagination
+                  currentPage={customerInvoicesPagination.currentPage}
+                  totalPages={customerInvoicesPagination.totalPages}
+                  totalItems={customerInvoicesPagination.totalItems}
+                  pageSize={customerInvoicesPagination.pageSize}
+                  entityName="عميل"
+                  getVisiblePages={customerInvoicesPagination.getVisiblePages}
+                  goToPage={customerInvoicesPagination.goToPage}
+                  goToNext={customerInvoicesPagination.goToNext}
+                  goToPrev={customerInvoicesPagination.goToPrev}
+                  changePageSize={customerInvoicesPagination.changePageSize}
                 />
               </CardContent>
             </Card>

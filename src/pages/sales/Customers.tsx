@@ -36,6 +36,7 @@ import {
   MessageCircle,
   Loader2,
   RefreshCw,
+  Printer,
 } from "lucide-react";
 import { db, Customer, Invoice, PaymentMethod, Supervisor, SalesRep, CustomerPhone, CustomerIdentification } from "@/shared/lib/indexedDB";
 import { toast } from "sonner";
@@ -53,6 +54,7 @@ import { usePagination } from "@/hooks/usePagination";
 import { DataPagination } from "@/components/ui/DataPagination";
 import { Switch } from "@/components/ui/switch";
 import { whatsappService } from "@/services/whatsapp/whatsappService";
+import { printCustomerDebtReport } from "@/lib/reportPrintService";
 
 const Customers = () => {
   const { can, user } = useAuth();
@@ -600,6 +602,31 @@ const Customers = () => {
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-bold">إدارة العملاء</h1>
           <div className="flex gap-2">
+            {/* زر طباعة تقرير المديونية */}
+            <Button
+              variant="outline"
+              onClick={() => {
+                const reportData = filteredCustomers
+                  .filter(c => getBalance(c.id, Number(c.currentBalance || 0)) > 0)
+                  .map(c => {
+                    const rep = salesReps.find(r => r.id === c.salesRepId);
+                    const supervisor = rep ? supervisors.find(s => s.id === rep.supervisorId) : undefined;
+                    return {
+                      name: c.name,
+                      balance: getBalance(c.id, Number(c.currentBalance || 0)),
+                      supervisorName: supervisor?.name || "-",
+                      salesRepName: rep?.name || "-",
+                    };
+                  });
+                const totalDebt = reportData.reduce((sum, c) => sum + c.balance, 0);
+                const supervisorFilter = filterBySupervisor !== "all" ? supervisors.find(s => s.id === filterBySupervisor)?.name : undefined;
+                printCustomerDebtReport(reportData, { supervisorFilter, totalDebt });
+              }}
+              className="gap-2"
+            >
+              <Printer className="h-4 w-4" />
+              طباعة تقرير المديونية
+            </Button>
             {/* زر تصدير Excel */}
             <ExcelExportButton
               data={filteredCustomers.map(c => ({
