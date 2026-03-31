@@ -86,6 +86,88 @@ export async function mobileRoutes(server: FastifyInstance) {
   }
 
   // ============================================================
+  // Helper: Get notifications scope WHERE condition based on user role
+  // ============================================================
+  async function getNotificationScope(
+    userId: string,
+    clientId: string,
+    role: string,
+    tableAlias: string = 'n',
+  ): Promise<{ condition: string; params: any[] }> {
+    const prefix = tableAlias ? `${tableAlias}.` : '';
+
+    if (role === 'customer') {
+      const [users] = await db.query<RowDataPacket[]>(
+        "SELECT linked_customer_id FROM users WHERE id = ? AND client_id = ?",
+        [userId, clientId]
+      );
+      const linkedCustomerId = users[0]?.linked_customer_id;
+
+      if (linkedCustomerId) {
+        return {
+          condition: `(${prefix}user_id = ? OR ${prefix}customer_id = ?)`,
+          params: [userId, linkedCustomerId],
+        };
+      }
+
+      return {
+        condition: `${prefix}user_id = ?`,
+        params: [userId],
+      };
+    }
+
+    if (role === 'sales_rep' || role === 'salesman' || role === 'salesRep') {
+      const [users] = await db.query<RowDataPacket[]>(
+        "SELECT linked_sales_rep_id FROM users WHERE id = ? AND client_id = ?",
+        [userId, clientId]
+      );
+      const salesRepId = users[0]?.linked_sales_rep_id;
+
+      if (salesRepId) {
+        return {
+          condition: `(${prefix}user_id = ? OR ${prefix}customer_id IN (
+            SELECT id FROM customers WHERE sales_rep_id = ? AND client_id = ? AND is_deleted = 0
+          ))`,
+          params: [userId, salesRepId, clientId],
+        };
+      }
+
+      return {
+        condition: `${prefix}user_id = ?`,
+        params: [userId],
+      };
+    }
+
+    if (role === 'supervisor') {
+      const [users] = await db.query<RowDataPacket[]>(
+        "SELECT linked_supervisor_id FROM users WHERE id = ? AND client_id = ?",
+        [userId, clientId]
+      );
+      const supervisorId = users[0]?.linked_supervisor_id;
+
+      if (supervisorId) {
+        return {
+          condition: `(${prefix}user_id = ? OR ${prefix}customer_id IN (
+            SELECT c.id FROM customers c
+            JOIN sales_reps sr ON c.sales_rep_id = sr.id
+            WHERE sr.supervisor_id = ? AND c.client_id = ? AND c.is_deleted = 0
+          ))`,
+          params: [userId, supervisorId, clientId],
+        };
+      }
+
+      return {
+        // No linked supervisor — keep previous fallback behavior
+        condition: `(${prefix}user_id = ? OR ${prefix}user_id IS NULL)`,
+        params: [userId],
+      };
+    }
+
+    // admin / super_admin / general_manager / sales_manager
+    return { condition: '', params: [] };
+  }
+
+  // ============================================================
   // GET /api/mobile/dashboard
   // Returns: balance, invoice count, total sales, total paid, total remaining
   // ============================================================
@@ -1437,58 +1519,10 @@ export async function mobileRoutes(server: FastifyInstance) {
         let whereConditions: string[] = ["n.client_id = ?"];
         let params: any[] = [clientId];
 
-        if (role === 'customer') {
-          // Customer: see notifications for their linked_customer_id or targeted to their user_id
-          const [users] = await db.query<RowDataPacket[]>(
-            "SELECT linked_customer_id FROM users WHERE id = ?",
-            [userId]
-          );
-          const linkedCustomerId = users[0]?.linked_customer_id;
-          if (linkedCustomerId) {
-            whereConditions.push(`(n.user_id = ? OR n.customer_id = ?)`);
-            params.push(userId, linkedCustomerId);
-          } else {
-            whereConditions.push(`n.user_id = ?`);
-            params.push(userId);
-          }
-        } else if (role === 'sales_rep' || role === 'salesman' || role === 'salesRep') {
-          // Sales rep: see notifications for their assigned customers
-          const [users] = await db.query<RowDataPacket[]>(
-            "SELECT linked_sales_rep_id FROM users WHERE id = ? AND client_id = ?",
-            [userId, clientId]
-          );
-          const salesRepId = users[0]?.linked_sales_rep_id;
-          if (salesRepId) {
-            whereConditions.push(`(n.user_id = ? OR n.customer_id IN (
-              SELECT id FROM customers WHERE sales_rep_id = ? AND client_id = ? AND is_deleted = 0
-            ))`);
-            params.push(userId, salesRepId, clientId);
-          } else {
-            whereConditions.push(`n.user_id = ?`);
-            params.push(userId);
-          }
-        } else if (role === 'supervisor') {
-          // Supervisor: see notifications for all customers under their sales reps
-          const [users] = await db.query<RowDataPacket[]>(
-            "SELECT linked_supervisor_id FROM users WHERE id = ? AND client_id = ?",
-            [userId, clientId]
-          );
-          const supervisorId = users[0]?.linked_supervisor_id;
-          if (supervisorId) {
-            whereConditions.push(`(n.user_id = ? OR n.customer_id IN (
-              SELECT c.id FROM customers c
-              JOIN sales_reps sr ON c.sales_rep_id = sr.id
-              WHERE sr.supervisor_id = ? AND c.client_id = ? AND c.is_deleted = 0
-            ))`);
-            params.push(userId, supervisorId, clientId);
-          } else {
-            // No linked supervisor — show all (admin-like fallback)
-            whereConditions.push(`(n.user_id = ? OR n.user_id IS NULL)`);
-            params.push(userId);
-          }
-        } else {
-          // admin / super_admin / general_manager / sales_manager: see all notifications for this client
-          // No additional filtering needed (already filtered by client_id)
+        const scope = await getNotificationScope(userId, clientId, role, 'n');
+        if (scope.condition) {
+          whereConditions.push(scope.condition);
+          params.push(...scope.params);
         }
 
         const whereClause = whereConditions.join(" AND ");
@@ -1535,7 +1569,24 @@ export async function mobileRoutes(server: FastifyInstance) {
     async (request, reply) => {
       try {
         const { id } = request.params;
-        await db.query("UPDATE notifications SET is_read = 1 WHERE id = ?", [id]);
+        const { userId, clientId, role } = request.user!;
+
+        const whereConditions: string[] = ["id = ?", "client_id = ?"];
+        const params: any[] = [id, clientId];
+
+        const scope = await getNotificationScope(userId, clientId, role, '');
+        if (scope.condition) {
+          whereConditions.push(scope.condition);
+          params.push(...scope.params);
+        }
+
+        await db.query<ResultSetHeader>(
+          `UPDATE notifications
+           SET is_read = 1
+           WHERE ${whereConditions.join(" AND ")}`,
+          params
+        );
+
         return reply.code(200).send({ message: "Notification marked as read" });
       } catch (error) {
         logger.error({ error }, "Failed to mark notification as read");
@@ -1553,12 +1604,102 @@ export async function mobileRoutes(server: FastifyInstance) {
     { preHandler: [server.authenticate] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const { userId, clientId } = request.user!;
-        await db.query(
-          "UPDATE notifications SET is_read = 1 WHERE client_id = ? AND (user_id = ? OR user_id IS NULL)",
-          [clientId, userId]
+        const { userId, clientId, role } = request.user!;
+
+        const whereConditions: string[] = ["client_id = ?"];
+        const params: any[] = [clientId];
+
+        const scope = await getNotificationScope(userId, clientId, role, '');
+        if (scope.condition) {
+          whereConditions.push(scope.condition);
+          params.push(...scope.params);
+        }
+
+        const [result] = await db.query<ResultSetHeader>(
+          `UPDATE notifications
+           SET is_read = 1
+           WHERE ${whereConditions.join(" AND ")} AND is_read = 0`,
+          params
         );
-        return reply.code(200).send({ message: "All notifications marked as read" });
+
+        return reply.code(200).send({
+          message: "All notifications marked as read",
+          updated: result.affectedRows,
+        });
+      } catch (error) {
+        logger.error({ error }, "Failed to mark all notifications as read");
+        return reply.code(500).send({ error: "Failed to update notifications" });
+      }
+    }
+  );
+
+  // ============================================================
+  // POST /api/mobile/notifications/:id/read
+  // Mark notification as read (POST alias for clients/proxies that block PUT)
+  // ============================================================
+  server.post<{ Params: { id: string } }>(
+    "/notifications/:id/read",
+    { preHandler: [server.authenticate] },
+    async (request, reply) => {
+      try {
+        const { id } = request.params;
+        const { userId, clientId, role } = request.user!;
+
+        const whereConditions: string[] = ["id = ?", "client_id = ?"];
+        const params: any[] = [id, clientId];
+
+        const scope = await getNotificationScope(userId, clientId, role, '');
+        if (scope.condition) {
+          whereConditions.push(scope.condition);
+          params.push(...scope.params);
+        }
+
+        await db.query<ResultSetHeader>(
+          `UPDATE notifications
+           SET is_read = 1
+           WHERE ${whereConditions.join(" AND ")}`,
+          params
+        );
+
+        return reply.code(200).send({ message: "Notification marked as read" });
+      } catch (error) {
+        logger.error({ error }, "Failed to mark notification as read");
+        return reply.code(500).send({ error: "Failed to update notification" });
+      }
+    }
+  );
+
+  // ============================================================
+  // POST /api/mobile/notifications/read-all
+  // Mark all notifications as read (POST alias for clients/proxies that block PUT)
+  // ============================================================
+  server.post(
+    "/notifications/read-all",
+    { preHandler: [server.authenticate] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { userId, clientId, role } = request.user!;
+
+        const whereConditions: string[] = ["client_id = ?"];
+        const params: any[] = [clientId];
+
+        const scope = await getNotificationScope(userId, clientId, role, '');
+        if (scope.condition) {
+          whereConditions.push(scope.condition);
+          params.push(...scope.params);
+        }
+
+        const [result] = await db.query<ResultSetHeader>(
+          `UPDATE notifications
+           SET is_read = 1
+           WHERE ${whereConditions.join(" AND ")} AND is_read = 0`,
+          params
+        );
+
+        return reply.code(200).send({
+          message: "All notifications marked as read",
+          updated: result.affectedRows,
+        });
       } catch (error) {
         logger.error({ error }, "Failed to mark all notifications as read");
         return reply.code(500).send({ error: "Failed to update notifications" });
@@ -1725,7 +1866,7 @@ export async function mobileRoutes(server: FastifyInstance) {
         const { clientId, branchId } = request.user!;
         const { search, category_id, limit = 100, offset = 0 } = request.query as any;
 
-        let where = ["p.client_id = ?", "p.is_deleted = 0", "p.is_active = 1"];
+        let where = ["p.client_id = ?", "p.is_deleted = 0", "p.active = 1"];
         const params: any[] = [clientId];
 
         if (branchId) { where.push("(p.branch_id = ? OR p.branch_id IS NULL)"); params.push(branchId); }
@@ -1733,20 +1874,49 @@ export async function mobileRoutes(server: FastifyInstance) {
         if (category_id) { where.push("p.category_id = ?"); params.push(category_id); }
 
         const [rows] = await db.query<RowDataPacket[]>(
-          `SELECT p.id, p.name, p.barcode, p.sale_price, p.purchase_price,
-                  p.stock_quantity, p.category_id, c.name as category_name,
-                  p.unit_id, u.name as unit_name, p.units_per_carton,
-                  p.image_url
+          `SELECT p.id, p.name, p.barcode, p.selling_price, p.cost_price,
+                  p.stock, p.category_id, c.name_ar as category_name,
+                  p.unit as unit_name, p.units_per_carton,
+                  p.image_url, p.prices_json
            FROM products p
            LEFT JOIN product_categories c ON p.category_id = c.id
-           LEFT JOIN product_units u ON p.unit_id = u.id
            WHERE ${where.join(" AND ")}
            ORDER BY p.name ASC
            LIMIT ? OFFSET ?`,
           [...params, Number(limit), Number(offset)]
         );
 
-        return reply.code(200).send({ data: rows });
+        // Fetch default price type for this client
+        const [ptRows] = await db.query<RowDataPacket[]>(
+          `SELECT id, name, is_default FROM price_types
+           WHERE client_id = ? AND is_deleted = 0 AND active = 1
+           ORDER BY is_default DESC, name ASC`,
+          [clientId]
+        );
+        const defaultPriceType = (ptRows as any[]).find((pt: any) => pt.is_default) || (ptRows as any[])[0] || null;
+
+        // Parse prices_json and compute effective_price using the default price type
+        const data = (rows as any[]).map((row: any) => {
+          let prices: Record<string, number> = {};
+          try {
+            if (row.prices_json) prices = JSON.parse(row.prices_json);
+          } catch { /* ignore */ }
+
+          let effectivePrice = Number(row.selling_price) || 0;
+          if (defaultPriceType && prices[defaultPriceType.id] !== undefined) {
+            effectivePrice = Number(prices[defaultPriceType.id]) || effectivePrice;
+          }
+
+          return {
+            ...row,
+            prices_json: undefined,
+            prices,
+            effective_price: effectivePrice,
+            default_price_type_id: defaultPriceType?.id || null,
+          };
+        });
+
+        return reply.code(200).send({ data, defaultPriceType });
       } catch (error) {
         logger.error({ error }, "Failed to fetch products for mobile");
         return reply.code(500).send({ error: "Failed to fetch products" });
@@ -1772,6 +1942,85 @@ export async function mobileRoutes(server: FastifyInstance) {
         return reply.code(200).send({ data: rows });
       } catch (error) {
         return reply.code(500).send({ error: "Failed to fetch payment methods" });
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────
+  // GET /api/mobile/warehouses
+  // Returns active warehouses with stock info
+  // ─────────────────────────────────────────────────────
+  server.get(
+    "/warehouses",
+    { preHandler: [server.authenticate] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { clientId, branchId } = request.user!;
+        const [rows] = await db.query<RowDataPacket[]>(
+          `SELECT id, name, is_default FROM warehouses
+           WHERE client_id = ? AND (branch_id = ? OR branch_id IS NULL)
+             AND active = 1 AND is_deleted = 0
+           ORDER BY is_default DESC, name ASC`,
+          [clientId, branchId]
+        );
+        return reply.code(200).send({ data: rows });
+      } catch (error) {
+        return reply.code(500).send({ error: "Failed to fetch warehouses" });
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────
+  // GET /api/mobile/products/:id/stock
+  // Returns per-warehouse stock for a single product
+  // ─────────────────────────────────────────────────────
+  server.get(
+    "/products/:id/stock",
+    { preHandler: [server.authenticate] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { clientId, branchId } = request.user!;
+        const { id } = request.params as any;
+
+        // Get all warehouses, LEFT JOIN with stock so quantity=0 when no record
+        const [rows] = await db.query<RowDataPacket[]>(
+          `SELECT w.id as warehouse_id,
+                  COALESCE(ps.quantity, 0) as quantity,
+                  w.name as warehouse_name,
+                  w.is_default
+           FROM warehouses w
+           LEFT JOIN product_stock ps
+             ON ps.warehouse_id = w.id
+             AND ps.product_id = ?
+             AND ps.client_id = ?
+             AND (ps.branch_id = ? OR ps.branch_id IS NULL)
+             AND ps.is_deleted = 0
+           WHERE w.client_id = ? AND w.active = 1 AND w.is_deleted = 0
+             AND (w.branch_id = ? OR w.branch_id IS NULL)
+           ORDER BY w.is_default DESC, w.name ASC`,
+          [id, clientId, branchId, clientId, branchId]
+        );
+
+        // If product_stock table is empty for this client, fall back to products.stock on the default warehouse only
+        const hasAnyStock = (rows as any[]).some((r: any) => Number(r.quantity) > 0);
+        if (!hasAnyStock) {
+          const [fallback] = await db.query<RowDataPacket[]>(
+            `SELECT w.id as warehouse_id, p.stock as quantity, w.name as warehouse_name, w.is_default
+             FROM products p
+             JOIN warehouses w ON w.client_id = p.client_id
+             WHERE p.id = ? AND p.client_id = ?
+               AND w.active = 1 AND w.is_deleted = 0
+               AND (w.branch_id = ? OR w.branch_id IS NULL)
+             ORDER BY w.is_default DESC
+             LIMIT 1`,
+            [id, clientId, branchId]
+          );
+          return reply.code(200).send({ data: fallback });
+        }
+
+        return reply.code(200).send({ data: rows });
+      } catch (error) {
+        return reply.code(500).send({ error: "Failed to fetch product stock" });
       }
     }
   );

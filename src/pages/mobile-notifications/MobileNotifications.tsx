@@ -191,10 +191,10 @@ export default function MobileNotifications() {
       const client = getFastifyClient();
       const formData = new FormData();
       formData.append("file", imageFile);
-      const res = await client.post<{ url: string }>("/api/notifications/upload-image", formData, {
+      const res = await client.post<{ imageUrl?: string; url?: string }>("/api/notifications/upload-image", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      return res.url;
+      return res.imageUrl || res.url || null;
     } catch {
       toast({ title: "خطأ", description: "فشل رفع الصورة", variant: "destructive" });
       return null;

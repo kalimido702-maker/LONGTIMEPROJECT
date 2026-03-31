@@ -344,12 +344,22 @@ class ApiService {
 
   /// Mark single notification as read
   Future<void> markNotificationRead(String id) async {
-    await _dio.put(ApiConfig.notificationRead(id));
+    try {
+      await _dio.put(ApiConfig.notificationRead(id), data: {});
+    } catch (_) {
+      // Fallback for environments where PUT is blocked or rewritten
+      await _dio.post(ApiConfig.notificationRead(id), data: {});
+    }
   }
 
   /// Mark all notifications as read
   Future<void> markAllNotificationsRead() async {
-    await _dio.put(ApiConfig.notificationsReadAll);
+    try {
+      await _dio.put(ApiConfig.notificationsReadAll, data: {});
+    } catch (_) {
+      // Fallback for environments where PUT is blocked or rewritten
+      await _dio.post(ApiConfig.notificationsReadAll, data: {});
+    }
   }
 
   /// Register FCM token for push notifications
@@ -377,18 +387,29 @@ class ApiService {
   // Products
   // ============================================================
 
-  Future<List<Map<String, dynamic>>> getProducts({
+  Future<Map<String, dynamic>> getProducts({
     String? search,
     String? categoryId,
     int limit = 100,
     int offset = 0,
   }) async {
-    final response = await _dio.get('/api/mobile/products', queryParameters: {
+    final response = await _dio.get('/mobile/products', queryParameters: {
       if (search != null && search.isNotEmpty) 'search': search,
       if (categoryId != null) 'category_id': categoryId,
       'limit': limit,
       'offset': offset,
     });
+    return response.data as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> getWarehouses() async {
+    final response = await _dio.get('/mobile/warehouses');
+    final data = response.data['data'] as List? ?? [];
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<List<Map<String, dynamic>>> getProductStock(String productId) async {
+    final response = await _dio.get('/mobile/products/$productId/stock');
     final data = response.data['data'] as List? ?? [];
     return data.cast<Map<String, dynamic>>();
   }
@@ -398,7 +419,7 @@ class ApiService {
   // ============================================================
 
   Future<List<Map<String, dynamic>>> getPaymentMethods() async {
-    final response = await _dio.get('/api/mobile/payment-methods');
+    final response = await _dio.get('/mobile/payment-methods');
     final data = response.data['data'] as List? ?? [];
     return data.cast<Map<String, dynamic>>();
   }
@@ -408,7 +429,7 @@ class ApiService {
   // ============================================================
 
   Future<Map<String, dynamic>> createInvoice(Map<String, dynamic> data) async {
-    final response = await _dio.post('/api/mobile/invoices', data: data);
+    final response = await _dio.post('/mobile/invoices', data: data);
     return response.data as Map<String, dynamic>;
   }
 
@@ -417,7 +438,7 @@ class ApiService {
   // ============================================================
 
   Future<Map<String, dynamic>> createPayment(Map<String, dynamic> data) async {
-    final response = await _dio.post('/api/mobile/payments', data: data);
+    final response = await _dio.post('/mobile/payments', data: data);
     return response.data as Map<String, dynamic>;
   }
 

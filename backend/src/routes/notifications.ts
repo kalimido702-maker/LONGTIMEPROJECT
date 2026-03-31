@@ -40,9 +40,7 @@ export async function notificationRoutes(server: FastifyInstance) {
           return reply.code(400).send({ error: "title, body, type, and target are required" });
         }
 
-        if (!notificationService.isEnabled()) {
-          return reply.code(503).send({ error: "Push notifications are not configured on this server" });
-        }
+        const pushEnabled = notificationService.isEnabled();
 
         if (body.target === 'all' || body.target === 'customers' || body.target === 'sales_reps' || body.target === 'supervisors') {
           // Targeted broadcast by role
@@ -52,41 +50,37 @@ export async function notificationRoutes(server: FastifyInstance) {
           else if (body.target === 'supervisors') roleFilter = "AND u.role = 'supervisor'";
 
           const [rows] = await db.query<RowDataPacket[]>(
-            `SELECT DISTINCT f.token
-             FROM fcm_tokens f
-             INNER JOIN users u ON f.user_id = u.id
-             WHERE f.client_id = ? AND f.is_active = 1 AND u.is_deleted = 0 AND u.is_active = 1
+            `SELECT DISTINCT u.id as user_id
+             FROM users u
+             INNER JOIN fcm_tokens f ON f.user_id = u.id AND f.is_active = 1
+             WHERE u.client_id = ? AND u.is_deleted = 0 AND u.is_active = 1
              ${roleFilter}`,
             [clientId]
           );
 
-          const tokens = rows.map((r) => r.token);
+          const userIds = rows.map((r) => r.user_id).filter(Boolean);
 
-          if (tokens.length === 0) {
+          if (userIds.length === 0) {
             return reply.code(200).send({ success: true, sent: 0, message: "لا يوجد مستخدمين متصلين" });
           }
 
-          // Use internal method via broadcastToClient for all, or direct send for filtered
-          if (body.target === 'all') {
-            await notificationService.broadcastToClient(clientId, branchId || null, body.title, body.body, body.type, undefined, body.imageUrl);
-          } else {
-            for (const row of rows) {
-              await notificationService.sendNotification({
-                clientId,
-                branchId,
-                userId: row.user_id,
-                title: body.title,
-                body: body.body,
-                type: body.type,
-                imageUrl: body.imageUrl,
-                referenceId: body.referenceId,
-                referenceType: body.referenceType,
-              });
-            }
+          // Persist + push one notification per target user
+          for (const targetUserId of userIds) {
+            await notificationService.sendNotification({
+              clientId,
+              branchId,
+              userId: targetUserId,
+              title: body.title,
+              body: body.body,
+              type: body.type,
+              imageUrl: body.imageUrl,
+              referenceId: body.referenceId,
+              referenceType: body.referenceType,
+            });
           }
 
-          logger.info({ clientId, target: body.target, tokenCount: tokens.length }, "Manual notification sent");
-          return reply.code(200).send({ success: true, sent: tokens.length });
+          logger.info({ clientId, target: body.target, userCount: userIds.length, pushEnabled }, "Manual notification sent");
+          return reply.code(200).send({ success: true, sent: userIds.length, pushEnabled });
 
         } else if (body.target === 'user') {
           if (!body.userId && !body.customerId) {
@@ -106,7 +100,7 @@ export async function notificationRoutes(server: FastifyInstance) {
             referenceType: body.referenceType,
           });
 
-          return reply.code(200).send({ success: true, sent: 1 });
+          return reply.code(200).send({ success: true, sent: 1, pushEnabled });
         }
 
         return reply.code(400).send({ error: "Invalid target" });
@@ -303,9 +297,17 @@ export async function notificationRoutes(server: FastifyInstance) {
 
         await pipeline(data.file, createWriteStream(filePath));
 
-        // Return public URL
-        const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3030}`;
-        const imageUrl = `${baseUrl}/notification-images/${filename}`;
+        // Return public URL using forwarded host/proto when behind reverse proxy
+        const forwardedProto = (request.headers["x-forwarded-proto"] as string | undefined)
+          ?.split(",")[0]
+          ?.trim();
+        const forwardedHost = (request.headers["x-forwarded-host"] as string | undefined)
+          ?.split(",")[0]
+          ?.trim();
+        const protocol = forwardedProto || (request as any).protocol || "http";
+        const host = forwardedHost || request.headers.host || `localhost:${process.env.PORT || 3030}`;
+        const baseUrl = process.env.BASE_URL || `${protocol}://${host}`;
+        const imageUrl = `${baseUrl}/uploads/notification-images/${filename}`;
 
         return reply.code(200).send({ imageUrl });
       } catch (error) {

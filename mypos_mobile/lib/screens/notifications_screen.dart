@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:go_router/go_router.dart';
 import '../config/theme.dart';
+import '../config/api_config.dart';
 import '../providers/data_provider.dart';
 
 class NotificationsScreen extends StatefulWidget {
@@ -16,6 +17,40 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   List<_NotificationItem> _notifications = [];
   int _unreadCount = 0;
   bool _isLoading = true;
+
+  String _normalizeImageUrl(dynamic rawUrl) {
+    var value = (rawUrl ?? '').toString().trim();
+    if (value.isEmpty) return '';
+
+    // Backward compatibility: old server responses used /notification-images/*
+    if (value.contains('/notification-images/') &&
+        !value.contains('/uploads/notification-images/')) {
+      value = value.replaceFirst(
+        '/notification-images/',
+        '/uploads/notification-images/',
+      );
+    }
+
+    final base = ApiConfig.baseUrl.replaceFirst(RegExp(r'/api/?$'), '');
+    final baseUri = Uri.tryParse(base);
+
+    if (value.startsWith('/')) {
+      return '$base$value';
+    }
+
+    final imageUri = Uri.tryParse(value);
+    if (imageUri != null &&
+        baseUri != null &&
+        (imageUri.host == 'localhost' || imageUri.host == '127.0.0.1')) {
+      return imageUri.replace(
+        scheme: baseUri.scheme,
+        host: baseUri.host,
+        port: baseUri.hasPort ? baseUri.port : null,
+      ).toString();
+    }
+
+    return value;
+  }
 
   @override
   void initState() {
@@ -43,6 +78,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             title: json['title'] ?? '',
             body: json['body'] ?? '',
             type: json['type'] ?? 'info',
+            imageUrl: _normalizeImageUrl(json['image_url'] ?? json['imageUrl']),
             referenceId: json['reference_id']?.toString() ?? '',
             referenceType: json['reference_type']?.toString() ?? '',
             date: date,
@@ -57,18 +93,32 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   Future<void> _markAllRead() async {
     final dataProvider = context.read<DataProvider>();
-    await dataProvider.markAllNotificationsRead();
-    setState(() {
-      for (var n in _notifications) {
-        n.isRead = true;
-      }
-      _unreadCount = 0;
-    });
+    try {
+      await dataProvider.markAllNotificationsRead();
+      if (!mounted) return;
+
+      setState(() {
+        for (var n in _notifications) {
+          n.isRead = true;
+        }
+        _unreadCount = 0;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('فشل تحديث حالة الإشعارات')),
+      );
+    }
   }
 
-  Future<void> _markRead(String id) async {
+  Future<bool> _markRead(String id) async {
     final dataProvider = context.read<DataProvider>();
-    await dataProvider.markNotificationRead(id);
+    try {
+      await dataProvider.markNotificationRead(id);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   @override
@@ -102,14 +152,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       final notification = _notifications[index];
                       return _NotificationCard(
                         notification: notification,
-                        onTap: () {
+                        onTap: () async {
                           if (!notification.isRead) {
-                            _markRead(notification.id);
-                            setState(() {
-                              notification.isRead = true;
-                              _unreadCount = _unreadCount > 0 ? _unreadCount - 1 : 0;
-                            });
+                            final marked = await _markRead(notification.id);
+                            if (marked && mounted) {
+                              setState(() {
+                                notification.isRead = true;
+                                _unreadCount = _unreadCount > 0 ? _unreadCount - 1 : 0;
+                              });
+                            }
                           }
+                          if (!mounted) return;
                           _navigateToNotification(notification);
                         },
                         onDismiss: () {
@@ -298,6 +351,27 @@ class _NotificationCard extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    if (notification.imageUrl.trim().isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: AspectRatio(
+                          aspectRatio: 16 / 9,
+                          child: Image.network(
+                            notification.imageUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(
+                              color: Colors.grey[100],
+                              alignment: Alignment.center,
+                              child: Icon(
+                                LucideIcons.imageOff,
+                                color: Colors.grey[400],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 6),
                     Text(
                       timeAgo,
@@ -332,6 +406,7 @@ class _NotificationItem {
   final String title;
   final String body;
   final String type;
+  final String imageUrl;
   final String referenceId;
   final String referenceType;
   final DateTime date;
@@ -342,6 +417,7 @@ class _NotificationItem {
     required this.title,
     required this.body,
     required this.type,
+    this.imageUrl = '',
     this.referenceId = '',
     this.referenceType = '',
     required this.date,

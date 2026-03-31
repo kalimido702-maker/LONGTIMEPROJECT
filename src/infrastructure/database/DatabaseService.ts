@@ -7,6 +7,7 @@ import { migration_v5 } from "./migrations/v5-shift-purchase-returns";
 import { UserSeeder } from "./seeders/UserSeeder";
 import { RoleSeeder } from "./seeders/RoleSeeder";
 import { SettingsSeeder } from "./seeders/SettingsSeeder";
+import { DB_VERSION } from "./migrations/schema.config";
 
 /**
  * DatabaseService - Facade pattern للوصول لقاعدة البيانات
@@ -20,7 +21,7 @@ export class DatabaseService {
   private seederRunner: SeederRunner;
   private repositories: Map<string, SyncableRepository<any>> = new Map();
 
-  constructor(dbName: string = "MASRPOS", dbVersion: number = 20) {
+  constructor(dbName: string = "MASRPOS", dbVersion: number = DB_VERSION) {
     this.client = new IndexedDBClient({ name: dbName, version: dbVersion });
     this.migrationRunner = new MigrationRunner();
     this.seederRunner = new SeederRunner(this.client);

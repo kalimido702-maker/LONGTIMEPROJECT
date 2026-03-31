@@ -104,16 +104,14 @@ class _CreatePaymentScreenState extends State<CreatePaymentScreen> {
     try {
       final api = ApiService();
       await api.createPayment({
-        'customer_id': _selectedCustomer!['id'],
-        'customer_name': _selectedCustomer!['name'],
-        'invoice_id': _selectedInvoice?['id'],
+        'customerId': _selectedCustomer!['id'],
+        'invoiceId': _selectedInvoice?['id'],
         'amount': amount,
-        'payment_method_id': _selectedPaymentMethod?['id'],
-        'payment_method_name': _selectedPaymentMethod?['name'],
-        'payment_date': _paymentDate.toIso8601String(),
-        'reference_number': _referenceController.text.trim(),
+        'paymentMethodId': _selectedPaymentMethod?['id'],
+        'paymentDate': _paymentDate.toIso8601String(),
+        'referenceNumber': _referenceController.text.trim(),
         'notes': _notesController.text.trim(),
-        'payment_type': 'receipt',
+        'paymentType': 'receipt',
       });
       _showSnack('تم إضافة القبض بنجاح');
       if (mounted) context.pop();
@@ -185,7 +183,7 @@ class _CreatePaymentScreenState extends State<CreatePaymentScreen> {
                             DropdownMenuItem(value: null, child: Text('بدون فاتورة محددة', style: GoogleFonts.cairo())),
                             ..._unpaidInvoices.map((inv) => DropdownMenuItem(
                               value: inv,
-                              child: Text('${inv['invoice_number'] ?? inv['invoiceNumber']} - ${_fmt.format((inv['remaining_amount'] ?? inv['remainingAmount'] ?? 0))} ج', style: GoogleFonts.cairo(fontSize: 13)),
+                              child: Text('${inv['invoice_number'] ?? inv['invoiceNumber']} - ${_fmt.format(double.tryParse((inv['remaining_amount'] ?? inv['remainingAmount'] ?? 0).toString()) ?? 0)} ج', style: GoogleFonts.cairo(fontSize: 13)),
                             )),
                           ],
                           onChanged: (v) {
