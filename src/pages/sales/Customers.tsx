@@ -38,10 +38,11 @@ import {
   RefreshCw,
   Printer,
 } from "lucide-react";
-import { db, Customer, Invoice, PaymentMethod, Supervisor, SalesRep, CustomerPhone, CustomerIdentification } from "@/shared/lib/indexedDB";
+import { db, Customer, Invoice, PaymentMethod, Supervisor, SalesRep, CustomerPhone, CustomerIdentification, PriceType } from "@/shared/lib/indexedDB";
 import { toast } from "sonner";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTabs } from "@/contexts/TabContext";
 import { CustomerDetailsDialog } from "@/components/dialogs/CustomerDetailsDialog";
 import { ExcelExportButton, ExcelColumn } from "@/components/common/ExcelExportButton";
 import { useCustomerBalances } from "@/hooks/useCustomerBalances";
@@ -58,7 +59,9 @@ import { printCustomerDebtReport } from "@/lib/reportPrintService";
 
 const Customers = () => {
   const { can, user } = useAuth();
+  const { addTab } = useTabs();
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [priceTypes, setPriceTypes] = useState<PriceType[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
@@ -101,17 +104,25 @@ const Customers = () => {
     idNumbers: [] as { number: string; label: string }[],
     latitude: null as number | null,
     longitude: null as number | null,
+    specialDiscount: 0,
+    defaultPriceTypeId: "",
   });
 
   useEffect(() => {
     loadCustomers();
     loadPaymentMethods();
     loadSalesReps();
+    loadPriceTypes();
   }, []);
 
   const loadCustomers = async () => {
     const data = await db.getAll<Customer>("customers");
     setCustomers(data);
+  };
+
+  const loadPriceTypes = async () => {
+    const data = await db.getAll<PriceType>("priceTypes");
+    setPriceTypes(data);
   };
 
   const loadPaymentMethods = async () => {
@@ -336,6 +347,8 @@ const Customers = () => {
       idNumbers: [],
       latitude: customer.latitude || null,
       longitude: customer.longitude || null,
+      specialDiscount: customer.specialDiscount || 0,
+      defaultPriceTypeId: customer.defaultPriceTypeId || "",
     });
     // Load additional phones and ID numbers from IndexedDB
     loadCustomerAdditionalData(customer.id);
@@ -391,6 +404,8 @@ const Customers = () => {
       idNumbers: [],
       latitude: null,
       longitude: null,
+      specialDiscount: 0,
+      defaultPriceTypeId: "",
     });
     setEditingCustomer(null);
     setWhatsappGroups([]);
@@ -1062,6 +1077,43 @@ const Customers = () => {
                       </SelectContent>
                     </Select>
                   </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>خصم خاص للعميل (%)</Label>
+                      <Input
+                        type="number"
+                        value={formData.specialDiscount || ""}
+                        onChange={(e) =>
+                          setFormData({ ...formData, specialDiscount: parseFloat(e.target.value) || 0 })
+                        }
+                        placeholder="0"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>نوع السعر الافتراضي</Label>
+                      <Select
+                        value={formData.defaultPriceTypeId || "none"}
+                        onValueChange={(value) =>
+                          setFormData({ ...formData, defaultPriceTypeId: value === "none" ? "" : value })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="اختر نوع السعر" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">السعر الافتراضي</SelectItem>
+                          {priceTypes.map((pt) => (
+                            <SelectItem key={pt.id} value={pt.id}>
+                              {pt.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="address">العنوان</Label>
                     <Input
@@ -1208,10 +1260,7 @@ const Customers = () => {
             <Card
               key={customer.id}
               className="hover:shadow-lg transition-shadow cursor-pointer"
-              onClick={() => {
-                setSelectedCustomerForDetails(customer);
-                setIsDetailsDialogOpen(true);
-              }}
+              onClick={() => addTab(`/customer-statement?customerId=${customer.id}`)}
             >
               <CardHeader>
                 <CardTitle className="flex justify-between items-start">

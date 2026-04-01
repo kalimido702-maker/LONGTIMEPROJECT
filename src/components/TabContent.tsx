@@ -56,6 +56,7 @@ class TabErrorBoundary extends Component<
 
 // Lazy load pages for better performance
 const POSv2 = lazy(() => import('@/pages/pos/POSv2'));
+const POSReturn = lazy(() => import('@/pages/pos/POSReturn'));
 const Home = lazy(() => import('@/pages/Home'));
 const Restaurant = lazy(() => import('@/pages/pos/Restaurant'));
 const Customers = lazy(() => import('@/pages/sales/Customers'));
@@ -98,11 +99,17 @@ const SalesReps = lazy(() => import('@/pages/salesReps/SalesReps'));
 const MobileAccounts = lazy(() => import('@/pages/mobile-accounts/MobileAccounts'));
 const MobileNotifications = lazy(() => import('@/pages/mobile-notifications/MobileNotifications'));
 const LogViewer = lazy(() => import('@/pages/admin/LogViewer'));
+const PrintSettingsPage = lazy(() => import('@/pages/settings/PrintSettingsPage'));
+const InvoiceTemplatePage = lazy(() => import('@/pages/settings/InvoiceTemplatePage'));
+const ThemeSettingsPage = lazy(() => import('@/pages/settings/ThemeSettingsPage'));
+const ProductMovement = lazy(() => import('@/pages/inventory/ProductMovement'));
+const CustomerStatement = lazy(() => import('@/pages/sales/CustomerStatement'));
 
 // Map paths to components
 const pathToComponent: Record<string, React.ComponentType> = {
     '/': Home,
     '/pos': POSv2,
+    '/pos-return': POSReturn,
     '/restaurant': Restaurant,
     '/customers': Customers,
     '/invoices': Invoices,
@@ -144,6 +151,11 @@ const pathToComponent: Record<string, React.ComponentType> = {
     '/mobile-accounts': MobileAccounts,
     '/mobile-notifications': MobileNotifications,
     '/logs': LogViewer,
+    '/print-settings': PrintSettingsPage,
+    '/invoice-template': InvoiceTemplatePage,
+    '/theme-settings': ThemeSettingsPage,
+    '/product-movement': ProductMovement,
+    '/customer-statement': CustomerStatement,
 };
 
 // Loading fallback

@@ -41,6 +41,7 @@ dependencies:
   share_plus: ^12.0.1
   path_provider: ^2.1.5
   printing: ^5.14.2
+  pdfx: ^2.9.2
 
 dev_dependencies:
   flutter_test:

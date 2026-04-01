@@ -94,7 +94,7 @@ import {
 
 
 
-const POSv2 = () => {
+const POSv2 = ({ forceMode }: { forceMode?: "sales" | "return" } = {}) => {
   const { user, can } = useAuth();
   const { toast } = useToast();
   const { getSetting } = useSettingsContext();
@@ -103,6 +103,7 @@ const POSv2 = () => {
   const navigate = useNavigate();
   const editingInvoiceId = searchParams.get("invoiceId"); // Check for edit mode
   const fromQuote = searchParams.get("fromQuote"); // Check if loading from quote
+  const initialMode = searchParams.get("mode"); // Check for mode (return)
 
 
   // States
@@ -124,7 +125,8 @@ const POSv2 = () => {
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
 
   // Transaction Mode: sales (default) or return
-  const [mode, setMode] = useState<"sales" | "return">("sales");
+  const [mode, setMode] = useState<"sales" | "return">(forceMode || (initialMode === "return" ? "return" : "sales"));
+  const isModeLocked = !!forceMode;
 
   // Payment states - now only credit (آجل) is supported
   const [paymentType] = useState<"credit">("credit");
@@ -174,6 +176,10 @@ const POSv2 = () => {
   const [productForQuantity, setProductForQuantity] = useState<Product | null>(null);
   const [inputQuantity, setInputQuantity] = useState<number>(0);
   const [currentProductStocks, setCurrentProductStocks] = useState<Record<string, number>>({});
+
+  // Inline editing state for cart table
+  const [editingCartItemId, setEditingCartItemId] = useState<string | null>(null);
+  const [editingCartField, setEditingCartField] = useState<"quantity" | "price" | null>(null);
 
   // Dialogs
   const [addCustomerDialog, setAddCustomerDialog] = useState(false);
@@ -580,17 +586,30 @@ const POSv2 = () => {
     // If product has warehouse stocks, auto-select warehouse with stock
     const warehousesWithStock = Object.keys(stocksRecord);
     if (warehousesWithStock.length === 1) {
-      // Only one warehouse has stock, select it
       setSelectedWarehouseId(warehousesWithStock[0]);
     } else if (warehousesWithStock.length > 0 && !warehousesWithStock.includes(selectedWarehouseId)) {
-      // Current selected warehouse has no stock, select first with stock
       setSelectedWarehouseId(warehousesWithStock[0]);
     }
 
-    // Show quantity input dialog
-    setProductForQuantity(product);
-    setInputQuantity(0);
-    setQuantityDialog(true);
+    // Check if product has multiple units
+    const productUnits = await db.getByIndex<ProductUnit>(
+      "productUnits",
+      "productId",
+      product.id
+    );
+
+    if (productUnits && productUnits.length > 0) {
+      // Show unit selection dialog
+      setProductForUnitSelection(product);
+      setAvailableProductUnits(productUnits);
+      setSelectedProductUnitId(productUnits[0]?.id || "");
+      setInputQuantity(1);
+      setUnitSelectionDialog(true);
+      return;
+    }
+
+    // No multiple units, add directly with qty=1
+    addToCartWithUnit(product, null, 1);
   };
 
   // Called after quantity is confirmed
@@ -720,8 +739,17 @@ const POSv2 = () => {
           // Validation Logic
           isPriceVerified: mode === "return" && selectedCustomer !== "cash" ? (await getLastCustomerPrice(selectedCustomer, product.id) !== null) : undefined,
           originalPrice: mode === "return" && selectedCustomer !== "cash" ? (await getLastCustomerPrice(selectedCustomer, product.id) || undefined) : undefined,
+          // Per-item fields
+          barcode: product.barcode,
+          unitsPerCarton: (product as any).unitsPerCarton,
+          itemDiscount: 0,
         },
       ]);
+
+      // Set inline editing on newly added item (quantity field)
+      const newItemKey = `${product.id}-${productUnit?.id || "base"}`;
+      setEditingCartItemId(newItemKey);
+      setEditingCartField("quantity");
     }
     setSearchQuery("");
     setUnitSelectionDialog(false);
@@ -779,6 +807,16 @@ const POSv2 = () => {
   const updatePrice = (id: string, price: number) => {
     setCartItems(
       cartItems.map((i) => (i.id === id ? { ...i, customPrice: price } : i))
+    );
+  };
+
+  const updateItemDiscount = (id: string, discount: number, productUnitId?: string) => {
+    setCartItems(
+      cartItems.map((i) =>
+        i.id === id && i.productUnitId === productUnitId
+          ? { ...i, itemDiscount: discount }
+          : i
+      )
     );
   };
 
@@ -872,9 +910,15 @@ const POSv2 = () => {
     0
   );
 
-  const discount = discountPercent
-    ? (subtotal * parseFloat(discountPercent)) / 100
-    : parseFloat(discountAmount) || 0;
+  // Per-item discounts total
+  const itemDiscountsTotal = cartItems.reduce(
+    (sum, i) => sum + (i.itemDiscount || 0),
+    0
+  );
+
+  const discount = itemDiscountsTotal + (discountPercent
+    ? ((subtotal - itemDiscountsTotal) * parseFloat(discountPercent)) / 100
+    : parseFloat(discountAmount) || 0);
 
   const afterDiscount = subtotal - discount;
   const tax = (includeTax && taxRate > 0) ? (afterDiscount * taxRate) / 100 : 0;
@@ -1105,6 +1149,7 @@ const POSv2 = () => {
       name: newCustomerData.name,
       phone: newCustomerData.phone,
       address: newCustomerData.address,
+      customerType: "registered",
       creditLimit: 0,
       currentBalance: 0,
       bonusBalance: 0,
@@ -1776,9 +1821,9 @@ const POSv2 = () => {
           {/* Right Side - Search + Cart + Totals */}
           <ResizablePanel defaultSize={65} minSize={40}>
             <div className="h-full flex flex-col p-3 gap-3 min-h-0">
-              {/* Search & Filter */}
-              <div className="flex gap-2">
-                <div className="relative flex-1">
+              {/* Search & Customer */}
+              <div className="flex gap-2 items-center">
+                <div className="relative flex-[2]">
                   <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
                   <Input
                     ref={searchInputRef}
@@ -1812,6 +1857,7 @@ const POSv2 = () => {
                       }
                       if (e.key === "Enter") {
                         e.preventDefault();
+                        if (!searchQuery.trim()) return;
                         if (highlightedProductIndex >= 0 && highlightedProductIndex < filteredProducts.length) {
                           addToCart(filteredProducts[highlightedProductIndex]);
                           setSearchQuery("");
@@ -1901,23 +1947,86 @@ const POSv2 = () => {
                     </div>
                   )}
                 </div>
-                <Select
-                  value={selectedCategory}
-                  onValueChange={setSelectedCategory}
-                >
-                  <SelectTrigger className="w-40 h-10">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">الكل</SelectItem>
-                    <SelectItem value="no-category">بدون قسم</SelectItem>
-                    {categories.map((c) => (
-                      <SelectItem key={c.id} value={c.nameAr}>
-                        {c.nameAr}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* Customer Selection - Inline */}
+                <div className="flex-[2] flex gap-1 items-center">
+                  <Popover open={customerSearchOpen} onOpenChange={setCustomerSearchOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={customerSearchOpen}
+                        className="flex-1 justify-between h-10 text-sm"
+                      >
+                        {selectedCustomer && selectedCustomer !== "cash"
+                          ? customers.find((c) => c.id === selectedCustomer)?.name || "اختر عميل"
+                          : "اختر عميل"}
+                        <Search className="h-3.5 w-3.5 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[300px] p-0" align="start">
+                      <Command shouldFilter={false}>
+                        <CommandInput
+                          placeholder="ابحث بالاسم أو الهاتف..."
+                          value={customerSearchQuery}
+                          onValueChange={setCustomerSearchQuery}
+                        />
+                        <CommandList>
+                          <CommandEmpty>لا يوجد عملاء</CommandEmpty>
+                          <CommandGroup>
+                            {filteredCustomersForPOS.map((c) => (
+                              <CommandItem
+                                key={c.id}
+                                value={c.id}
+                                onSelect={() => {
+                                  setSelectedCustomer(c.id);
+                                  setCustomerSearchOpen(false);
+                                  // Auto-set customer's default price type
+                                  if (c.defaultPriceTypeId) {
+                                    updateGlobalPriceType(c.defaultPriceTypeId);
+                                  }
+                                  // Auto-set customer's special discount
+                                  if (c.specialDiscount && c.specialDiscount > 0) {
+                                    setDiscountPercent(c.specialDiscount.toString());
+                                    setDiscountAmount("");
+                                  }
+                                  setTimeout(() => searchInputRef.current?.focus(), 100);
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-3.5 w-3.5",
+                                    selectedCustomer === c.id ? "opacity-100" : "opacity-0"
+                                  )}
+                                />
+                                <div className="flex flex-col flex-1">
+                                  <span className="text-sm">{c.name}</span>
+                                  <span className="text-xs text-muted-foreground">{c.phone}</span>
+                                </div>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-10 w-10 p-0"
+                    onClick={() => setAddCustomerDialog(true)}
+                  >
+                    <UserPlus className="h-4 w-4" />
+                  </Button>
+                </div>
+                {/* Customer Balance Display */}
+                {selectedCustomer && selectedCustomer !== "cash" && (() => {
+                  const customer = customers.find((c) => c.id === selectedCustomer);
+                  return customer ? (
+                    <div className="text-sm font-bold px-3 py-2 rounded-md bg-muted whitespace-nowrap">
+                      الرصيد: <span className={customer.currentBalance > 0 ? "text-red-600" : "text-green-600"}>{Math.round(customer.currentBalance)} {currency}</span>
+                    </div>
+                  ) : null;
+                })()}
               </div>
 
               {/* Cart Table */}
@@ -1940,92 +2049,113 @@ const POSv2 = () => {
                   <table className="w-full text-sm">
                     <thead className="bg-muted/50 sticky top-0">
                       <tr className="border-b">
-                        <th className="text-center p-2 w-28">الكمية</th>
-                        <th className="text-right p-2">المنتج</th>
-                        <th className="text-center p-2 w-24">السعر</th>
-                        <th className="text-right p-2 w-24">المجموع</th>
+                        <th className="text-center p-1.5 w-8">#</th>
+                        <th className="text-center p-1.5 w-20">الكمية</th>
+                        <th className="text-center p-1.5 w-20">الكود</th>
+                        <th className="text-right p-1.5">اسم الصنف</th>
+                        <th className="text-center p-1.5 w-20">السعر</th>
+                        <th className="text-center p-1.5 w-20">الاجمالي</th>
+                        <th className="text-center p-1.5 w-16">الخصم</th>
+                        <th className="text-center p-1.5 w-20">النهائي</th>
+                        <th className="text-center p-1.5 w-14">كرتونة</th>
                         <th className="w-8"></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {cartItems.map((item, index) => (
-                        <tr
-                          key={`${item.id}-${item.productUnitId || "base"}-${index}`}
-                          className={`border-b hover:bg-muted/30 ${item.isPriceVerified === false && mode === "return" ? "bg-amber-50" : ""}`}
-                        >
-                          <td className="p-2">
-                            <div className="flex items-center justify-center gap-1">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => updateQuantity(item.id, item.quantity - 1, item.productUnitId)}
-                                className="h-7 w-7 p-0"
-                              >
-                                <Minus className="h-3 w-3" />
-                              </Button>
+                      {cartItems.map((item, index) => {
+                        const itemKey = `${item.id}-${item.productUnitId || "base"}`;
+                        const isEditingQty = editingCartItemId === itemKey && editingCartField === "quantity";
+                        const isEditingPrice = editingCartItemId === itemKey && editingCartField === "price";
+                        const itemTotal = (item.customPrice ?? item.price) * item.quantity;
+                        const itemFinal = itemTotal - (item.itemDiscount || 0);
+                        return (
+                          <tr
+                            key={`${itemKey}-${index}`}
+                            className={`border-b ${index % 2 === 0 ? "bg-muted/10" : "bg-background"} ${item.isPriceVerified === false && mode === "return" ? "bg-amber-50" : ""}`}
+                          >
+                            <td className="text-center p-1.5 text-xs text-muted-foreground">{index + 1}</td>
+                            <td className="p-1.5">
                               <Input
                                 type="number"
                                 value={item.quantity}
+                                readOnly={!isEditingQty}
                                 onChange={(e) => updateQuantity(item.id, parseInt(e.target.value) || 1, item.productUnitId)}
-                                className="h-7 w-14 text-center p-0"
+                                onDoubleClick={() => {
+                                  setEditingCartItemId(itemKey);
+                                  setEditingCartField("quantity");
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    setEditingCartItemId(null);
+                                    setEditingCartField(null);
+                                    searchInputRef.current?.focus();
+                                  }
+                                  if (e.key === "Escape") {
+                                    setEditingCartItemId(null);
+                                    setEditingCartField(null);
+                                    searchInputRef.current?.focus();
+                                  }
+                                }}
+                                ref={(el) => { if (isEditingQty && el) { el.focus(); el.select(); } }}
+                                className={`h-7 w-16 text-center p-0 ${isEditingQty ? "ring-2 ring-primary" : "bg-transparent border-none"}`}
                                 min={1}
                               />
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => updateQuantity(item.id, item.quantity + 1, item.productUnitId)}
-                                className="h-7 w-7 p-0"
-                              >
-                                <Plus className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          </td>
-                          <td className="p-2">
-                            <div className="font-bold text-xs flex items-center gap-1">
-                              {item.nameAr}
-                              {item.isPriceVerified === false && mode === "return" && (
-                                <div className="text-[10px] text-amber-600 bg-amber-100 px-1 rounded border border-amber-200" title="لم يتم شراء هذا المنتج من قبل من هذا العميل">
-                                  ! لم يُشترى
-                                </div>
-                              )}
-                            </div>
-                            {item.selectedUnitName && (
-                              <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                            </td>
+                            <td className="text-center p-1.5 text-xs text-muted-foreground">{item.barcode || (item as any).code || "-"}</td>
+                            <td className="p-1.5">
+                              <div className="font-bold text-xs truncate">{item.nameAr}</div>
+                              {item.selectedUnitName && (
                                 <Badge variant="secondary" className="text-[9px] h-4 px-1">
                                   {item.selectedUnitName}
                                 </Badge>
-                                {item.conversionFactor && item.conversionFactor > 1 && (
-                                  <span>({item.conversionFactor} قطعة)</span>
-                                )}
-                              </div>
-                            )}
-                            {!item.selectedUnitName && item.unitName && (
-                              <div className="text-[10px] text-muted-foreground">{item.unitName}</div>
-                            )}
-                          </td>
-                          <td className="p-2">
-                            <Input
-                              type="number"
-                              value={item.customPrice ?? item.price}
-                              onChange={(e) => updatePrice(item.id, parseFloat(e.target.value) || 0)}
-                              className="h-7 w-20 text-center p-0"
-                            />
-                          </td>
-                          <td className="text-right p-2 font-bold">
-                            {formatCurrency(item.quantity * (item.customPrice ?? item.price))}
-                          </td>
-                          <td className="w-8">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => removeItem(item.id, item.productUnitId)}
-                              className="text-red-500 hover:text-red-700 h-7 w-7 p-0"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
+                              )}
+                            </td>
+                            <td className="p-1.5">
+                              <Input
+                                type="number"
+                                value={item.customPrice ?? item.price}
+                                readOnly={!isEditingPrice}
+                                onChange={(e) => updatePrice(item.id, parseFloat(e.target.value) || 0)}
+                                onDoubleClick={() => {
+                                  setEditingCartItemId(itemKey);
+                                  setEditingCartField("price");
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === "Escape") {
+                                    setEditingCartItemId(null);
+                                    setEditingCartField(null);
+                                    searchInputRef.current?.focus();
+                                  }
+                                }}
+                                ref={(el) => { if (isEditingPrice && el) { el.focus(); el.select(); } }}
+                                className={`h-7 w-16 text-center p-0 ${isEditingPrice ? "ring-2 ring-primary" : "bg-transparent border-none"}`}
+                              />
+                            </td>
+                            <td className="text-center p-1.5 font-bold text-xs">{Math.round(itemTotal)}</td>
+                            <td className="p-1.5">
+                              <Input
+                                type="number"
+                                value={item.itemDiscount || 0}
+                                onChange={(e) => updateItemDiscount(item.id, parseFloat(e.target.value) || 0, item.productUnitId)}
+                                className="h-7 w-14 text-center p-0"
+                                min={0}
+                              />
+                            </td>
+                            <td className="text-center p-1.5 font-bold text-xs text-primary">{Math.round(itemFinal)}</td>
+                            <td className="text-center p-1.5 text-xs text-muted-foreground">{item.unitsPerCarton || "-"}</td>
+                            <td className="w-8">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => removeItem(item.id, item.productUnitId)}
+                                className="text-red-500 hover:text-red-700 h-7 w-7 p-0"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}
@@ -2041,121 +2171,13 @@ const POSv2 = () => {
           {/* Left Side - Invoice Data (Customer, Payment, Delivery) */}
           <ResizablePanel defaultSize={35} minSize={25}>
             <div className="h-full border-l flex flex-col bg-card">
-              {/* Header */}
-              <div className={`p-1 flex ${mode === "return" ? "bg-red-600" : "bg-primary"} text-primary-foreground transition-colors`}>
-                <div className="flex w-full gap-1">
-                  <Button
-                    variant={mode === "sales" ? "secondary" : "ghost"}
-                    className={`flex-1 ${mode === "sales" ? "bg-white text-primary hover:bg-white/90" : "text-white hover:bg-white/20"}`}
-                    onClick={() => { setMode("sales"); setCartItems([]); }}
-                  >
-                    فاتورة بيع
-                  </Button>
-                  <Button
-                    variant={mode === "return" ? "secondary" : "ghost"}
-                    className={`flex-1 ${mode === "return" ? "bg-white text-red-600 hover:bg-white/90" : "text-white hover:bg-white/20"}`}
-                    onClick={() => { setMode("return"); setCartItems([]); }}
-                  >
-                    فاتورة مرتجع
-                  </Button>
-                </div>
-              </div>
 
               {/* Quick Actions - Top */}
               <div className="p-2 border-b bg-muted/30 space-y-2">
-                <div className="grid grid-cols-3 gap-2">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => saveInvoice(false)}
-                  >
-                    <Save className="h-4 w-4 ml-1" />
-                    حفظ
-                  </Button>
-                  <Button size="sm" onClick={() => saveInvoice(true)}>
-                    <Printer className="h-4 w-4 ml-1" />
-                    حفظ وطباعة
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={generateQuotePDF}>
-                    <FileText className="h-4 w-4 ml-1" />
-                    عرض سعر
-                  </Button>
-                </div>
-                <div className="flex gap-2">
-                  <Button size="sm" variant="outline" onClick={clearCart} className="flex-1">
-                    <X className="h-4 w-4 ml-1" />
-                    إلغاء
-                  </Button>
-                </div>
               </div>
 
               {/* Invoice Data Section */}
-              <div className="h-full overflow-auto p-3 space-y-3">
-                {/* Customer Selection */}
-                <div className="space-y-2">
-                  <Label className="text-xs">العميل * (آجل)</Label>
-                  <div className="flex gap-2">
-                    <Popover open={customerSearchOpen} onOpenChange={setCustomerSearchOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          role="combobox"
-                          aria-expanded={customerSearchOpen}
-                          className="flex-1 justify-between h-9 text-sm"
-                        >
-                          {selectedCustomer && selectedCustomer !== "cash"
-                            ? customers.find((c) => c.id === selectedCustomer)?.name || "اختر عميل"
-                            : "اختر عميل"}
-                          <Search className="h-3.5 w-3.5 shrink-0 opacity-50" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-[300px] p-0" align="start">
-                        <Command shouldFilter={false}>
-                          <CommandInput
-                            placeholder="ابحث بالاسم أو الهاتف..."
-                            value={customerSearchQuery}
-                            onValueChange={setCustomerSearchQuery}
-                          />
-                          <CommandList>
-                            <CommandEmpty>لا يوجد عملاء</CommandEmpty>
-                            <CommandGroup>
-                              {filteredCustomersForPOS.map((c) => (
-                                <CommandItem
-                                  key={c.id}
-                                  value={c.id}
-                                  onSelect={() => {
-                                    setSelectedCustomer(c.id);
-                                    setCustomerSearchOpen(false);
-                                    setTimeout(() => searchInputRef.current?.focus(), 100);
-                                  }}
-                                >
-                                  <Check
-                                    className={cn(
-                                      "mr-2 h-3.5 w-3.5",
-                                      selectedCustomer === c.id ? "opacity-100" : "opacity-0"
-                                    )}
-                                  />
-                                  <div className="flex flex-col flex-1">
-                                    <span className="text-sm">{c.name}</span>
-                                    <span className="text-xs text-muted-foreground">{c.phone}</span>
-                                  </div>
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setAddCustomerDialog(true)}
-                    >
-                      <UserPlus className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
+              <div className="flex-1 overflow-auto p-3 space-y-3">
                 {/* Invoice Date */}
                 <div className="space-y-1">
                     <Label className="text-xs">تاريخ الفاتورة</Label>
@@ -2177,6 +2199,102 @@ const POSv2 = () => {
                     placeholder="أضف ملاحظات على الفاتورة..."
                     className="h-9"
                   />
+                </div>
+
+                {/* Price Type Selection */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <Label className="text-xs font-semibold">
+                      نوع السعر (لكل المنتجات)
+                    </Label>
+                    {cartItems.length > 0 && (
+                      <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+                        {cartItems.length} منتج
+                      </span>
+                    )}
+                  </div>
+                  <Select
+                    value={selectedPriceTypeId}
+                    onValueChange={updateGlobalPriceType}
+                  >
+                    <SelectTrigger className="h-9 border-2 border-primary/20">
+                      <SelectValue>
+                        {priceTypes.find(
+                          (pt) => pt.id === selectedPriceTypeId
+                        )?.name || "اختر نوع السعر"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {priceTypes.map((pt) => (
+                        <SelectItem key={pt.id} value={pt.id}>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">
+                              {pt.name}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Discount & Tax */}
+                <div className="space-y-2">
+                  {/* Promotions Button */}
+                  {promotions.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPromotionDialogOpen(true)}
+                      className="w-full h-8 gap-2"
+                    >
+                      <Tag className="h-3 w-3" />
+                      تطبيق عرض ({promotions.length})
+                    </Button>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-xs">خصم %</Label>
+                      <Input
+                        type="number"
+                        value={discountPercent}
+                        onChange={(e) => {
+                          setDiscountPercent(e.target.value);
+                          setDiscountAmount("");
+                          setSelectedPromotion("");
+                        }}
+                        className="h-9"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">خصم مبلغ</Label>
+                      <Input
+                        type="number"
+                        value={discountAmount}
+                        onChange={(e) => {
+                          setDiscountAmount(e.target.value);
+                          setDiscountPercent("");
+                          setSelectedPromotion("");
+                        }}
+                        className="h-9"
+                      />
+                    </div>
+                  </div>
+
+                  {selectedPromotion && (
+                    <div className="bg-green-50 border border-green-200 rounded px-2 py-1 text-xs text-green-900 flex items-center gap-1">
+                      <Tag className="h-3 w-3" />
+                      <span>
+                        تم تطبيق:{" "}
+                        {
+                          promotions.find(
+                            (p) => p.id === selectedPromotion
+                          )?.name
+                        }
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Delivery Status Selection */}
@@ -2273,298 +2391,6 @@ const POSv2 = () => {
                   </div>
                 )}
 
-                {/* Price Type Selection */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <Label className="text-xs font-semibold">
-                      نوع السعر (لكل المنتجات)
-                    </Label>
-                    {cartItems.length > 0 && (
-                      <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full">
-                        {cartItems.length} منتج
-                      </span>
-                    )}
-                  </div>
-                  <Select
-                    value={selectedPriceTypeId}
-                    onValueChange={updateGlobalPriceType}
-                  >
-                    <SelectTrigger className="h-9 border-2 border-primary/20">
-                      <SelectValue>
-                        {priceTypes.find(
-                          (pt) => pt.id === selectedPriceTypeId
-                        )?.name || "اختر نوع السعر"}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {priceTypes.map((pt) => (
-                        <SelectItem key={pt.id} value={pt.id}>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">
-                              {pt.name}
-                            </span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Payment Method Selection */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs">طريقة الدفع</Label>
-                    <div className="flex items-center gap-2" dir="ltr">
-                      <Switch
-                        checked={splitPaymentMode}
-                        onCheckedChange={(checked) => {
-                          setSplitPaymentMode(checked);
-                          if (checked) {
-                            // تفعيل الدفع المقسم - إضافة طريقة دفع واحدة افتراضياً
-                            const defaultMethod =
-                              paymentMethods.find(
-                                (pm) => pm.type === "cash"
-                              ) || paymentMethods[0];
-                            if (
-                              defaultMethod &&
-                              paymentSplits.length === 0
-                            ) {
-                              setPaymentSplits([
-                                {
-                                  methodId: defaultMethod.id,
-                                  methodName: defaultMethod.name,
-                                  amount:
-                                    total > 0 ? total.toFixed(2) : "0",
-                                },
-                              ]);
-                            }
-                          } else {
-                            // إلغاء الدفع المقسم
-                            setPaymentSplits([]);
-                          }
-                        }}
-                      />
-                      <span className="text-[10px] text-muted-foreground">
-                        دفع بطرق متعددة
-                      </span>
-                    </div>
-                  </div>
-
-                  {!splitPaymentMode ? (
-                    // طريقة دفع واحدة فقط
-                    <Select
-                      value={selectedPaymentMethodId}
-                      onValueChange={setSelectedPaymentMethodId}
-                    >
-                      <SelectTrigger className="h-9">
-                        <SelectValue>
-                          {(() => {
-                            const selected = paymentMethods.find(
-                              (pm) => pm.id === selectedPaymentMethodId
-                            );
-                            if (!selected) return "اختر طريقة الدفع";
-                            return (
-                              <div className="flex items-center gap-2">
-                                {selected.type === "cash" && (
-                                  <Banknote className="h-4 w-4" />
-                                )}
-                                {selected.type === "wallet" && (
-                                  <Wallet className="h-4 w-4" />
-                                )}
-                                {selected.type === "visa" && (
-                                  <CreditCard className="h-4 w-4" />
-                                )}
-                                {selected.type === "bank_transfer" && (
-                                  <CreditCard className="h-4 w-4" />
-                                )}
-                                <span>{selected.name}</span>
-                              </div>
-                            );
-                          })()}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {paymentMethods.map((pm) => (
-                          <SelectItem key={pm.id} value={pm.id}>
-                            <div className="flex items-center gap-2">
-                              {pm.type === "cash" && (
-                                <Banknote className="h-4 w-4" />
-                              )}
-                              {pm.type === "wallet" && (
-                                <Wallet className="h-4 w-4" />
-                              )}
-                              {pm.type === "visa" && (
-                                <CreditCard className="h-4 w-4" />
-                              )}
-                              {pm.type === "bank_transfer" && (
-                                <CreditCard className="h-4 w-4" />
-                              )}
-                              <span>{pm.name}</span>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    // طرق دفع متعددة (Split Payment)
-                    <div className="space-y-2 border rounded-md p-2 bg-muted/30">
-                      {paymentSplits.map((split, index) => (
-                        <div
-                          key={index}
-                          className="flex gap-2 items-start"
-                        >
-                          <Select
-                            value={split.methodId}
-                            onValueChange={(value) =>
-                              updatePaymentSplit(
-                                index,
-                                "methodId",
-                                value
-                              )
-                            }
-                          >
-                            <SelectTrigger className="h-9 flex-1">
-                              <SelectValue>
-                                {
-                                  paymentMethods.find(
-                                    (pm) => pm.id === split.methodId
-                                  )?.name
-                                }
-                              </SelectValue>
-                            </SelectTrigger>
-                            <SelectContent>
-                              {paymentMethods.map((pm) => (
-                                <SelectItem key={pm.id} value={pm.id}>
-                                  <div className="flex items-center gap-2">
-                                    {pm.type === "cash" && (
-                                      <Banknote className="h-4 w-4" />
-                                    )}
-                                    {pm.type === "wallet" && (
-                                      <Wallet className="h-4 w-4" />
-                                    )}
-                                    {pm.type === "visa" && (
-                                      <CreditCard className="h-4 w-4" />
-                                    )}
-                                    {pm.type === "bank_transfer" && (
-                                      <CreditCard className="h-4 w-4" />
-                                    )}
-                                    <span>{pm.name}</span>
-                                  </div>
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <Input
-                            type="number"
-                            value={split.amount}
-                            onChange={(e) =>
-                              updatePaymentSplit(
-                                index,
-                                "amount",
-                                e.target.value
-                              )
-                            }
-                            className="h-9 w-24"
-                            placeholder="المبلغ"
-                          />
-                          {paymentSplits.length > 1 && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => removePaymentSplit(index)}
-                              className="h-9 w-9 p-0"
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          )}
-                        </div>
-                      ))}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={addPaymentSplit}
-                        className="w-full h-8"
-                      >
-                        <Plus className="h-3 w-3 ml-1" />
-                        إضافة طريقة دفع
-                      </Button>
-                      {paymentSplits.length > 0 && (
-                        <div className="text-[10px] text-center pt-1 border-t">
-                          <span
-                            className={
-                              paid >= total
-                                ? "text-green-600 font-bold"
-                                : "text-amber-600"
-                            }
-                          >
-                            المجموع: {paid.toFixed(2)} من{" "}
-                            {total.toFixed(2)} {currency}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Discount & Tax */}
-                <div className="space-y-2">
-                  {/* Promotions Button */}
-                  {promotions.length > 0 && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPromotionDialogOpen(true)}
-                      className="w-full h-8 gap-2"
-                    >
-                      <Tag className="h-3 w-3" />
-                      تطبيق عرض ({promotions.length})
-                    </Button>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Label className="text-xs">خصم %</Label>
-                      <Input
-                        type="number"
-                        value={discountPercent}
-                        onChange={(e) => {
-                          setDiscountPercent(e.target.value);
-                          setDiscountAmount("");
-                          setSelectedPromotion("");
-                        }}
-                        className="h-9"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">خصم مبلغ</Label>
-                      <Input
-                        type="number"
-                        value={discountAmount}
-                        onChange={(e) => {
-                          setDiscountAmount(e.target.value);
-                          setDiscountPercent("");
-                          setSelectedPromotion("");
-                        }}
-                        className="h-9"
-                      />
-                    </div>
-                  </div>
-
-                  {selectedPromotion && (
-                    <div className="bg-green-50 border border-green-200 rounded px-2 py-1 text-xs text-green-900 flex items-center gap-1">
-                      <Tag className="h-3 w-3" />
-                      <span>
-                        تم تطبيق:{" "}
-                        {
-                          promotions.find(
-                            (p) => p.id === selectedPromotion
-                          )?.name
-                        }
-                      </span>
-                    </div>
-                  )}
-                </div>
-
                 <div className="flex items-center justify-between">
                   <Label className="text-xs">
                     شامل ضريبة {taxRate}%
@@ -2604,37 +2430,28 @@ const POSv2 = () => {
                   </div>
                 </div>
 
-                {/* Paid Amount - Only show if not in split payment mode */}
-                {/* {!splitPaymentMode && (
-                  <div>
-                    <Label className="text-xs">المدفوع</Label>
-                    <Input
-                      type="number"
-                      value={paidAmount}
-                      onChange={(e) => setPaidAmount(e.target.value)}
-                      placeholder={formatCurrency(total)}
-                      className="h-10 text-lg font-bold"
-                    />
-                  </div>
-                )} */}
+              </div>
 
-                {paid > 0 && (
-                  <div
-                    className={`text-center p-3 rounded ${change >= 0
-                      ? "bg-green-100 text-green-900"
-                      : "bg-red-100 text-red-900"
-                      }`}
+              {/* Action Buttons - Fixed at Bottom */}
+              <div className="p-2 border-t bg-muted/30">
+                <div className="grid grid-cols-3 gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => saveInvoice(false)}
                   >
-                    <div className="text-xs">
-                      {change >= 0 ? "الباقي" : "المتبقي"}
-                    </div>
-                    <div className="text-xl font-bold bg-muted p-2 rounded text-center">
-                      {formatCurrency(Math.abs(change))}
-                    </div>
-                  </div>
-                )}
-
-
+                    <Save className="h-4 w-4 ml-1" />
+                    حفظ
+                  </Button>
+                  <Button size="sm" onClick={() => saveInvoice(true)}>
+                    <Printer className="h-4 w-4 ml-1" />
+                    حفظ وطباعة
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={generateQuotePDF}>
+                    <FileText className="h-4 w-4 ml-1" />
+                    عرض سعر
+                  </Button>
+                </div>
               </div>
             </div>
           </ResizablePanel>

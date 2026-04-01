@@ -4,6 +4,11 @@ import { logger } from "../config/logger.js";
 import { RowDataPacket, ResultSetHeader } from "mysql2/promise";
 import { randomUUID } from "crypto";
 import bcrypt from "bcrypt";
+import { resolve } from "path";
+import { existsSync, createReadStream, readdirSync, statSync } from "fs";
+import { mkdir, unlink } from "fs/promises";
+import { createWriteStream } from "fs";
+import { pipeline } from "stream/promises";
 
 /**
  * Mobile API Routes
@@ -1742,9 +1747,42 @@ export async function mobileRoutes(server: FastifyInstance) {
           }
         }
 
+        // Fetch fresh permissions from role
+        let parsedPermissions: string[] = [];
+        const [roles] = await db.query<RowDataPacket[]>(
+          "SELECT name, name_en, permissions FROM roles WHERE client_id = ? AND (id = ? OR name = ? OR name_en = ?) AND is_deleted = 0 LIMIT 1",
+          [clientId, user.role, user.role, user.role]
+        );
+        if (roles.length > 0 && roles[0].permissions) {
+          try {
+            const rawPerms = typeof roles[0].permissions === 'string'
+              ? JSON.parse(roles[0].permissions)
+              : roles[0].permissions;
+            if (Array.isArray(rawPerms)) {
+              parsedPermissions = rawPerms;
+            } else if (typeof rawPerms === 'object' && rawPerms !== null) {
+              for (const [resource, actions] of Object.entries(rawPerms)) {
+                if (Array.isArray(actions)) {
+                  (actions as string[]).forEach((action: string) => {
+                    parsedPermissions.push(`${resource}.${action}`);
+                  });
+                }
+              }
+            }
+          } catch (_) {}
+        }
+
+        // Resolve role name
+        let resolvedRole = user.role;
+        if (roles.length > 0) {
+          resolvedRole = roles[0].name_en || roles[0].name || user.role;
+        }
+
         return reply.code(200).send({
           data: {
             ...user,
+            role: resolvedRole,
+            permissions: parsedPermissions,
             customer,
           },
         });
@@ -2216,6 +2254,135 @@ export async function mobileRoutes(server: FastifyInstance) {
         return reply.code(500).send({ error: "فشل إضافة القبض", details: msg });
       } finally {
         connection.release();
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────
+  // POST /api/mobile/price-list/upload
+  // Upload a price list PDF (admin only)
+  // ─────────────────────────────────────────────────────
+  server.post(
+    "/price-list/upload",
+    { preHandler: [server.authenticate] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const data = await request.file();
+        if (!data) return reply.code(400).send({ error: "No file uploaded" });
+
+        if (data.mimetype !== "application/pdf") {
+          return reply.code(400).send({ error: "Only PDF files are allowed" });
+        }
+
+        const { clientId } = request.user!;
+        const uploadsDir = resolve(process.cwd(), "data/price-lists");
+        if (!existsSync(uploadsDir)) await mkdir(uploadsDir, { recursive: true });
+
+        // Remove old price list for this client
+        const prefix = `pricelist-${clientId}-`;
+        try {
+          const existing = readdirSync(uploadsDir).filter(f => f.startsWith(prefix));
+          for (const old of existing) {
+            await unlink(resolve(uploadsDir, old));
+          }
+        } catch { /* ignore */ }
+
+        const filename = `${prefix}${randomUUID()}.pdf`;
+        const filePath = resolve(uploadsDir, filename);
+
+        await pipeline(data.file, createWriteStream(filePath));
+
+        const forwardedProto = (request.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim();
+        const forwardedHost = (request.headers["x-forwarded-host"] as string | undefined)?.split(",")[0]?.trim();
+        const protocol = forwardedProto || (request as any).protocol || "http";
+        const host = forwardedHost || request.headers.host || `localhost:${process.env.PORT || 3030}`;
+        const baseUrl = process.env.BASE_URL || `${protocol}://${host}`;
+        const fileUrl = `${baseUrl}/uploads/price-list/${filename}`;
+
+        logger.info({ clientId, filename }, "Price list PDF uploaded");
+        return reply.code(200).send({ success: true, url: fileUrl, filename });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        logger.error({ error }, "Failed to upload price list");
+        return reply.code(500).send({ error: "Failed to upload price list", details: msg });
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────
+  // GET /api/mobile/price-list
+  // Get the current price list PDF URL for the client
+  // ─────────────────────────────────────────────────────
+  server.get(
+    "/price-list",
+    { preHandler: [server.authenticate] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { clientId } = request.user!;
+        const uploadsDir = resolve(process.cwd(), "data/price-lists");
+        const prefix = `pricelist-${clientId}-`;
+
+        if (!existsSync(uploadsDir)) {
+          return reply.code(200).send({ exists: false });
+        }
+
+        const files = readdirSync(uploadsDir).filter(f => f.startsWith(prefix));
+        if (files.length === 0) {
+          return reply.code(200).send({ exists: false });
+        }
+
+        // Get latest file
+        const latest = files
+          .map(f => ({ name: f, mtime: statSync(resolve(uploadsDir, f)).mtimeMs }))
+          .sort((a, b) => b.mtime - a.mtime)[0];
+
+        const forwardedProto = (request.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim();
+        const forwardedHost = (request.headers["x-forwarded-host"] as string | undefined)?.split(",")[0]?.trim();
+        const protocol = forwardedProto || (request as any).protocol || "http";
+        const host = forwardedHost || request.headers.host || `localhost:${process.env.PORT || 3030}`;
+        const baseUrl = process.env.BASE_URL || `${protocol}://${host}`;
+        const fileUrl = `${baseUrl}/uploads/price-list/${latest.name}`;
+
+        return reply.code(200).send({
+          exists: true,
+          url: fileUrl,
+          filename: latest.name,
+          updatedAt: new Date(latest.mtime).toISOString(),
+        });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        logger.error({ error }, "Failed to get price list");
+        return reply.code(500).send({ error: "Failed to get price list", details: msg });
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────
+  // DELETE /api/mobile/price-list
+  // Delete the current price list PDF (admin only)
+  // ─────────────────────────────────────────────────────
+  server.delete(
+    "/price-list",
+    { preHandler: [server.authenticate] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { clientId } = request.user!;
+        const uploadsDir = resolve(process.cwd(), "data/price-lists");
+        const prefix = `pricelist-${clientId}-`;
+
+        if (existsSync(uploadsDir)) {
+          const files = readdirSync(uploadsDir).filter(f => f.startsWith(prefix));
+          for (const f of files) {
+            await unlink(resolve(uploadsDir, f));
+          }
+        }
+
+        logger.info({ clientId }, "Price list PDF deleted");
+        return reply.code(200).send({ success: true });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        logger.error({ error }, "Failed to delete price list");
+        return reply.code(500).send({ error: "Failed to delete price list", details: msg });
       }
     }
   );

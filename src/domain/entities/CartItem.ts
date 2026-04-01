@@ -18,4 +18,8 @@ export interface CartItem {
   // Return Verification
   isPriceVerified?: boolean; // True if price matches history, False if not found
   originalPrice?: number; // The price found in history (if any)
+  // Per-item fields
+  barcode?: string;
+  unitsPerCarton?: number;
+  itemDiscount?: number; // خصم على مستوى الصنف
 }

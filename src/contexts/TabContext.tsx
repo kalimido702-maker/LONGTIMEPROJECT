@@ -37,6 +37,7 @@ import {
     Smartphone,
     ScrollText,
     Bell,
+    Palette,
 } from 'lucide-react';
 
 export interface Tab {
@@ -63,7 +64,8 @@ const TabContext = createContext<TabContextType | undefined>(undefined);
 // Mapping of paths to tab info
 export const pathToTabInfo: Record<string, { title: string; iconName: string }> = {
     '/': { title: 'الرئيسية', iconName: 'LayoutGrid' },
-    '/pos': { title: 'نقطة البيع', iconName: 'ShoppingCart' },
+    '/pos': { title: 'فاتورة بيع', iconName: 'ShoppingCart' },
+    '/pos-return': { title: 'فاتورة مرتجع', iconName: 'RotateCcw' },
     '/customers': { title: 'العملاء', iconName: 'Users' },
     '/invoices': { title: 'الفواتير', iconName: 'FileText' },
     '/quotes': { title: 'عروض الأسعار', iconName: 'FileText' },
@@ -107,6 +109,10 @@ export const pathToTabInfo: Record<string, { title: string; iconName: string }> 
     '/mobile-accounts': { title: 'حسابات الموبايل', iconName: 'Smartphone' },
     '/mobile-notifications': { title: 'إشعارات الموبايل', iconName: 'Bell' },
     '/logs': { title: 'سجلات النظام', iconName: 'ScrollText' },
+    '/invoice-template': { title: 'تصميم الفاتورة', iconName: 'FileText' },
+    '/theme-settings': { title: 'الثيمات والألوان', iconName: 'Palette' },
+    '/product-movement': { title: 'حركة المنتج', iconName: 'Package' },
+    '/customer-statement': { title: 'كشف حساب', iconName: 'FileText' },
 };
 
 // Icon component mapping
@@ -138,6 +144,7 @@ export const iconComponents: Record<string, React.ComponentType<{ className?: st
     Smartphone,
     ScrollText,
     Bell,
+    Palette,
 };
 
 const STORAGE_KEY = 'pos-tabs';

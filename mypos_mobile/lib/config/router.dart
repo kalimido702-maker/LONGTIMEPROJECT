@@ -20,6 +20,7 @@ import '../screens/shell_screen.dart';
 import '../screens/profile_screen.dart';
 import '../screens/create_invoice_screen.dart';
 import '../screens/create_payment_screen.dart';
+import '../screens/price_list_screen.dart';
 
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
@@ -178,6 +179,11 @@ GoRouter createRouter(AuthProvider authProvider) {
             ],
           ),
         ],
+      ),
+      // Price list — full screen (no bottom nav)
+      GoRoute(
+        path: '/price-list',
+        builder: (context, state) => const PriceListScreen(),
       ),
     ],
   );

@@ -7,126 +7,145 @@ import '../providers/auth_provider.dart';
 
 import '../models/user.dart';
 
-/// Determines which navigation variant to show based on user role.
-enum _NavVariant { customer, salesRep, supervisor, admin, employee, generalManager, salesManager }
+/// Each possible nav item with its permission key, route, icon, and label.
+class _NavItem {
+  final String permission;
+  final String route;
+  final IconData icon;
+  final String label;
+  /// Fallback permissions — if any of these exist, show the tab even without mobile_app.*.
+  final List<String> fallbacks;
+  const _NavItem({
+    required this.permission,
+    required this.route,
+    required this.icon,
+    required this.label,
+    this.fallbacks = const [],
+  });
+}
 
 class ShellScreen extends StatelessWidget {
   final Widget child;
   const ShellScreen({super.key, required this.child});
 
-  _NavVariant _variant(String? role) {
-    switch (role) {
-      case 'admin':
-        return _NavVariant.admin;
-      case 'مدير النظام':
-        return _NavVariant.admin;
-      case 'supervisor':
-        return _NavVariant.supervisor;
-      case 'sales_rep':
-      case 'salesRep':
-      case 'salesman':
-        return _NavVariant.salesRep;
-      case 'customer':
-        return _NavVariant.customer;
-      case 'general_manager':
-        return _NavVariant.generalManager;
-      case 'sales_manager':
-        return _NavVariant.salesManager;
-      default:
-        return _NavVariant.employee;
+  /// All possible navigation items in display order.
+  /// The permission string maps to mobile_app.* permissions.
+  /// fallbacks are checked if mobile_app.* is missing (for legacy roles).
+  static const _allNavItems = [
+    _NavItem(permission: 'home', route: '/home', icon: LucideIcons.home, label: 'الرئيسية'),
+    _NavItem(permission: 'invoices', route: '/invoices', icon: LucideIcons.fileText, label: 'الفواتير', fallbacks: ['invoices.view']),
+    _NavItem(permission: 'payments', route: '/payments', icon: LucideIcons.creditCard, label: 'المدفوعات', fallbacks: ['payments.view']),
+    _NavItem(permission: 'statement', route: '/statement', icon: LucideIcons.scrollText, label: 'كشف حساب', fallbacks: ['mobile_app.statement']),
+    _NavItem(permission: 'supervisors', route: '/supervisors', icon: LucideIcons.shield, label: 'المشرفين'),
+    _NavItem(permission: 'sales_reps', route: '/sales-reps', icon: LucideIcons.briefcase, label: 'المندوبين'),
+    _NavItem(permission: 'customers', route: '/customers', icon: LucideIcons.users, label: 'العملاء', fallbacks: ['customers.view']),
+  ];
+
+  /// Items that can be hidden from the tab bar when there are too many (>5 total).
+  /// These are still accessible via quick actions on home screen.
+  static const _collapsiblePermissions = {'supervisors', 'sales_reps', 'customers'};
+
+  // ── Customer: fixed navigation (no permission system) ──
+  static const _customerRoutes = ['/home', '/invoices', '/payments', '/statement', '/notifications'];
+  static const _customerDestinations = [
+    NavigationDestination(icon: Icon(LucideIcons.home, size: 22), selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary), label: 'الرئيسية'),
+    NavigationDestination(icon: Icon(LucideIcons.fileText, size: 22), selectedIcon: Icon(LucideIcons.fileText, size: 22, color: AppColors.primary), label: 'الفواتير'),
+    NavigationDestination(icon: Icon(LucideIcons.creditCard, size: 22), selectedIcon: Icon(LucideIcons.creditCard, size: 22, color: AppColors.primary), label: 'المدفوعات'),
+    NavigationDestination(icon: Icon(LucideIcons.scrollText, size: 22), selectedIcon: Icon(LucideIcons.scrollText, size: 22, color: AppColors.primary), label: 'كشف حساب'),
+    NavigationDestination(icon: Icon(LucideIcons.bell, size: 22), selectedIcon: Icon(LucideIcons.bell, size: 22, color: AppColors.primary), label: 'الإشعارات'),
+  ];
+
+  bool _isCustomer(User? user) => user?.isCustomer ?? false;
+
+  /// Check if user has permission for a nav item (mobile_app.* OR any fallback).
+  bool _hasNavPermission(User user, _NavItem item) {
+    if (user.hasPermission('mobile_app.${item.permission}')) return true;
+    for (final fb in item.fallbacks) {
+      if (user.hasPermission(fb)) return true;
     }
+    return false;
   }
 
-  // ---------- Routes per role ----------
-  static const _customerRoutes = [
-    '/home',
-    '/invoices',
-    '/payments',
-    '/statement',
-    '/notifications',
-  ];
-  static const _salesRepRoutes = ['/home', '/customers', '/notifications'];
-  static const _supervisorRoutes = [
-    '/home',
-    '/sales-reps',
-    '/customers',
-    '/notifications',
-  ];
-  static const _adminRoutes = [
-    '/home',
-    '/invoices',
-    '/payments',
-    '/supervisors',
-    '/sales-reps',
-    '/customers',
-    '/notifications',
-  ];
-  static const _generalManagerRoutes = [
-    '/home',
-    '/invoices',
-    '/payments',
-    '/supervisors',
-    '/sales-reps',
-    '/customers',
-    '/payments',
-  ];
-  static const _salesManagerRoutes = ['/home', '/invoices', '/payments'];
-
-  List<String> _routes(BuildContext context, _NavVariant v, User? user) {
-    if (v == _NavVariant.employee && user != null) {
-      final routes = <String>[];
-      // Home is always available if they can log in
-      routes.add('/home');
-      if (user.hasPermission('mobile_app.invoices') ||
-          user.hasPermission('invoices.view'))
-        routes.add('/invoices');
-      if (user.hasPermission('mobile_app.payments') ||
-          user.hasPermission('payments.view'))
-        routes.add('/payments');
-      if (user.hasPermission('mobile_app.statement') ||
-          user.hasPermission('customers.view'))
-        routes.add('/customers');
-      routes.add('/notifications');
-      if (routes.length == 1) routes.insert(0, '/home'); // Fallback
-      return routes;
+  /// Get the filtered nav items for this user, collapsing extras if > 5 tabs.
+  List<_NavItem> _filteredNavItems(User user) {
+    // First, collect all items the user has permission for
+    final all = <_NavItem>[];
+    for (final item in _allNavItems) {
+      if (item.permission == 'home') continue;
+      if (_hasNavPermission(user, item)) {
+        all.add(item);
+      }
     }
-
-    switch (v) {
-      case _NavVariant.admin:
-        return _adminRoutes;
-      case _NavVariant.supervisor:
-        return _supervisorRoutes;
-      case _NavVariant.salesRep:
-        return _salesRepRoutes;
-      case _NavVariant.customer:
-        return _customerRoutes;
-      case _NavVariant.generalManager:
-        return _generalManagerRoutes;
-      case _NavVariant.salesManager:
-        return _salesManagerRoutes;
-      case _NavVariant.employee:
-        return _customerRoutes; // Fallback
+    // total = home + items + notifications
+    final totalCount = 1 + all.length + 1;
+    if (totalCount > 5) {
+      // Remove collapsible items (they're in quick actions anyway)
+      all.removeWhere((item) => _collapsiblePermissions.contains(item.permission));
     }
+    return all;
   }
 
-  int _currentIndex(BuildContext context, _NavVariant v, User? user) {
+  /// Build routes list from permissions.
+  List<String> _routes(User? user) {
+    if (user == null) return ['/home', '/notifications'];
+    if (_isCustomer(user)) return _customerRoutes;
+
+    final items = _filteredNavItems(user);
+    final routes = <String>['/home'];
+    for (final item in items) {
+      routes.add(item.route);
+    }
+    routes.add('/notifications');
+    return routes;
+  }
+
+  /// Build destination widgets from permissions.
+  List<NavigationDestination> _destinations(User? user) {
+    if (user == null || _isCustomer(user)) return _customerDestinations;
+
+    final items = _filteredNavItems(user);
+    final dests = <NavigationDestination>[
+      const NavigationDestination(
+        icon: Icon(LucideIcons.home, size: 22),
+        selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary),
+        label: 'الرئيسية',
+      ),
+    ];
+
+    for (final item in items) {
+      dests.add(NavigationDestination(
+        icon: Icon(item.icon, size: 22),
+        selectedIcon: Icon(item.icon, size: 22, color: AppColors.primary),
+        label: item.label,
+      ));
+    }
+
+    dests.add(const NavigationDestination(
+      icon: Icon(LucideIcons.bell, size: 22),
+      selectedIcon: Icon(LucideIcons.bell, size: 22, color: AppColors.primary),
+      label: 'الإشعارات',
+    ));
+
+    return dests;
+  }
+
+  int _currentIndex(BuildContext context, User? user) {
     final location = GoRouterState.of(context).matchedLocation;
-    final r = _routes(context, v, user);
+    final r = _routes(user);
     for (int i = 0; i < r.length; i++) {
       if (location.startsWith(r[i])) return i;
     }
     return 0;
   }
 
-  void _onTap(BuildContext context, int index, _NavVariant v, User? user) {
-    final r = _routes(context, v, user);
+  void _onTap(BuildContext context, int index, User? user) {
+    final r = _routes(user);
     if (index < r.length) context.go(r[index]);
   }
 
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthProvider>().user;
-    final v = _variant(user?.role);
 
     return Scaffold(
       body: child,
@@ -145,307 +164,18 @@ class ShellScreen extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: NavigationBar(
-              selectedIndex: _currentIndex(context, v, user),
-              onDestinationSelected: (index) => _onTap(context, index, v, user),
+              selectedIndex: _currentIndex(context, user),
+              onDestinationSelected: (index) => _onTap(context, index, user),
               backgroundColor: Colors.transparent,
               elevation: 0,
               indicatorColor: AppColors.primary.withOpacity(0.12),
               labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
               height: 64,
-              destinations: _destinations(context, v, user),
+              destinations: _destinations(user),
             ),
           ),
         ),
       ),
     );
   }
-
-  List<NavigationDestination> _destinations(
-    BuildContext context,
-    _NavVariant v,
-    User? user,
-  ) {
-    if (v == _NavVariant.employee && user != null) {
-      final dests = <NavigationDestination>[];
-      // Home is always available if they can log in
-      dests.add(
-        const NavigationDestination(
-          icon: Icon(LucideIcons.home, size: 22),
-          selectedIcon: Icon(
-            LucideIcons.home,
-            size: 22,
-            color: AppColors.primary,
-          ),
-          label: 'الرئيسية',
-        ),
-      );
-      if (user.hasPermission('mobile_app.invoices') ||
-          user.hasPermission('invoices.view')) {
-        dests.add(
-          const NavigationDestination(
-            icon: Icon(LucideIcons.fileText, size: 22),
-            selectedIcon: Icon(
-              LucideIcons.fileText,
-              size: 22,
-              color: AppColors.primary,
-            ),
-            label: 'الفواتير',
-          ),
-        );
-      }
-      if (user.hasPermission('mobile_app.payments') ||
-          user.hasPermission('payments.view')) {
-        dests.add(
-          const NavigationDestination(
-            icon: Icon(LucideIcons.creditCard, size: 22),
-            selectedIcon: Icon(
-              LucideIcons.creditCard,
-              size: 22,
-              color: AppColors.primary,
-            ),
-            label: 'المدفوعات',
-          ),
-        );
-      }
-      if (user.hasPermission('mobile_app.statement') ||
-          user.hasPermission('customers.view')) {
-        dests.add(
-          const NavigationDestination(
-            icon: Icon(LucideIcons.users, size: 22),
-            selectedIcon: Icon(
-              LucideIcons.users,
-              size: 22,
-              color: AppColors.primary,
-            ),
-            label: 'العملاء',
-          ),
-        );
-      }
-      dests.add(
-        const NavigationDestination(
-          icon: Icon(LucideIcons.bell, size: 22),
-          selectedIcon: Icon(
-            LucideIcons.bell,
-            size: 22,
-            color: AppColors.primary,
-          ),
-          label: 'الإشعارات',
-        ),
-      );
-
-      if (dests.length == 1) {
-        // Only notifications
-        dests.insert(
-          0,
-          const NavigationDestination(
-            icon: Icon(LucideIcons.home, size: 22),
-            selectedIcon: Icon(
-              LucideIcons.home,
-              size: 22,
-              color: AppColors.primary,
-            ),
-            label: 'الرئيسية',
-          ),
-        );
-      }
-      return dests;
-    }
-
-    switch (v) {
-      case _NavVariant.customer:
-        return _customerDestinations;
-      case _NavVariant.salesRep:
-        return _salesRepDestinations;
-      case _NavVariant.supervisor:
-        return _supervisorDestinations;
-      case _NavVariant.admin:
-        return _adminDestinations;
-      case _NavVariant.generalManager:
-        return _generalManagerDestinations;
-      case _NavVariant.salesManager:
-        return _salesManagerDestinations;
-      case _NavVariant.employee:
-        return _customerDestinations; // Fallback
-    }
-  }
-
-  // ── Customer: الرئيسية | الفواتير | المدفوعات | كشف حساب | الإشعارات
-  static const _customerDestinations = [
-    NavigationDestination(
-      icon: Icon(LucideIcons.home, size: 22),
-      selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary),
-      label: 'الرئيسية',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.fileText, size: 22),
-      selectedIcon: Icon(
-        LucideIcons.fileText,
-        size: 22,
-        color: AppColors.primary,
-      ),
-      label: 'الفواتير',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.creditCard, size: 22),
-      selectedIcon: Icon(
-        LucideIcons.creditCard,
-        size: 22,
-        color: AppColors.primary,
-      ),
-      label: 'المدفوعات',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.scrollText, size: 22),
-      selectedIcon: Icon(
-        LucideIcons.scrollText,
-        size: 22,
-        color: AppColors.primary,
-      ),
-      label: 'كشف حساب',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.bell, size: 22),
-      selectedIcon: Icon(LucideIcons.bell, size: 22, color: AppColors.primary),
-      label: 'الإشعارات',
-    ),
-  ];
-
-  // ── Sales Rep: الرئيسية | العملاء | الإشعارات
-  static const _salesRepDestinations = [
-    NavigationDestination(
-      icon: Icon(LucideIcons.home, size: 22),
-      selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary),
-      label: 'الرئيسية',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.users, size: 22),
-      selectedIcon: Icon(LucideIcons.users, size: 22, color: AppColors.primary),
-      label: 'العملاء',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.bell, size: 22),
-      selectedIcon: Icon(LucideIcons.bell, size: 22, color: AppColors.primary),
-      label: 'الإشعارات',
-    ),
-  ];
-
-  // ── Supervisor: الرئيسية | المندوبين | العملاء | الإشعارات
-  static const _supervisorDestinations = [
-    NavigationDestination(
-      icon: Icon(LucideIcons.home, size: 22),
-      selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary),
-      label: 'الرئيسية',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.briefcase, size: 22),
-      selectedIcon: Icon(
-        LucideIcons.briefcase,
-        size: 22,
-        color: AppColors.primary,
-      ),
-      label: 'المندوبين',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.users, size: 22),
-      selectedIcon: Icon(LucideIcons.users, size: 22, color: AppColors.primary),
-      label: 'العملاء',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.bell, size: 22),
-      selectedIcon: Icon(LucideIcons.bell, size: 22, color: AppColors.primary),
-      label: 'الإشعارات',
-    ),
-  ];
-
-  // ── Admin: الرئيسية | الفواتير | المدفوعات | المشرفين | المندوبين | العملاء | الإشعارات
-  static const _adminDestinations = [
-    NavigationDestination(
-      icon: Icon(LucideIcons.home, size: 22),
-      selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary),
-      label: 'الرئيسية',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.fileText, size: 22),
-      selectedIcon: Icon(LucideIcons.fileText, size: 22, color: AppColors.primary),
-      label: 'الفواتير',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.creditCard, size: 22),
-      selectedIcon: Icon(LucideIcons.creditCard, size: 22, color: AppColors.primary),
-      label: 'المدفوعات',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.shield, size: 22),
-      selectedIcon: Icon(LucideIcons.shield, size: 22, color: AppColors.primary),
-      label: 'المشرفين',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.briefcase, size: 22),
-      selectedIcon: Icon(LucideIcons.briefcase, size: 22, color: AppColors.primary),
-      label: 'المندوبين',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.users, size: 22),
-      selectedIcon: Icon(LucideIcons.users, size: 22, color: AppColors.primary),
-      label: 'العملاء',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.bell, size: 22),
-      selectedIcon: Icon(LucideIcons.bell, size: 22, color: AppColors.primary),
-      label: 'الإشعارات',
-    ),
-  ];
-
-  // ── General Manager: الرئيسية | الفواتير | المدفوعات | المشرفين | المندوبين | العملاء | الإشعارات
-  static const _generalManagerDestinations = [
-    NavigationDestination(
-      icon: Icon(LucideIcons.home, size: 22),
-      selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary),
-      label: 'الرئيسية',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.fileText, size: 22),
-      selectedIcon: Icon(LucideIcons.fileText, size: 22, color: AppColors.primary),
-      label: 'الفواتير',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.creditCard, size: 22),
-      selectedIcon: Icon(LucideIcons.creditCard, size: 22, color: AppColors.primary),
-      label: 'المدفوعات',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.shield, size: 22),
-      selectedIcon: Icon(LucideIcons.shield, size: 22, color: AppColors.primary),
-      label: 'المشرفين',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.briefcase, size: 22),
-      selectedIcon: Icon(LucideIcons.briefcase, size: 22, color: AppColors.primary),
-      label: 'المندوبين',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.users, size: 22),
-      selectedIcon: Icon(LucideIcons.users, size: 22, color: AppColors.primary),
-      label: 'العملاء',
-    ),
-  ];
-
-  // ── Sales Manager: الرئيسية | الفواتير | المدفوعات
-  static const _salesManagerDestinations = [
-    NavigationDestination(
-      icon: Icon(LucideIcons.home, size: 22),
-      selectedIcon: Icon(LucideIcons.home, size: 22, color: AppColors.primary),
-      label: 'الرئيسية',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.fileText, size: 22),
-      selectedIcon: Icon(LucideIcons.fileText, size: 22, color: AppColors.primary),
-      label: 'الفواتير',
-    ),
-    NavigationDestination(
-      icon: Icon(LucideIcons.creditCard, size: 22),
-      selectedIcon: Icon(LucideIcons.creditCard, size: 22, color: AppColors.primary),
-      label: 'المدفوعات',
-    ),
-  ];
 }

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import "./utils/crypto-polyfill.js"; // Must be imported BEFORE whatsappHandler
-import { registerWhatsAppHandlers, setMainWindow } from "./handlers/whatsappHandler.js";
+import { registerWhatsAppHandlers, setMainWindow, cleanupAllSockets } from "./handlers/whatsappHandler.js";
 import {
   registerLicenseHandlers,
   verifyLicense,
@@ -174,6 +174,11 @@ if (!gotTheLock) {
     if (mainWindow) {
       initAutoUpdater(mainWindow);
     }
+  });
+
+  // تنظيف الاتصالات قبل الإغلاق
+  app.on("before-quit", () => {
+    cleanupAllSockets();
   });
 
   // عند إغلاق جميع النوافذ

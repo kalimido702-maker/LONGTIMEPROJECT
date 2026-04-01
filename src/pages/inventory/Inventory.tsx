@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { POSHeader } from "@/components/POS/POSHeader";
+import { useTabs } from "@/contexts/TabContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -61,6 +62,7 @@ import { DataPagination } from "@/components/ui/DataPagination";
 
 const Inventory = () => {
   const { can, user } = useAuth();
+  const { addTab } = useTabs();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -1059,7 +1061,8 @@ const Inventory = () => {
             return (
               <Card
                 key={product.id}
-                className="p-4 hover:shadow-lg transition-shadow"
+                className="p-4 hover:shadow-lg transition-shadow cursor-pointer"
+                onClick={() => addTab(`/product-movement?productId=${product.id}`)}
               >
                 {product.imageUrl && (
                   <div className="mb-3 rounded-lg overflow-hidden h-32 bg-gray-100">
@@ -1123,7 +1126,7 @@ const Inventory = () => {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleEdit(product)}
+                      onClick={(e) => { e.stopPropagation(); handleEdit(product); }}
                       className="flex-1"
                     >
                       <Edit className="h-3 w-3 ml-1" />
@@ -1134,7 +1137,7 @@ const Inventory = () => {
                     <Button
                       size="sm"
                       variant="destructive"
-                      onClick={() => handleDelete(product.id)}
+                      onClick={(e) => { e.stopPropagation(); handleDelete(product.id); }}
                     >
                       <Trash2 className="h-3 w-3" />
                     </Button>

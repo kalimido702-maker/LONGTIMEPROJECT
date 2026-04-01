@@ -836,6 +836,21 @@ export function registerWhatsAppHandlers() {
 }
 
 /**
+ * Cleanup all active sockets - called on app quit
+ */
+export function cleanupAllSockets() {
+  for (const accountId of activeSockets.keys()) {
+    closeSocket(accountId);
+  }
+  // Clear all reconnect timers
+  for (const timer of reconnectTimers.values()) {
+    clearTimeout(timer);
+  }
+  reconnectTimers.clear();
+  reconnectAttempts.clear();
+}
+
+/**
  * Set the main window reference for bot message forwarding
  */
 export function setMainWindow(win: BrowserWindow) {

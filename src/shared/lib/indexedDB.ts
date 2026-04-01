@@ -93,7 +93,7 @@ class IndexedDBService {
 
       // إضافة صلاحيات تطبيق الجوال
       const currentMobileAppPerms = adminRole.permissions.mobile_app || [];
-      const updatedMobileAppPerms = [...new Set([...currentMobileAppPerms, "home", "due", "invoices", "payments", "statement"])];
+      const updatedMobileAppPerms = [...new Set([...currentMobileAppPerms, "home", "due", "invoices", "payments", "statement", "customers", "sales_reps", "supervisors", "create_invoice", "create_payment"])];
 
       const needsUpdate = updatedInvoicePerms.length !== currentInvoicePerms.length ||
         updatedReturnsPerms.length !== currentReturnsPerms.length ||

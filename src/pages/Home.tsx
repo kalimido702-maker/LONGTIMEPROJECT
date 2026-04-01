@@ -5,13 +5,14 @@ import {
     FileText,
     Users,
     TrendingUp,
-    Settings,
     Wallet,
     Printer,
     Shield,
     LogOut,
     LayoutGrid,
-    Plus
+    Plus,
+    RotateCcw,
+    ClipboardList,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,12 +27,28 @@ const Home = () => {
 
     const menuItems = [
         {
-            title: "نقطة البيع",
+            title: "فاتورة بيع",
             icon: ShoppingCart,
             path: "/pos",
             color: "text-blue-600",
             bgColor: "bg-blue-100",
-            description: "إنشاء فواتير مبيعات ومرتجعات"
+            description: "إنشاء فاتورة بيع جديدة"
+        },
+        {
+            title: "فاتورة مرتجع",
+            icon: RotateCcw,
+            path: "/pos-return",
+            color: "text-red-600",
+            bgColor: "bg-red-100",
+            description: "إنشاء فاتورة مرتجع جديدة"
+        },
+        {
+            title: "عرض سعر",
+            icon: ClipboardList,
+            path: "/quotes",
+            color: "text-amber-600",
+            bgColor: "bg-amber-100",
+            description: "إنشاء وإدارة عروض الأسعار"
         },
         {
             title: "التصنيفات والمخزون",
@@ -72,14 +89,6 @@ const Home = () => {
             color: "text-indigo-600",
             bgColor: "bg-indigo-100",
             description: "تقارير المبيعات والأرباح والديون"
-        },
-        {
-            title: "الإعدادات",
-            icon: Settings,
-            path: "/settings",
-            color: "text-gray-600",
-            bgColor: "bg-gray-100",
-            description: "إعدادات النظام والطباعة"
         }
     ];
 
@@ -96,7 +105,7 @@ const Home = () => {
                             {storeName} - لوحة التحكم الرئيسية
                         </p>
                     </div>
-                    <div className="flex gap-2">
+                    {/* <div className="flex gap-2">
                         {(can("invoices", "create") || can("invoices", "view")) && (
                             <Button onClick={() => addTab("/pos")} className="gap-2 bg-blue-600 hover:bg-blue-700 text-white">
                                 <Plus className="h-4 w-4" />
@@ -109,7 +118,7 @@ const Home = () => {
                                 إضافة قبض
                             </Button>
                         )}
-                    </div>
+                    </div> */}
                 </div>
 
                 {/* Quick Stats / Info Cards could go here */}

@@ -91,6 +91,65 @@ const Settings = () => {
   // Debug mode - shows dangerous operations only (does NOT affect sync)
   const isDebugMode = import.meta.env.VITE_DEBUG_SYNC === 'true';
 
+  // Price list state
+  const [priceListUrl, setPriceListUrl] = useState<string | null>(null);
+  const [priceListUpdatedAt, setPriceListUpdatedAt] = useState<string | null>(null);
+  const [priceListLoading, setPriceListLoading] = useState(false);
+  const [priceListUploading, setPriceListUploading] = useState(false);
+
+  // Load price list info
+  const loadPriceList = async () => {
+    try {
+      setPriceListLoading(true);
+      const client = getFastifyClient();
+      const res = await client.get<{ exists: boolean; url?: string; updatedAt?: string }>("/api/mobile/price-list");
+      if (res.exists && res.url) {
+        setPriceListUrl(res.url);
+        setPriceListUpdatedAt(res.updatedAt || null);
+      } else {
+        setPriceListUrl(null);
+        setPriceListUpdatedAt(null);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setPriceListLoading(false);
+    }
+  };
+
+  const handlePriceListUpload = async (file: File) => {
+    try {
+      setPriceListUploading(true);
+      const client = getFastifyClient();
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await client.post<{ success: boolean; url: string }>("/api/mobile/price-list/upload", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      if (res.success) {
+        setPriceListUrl(res.url);
+        setPriceListUpdatedAt(new Date().toISOString());
+        toast({ title: "تم رفع لستة الأسعار بنجاح" });
+      }
+    } catch {
+      toast({ title: "فشل رفع الملف", variant: "destructive" });
+    } finally {
+      setPriceListUploading(false);
+    }
+  };
+
+  const handlePriceListDelete = async () => {
+    try {
+      const client = getFastifyClient();
+      await client.delete("/api/mobile/price-list");
+      setPriceListUrl(null);
+      setPriceListUpdatedAt(null);
+      toast({ title: "تم حذف لستة الأسعار" });
+    } catch {
+      toast({ title: "فشل حذف الملف", variant: "destructive" });
+    }
+  };
+
   // Force server pull state
   const [isServerPulling, setIsServerPulling] = useState(false);
   const [serverPullResult, setServerPullResult] = useState<{
@@ -183,6 +242,7 @@ const Settings = () => {
       setLicenseLoading(false);
     };
     loadLicense();
+    loadPriceList();
   }, []);
 
   const copyToClipboard = (text: string, label: string) => {
@@ -289,6 +349,7 @@ const Settings = () => {
             <TabsTrigger value="invoice-template">تصميم الفاتورة</TabsTrigger>
             <TabsTrigger value="theme">الثيمات والألوان</TabsTrigger>
             <TabsTrigger value="store">بيانات المتجر</TabsTrigger>
+            <TabsTrigger value="price-list">لستة الأسعار</TabsTrigger>
             <TabsTrigger value="whatsapp">واتساب</TabsTrigger>
             <TabsTrigger value="license">الترخيص</TabsTrigger>
           </TabsList>
@@ -622,6 +683,85 @@ const Settings = () => {
                 <Button onClick={handleSave} disabled={loading}>
                   {loading ? "جاري الحفظ..." : "حفظ البيانات"}
                 </Button>
+              </div>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="price-list">
+            <Card className="p-6">
+              <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+                لستة الأسعار (PDF)
+              </h2>
+              <div className="space-y-4">
+                <p className="text-muted-foreground text-sm">
+                  ارفع ملف PDF للستة الأسعار ليظهر في تطبيق الموبايل والموقع الإلكتروني.
+                </p>
+
+                {priceListLoading ? (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    جاري التحميل...
+                  </div>
+                ) : priceListUrl ? (
+                  <div className="border rounded-lg p-4 space-y-3">
+                    <div className="flex items-center gap-2 text-green-600">
+                      <CheckCircle className="h-5 w-5" />
+                      <span className="font-medium">تم رفع لستة الأسعار</span>
+                    </div>
+                    {priceListUpdatedAt && (
+                      <p className="text-sm text-muted-foreground">
+                        آخر تحديث: {new Date(priceListUpdatedAt).toLocaleDateString("ar-EG", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                    )}
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => window.open(priceListUrl, "_blank")}>
+                        عرض الملف
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const input = document.createElement("input");
+                          input.type = "file";
+                          input.accept = ".pdf";
+                          input.onchange = (e) => {
+                            const file = (e.target as HTMLInputElement).files?.[0];
+                            if (file) handlePriceListUpload(file);
+                          };
+                          input.click();
+                        }}
+                        disabled={priceListUploading}
+                      >
+                        {priceListUploading ? <Loader2 className="h-4 w-4 animate-spin ml-1" /> : null}
+                        تغيير الملف
+                      </Button>
+                      <Button variant="destructive" size="sm" onClick={handlePriceListDelete}>
+                        <Trash2 className="h-4 w-4 ml-1" />
+                        حذف
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="border-2 border-dashed rounded-lg p-8 text-center space-y-3">
+                    <p className="text-muted-foreground">لم يتم رفع لستة أسعار بعد</p>
+                    <Button
+                      onClick={() => {
+                        const input = document.createElement("input");
+                        input.type = "file";
+                        input.accept = ".pdf";
+                        input.onchange = (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0];
+                          if (file) handlePriceListUpload(file);
+                        };
+                        input.click();
+                      }}
+                      disabled={priceListUploading}
+                    >
+                      {priceListUploading ? <Loader2 className="h-4 w-4 animate-spin ml-1" /> : null}
+                      رفع ملف PDF
+                    </Button>
+                  </div>
+                )}
               </div>
             </Card>
           </TabsContent>

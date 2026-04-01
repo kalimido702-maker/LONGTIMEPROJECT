@@ -22,4 +22,6 @@ export interface Customer {
   loyaltyPoints: number;
   createdAt: string;
   notes?: string;
+  specialDiscount?: number; // خصم خاص يتطبق تلقائياً
+  defaultPriceTypeId?: string; // نوع السعر الافتراضي
 }
