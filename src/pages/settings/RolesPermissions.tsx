@@ -220,8 +220,13 @@ const RolesPermissions = () => {
         home: "عرض الرئيسية",
         due: "عرض المستحقات",
         invoices: "عرض الفواتير",
+        create_invoice: "إنشاء فاتورة",
         payments: "عرض المدفوعات",
+        create_payment: "إضافة قبض",
         statement: "عرض كشف الحساب",
+        customers: "عرض العملاء",
+        sales_reps: "عرض المندوبين",
+        supervisors: "عرض المشرفين",
       },
     },
   };

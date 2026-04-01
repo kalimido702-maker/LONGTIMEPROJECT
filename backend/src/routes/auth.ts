@@ -82,10 +82,10 @@ export default async function authRoutes(fastify: FastifyInstance) {
           });
         }
 
-        // Get user permissions from role (role field may contain role name OR role ID)
+        // Get user permissions from role (role field may contain role name, name_en, OR role ID)
         const roles = await query<any>(
-          "SELECT name, name_en, permissions FROM roles WHERE client_id = ? AND (id = ? OR name = ?) AND is_deleted = 0 LIMIT 1",
-          [user.client_id, user.role, user.role]
+          "SELECT name, name_en, permissions FROM roles WHERE client_id = ? AND (id = ? OR name = ? OR name_en = ?) AND is_deleted = 0 LIMIT 1",
+          [user.client_id, user.role, user.role, user.role]
         );
 
         let parsedPermissions: any = [];
@@ -278,10 +278,10 @@ export default async function authRoutes(fastify: FastifyInstance) {
           });
         }
 
-        // Get permissions (role field may contain role name OR role ID)
+        // Get permissions (role field may contain role name, name_en, OR role ID)
         const roles = await query<Role & { name: string }>(
-          "SELECT name, permissions FROM roles WHERE client_id = ? AND (id = ? OR name = ?) AND is_deleted = FALSE LIMIT 1",
-          [user.client_id, user.role, user.role]
+          "SELECT name, name_en, permissions FROM roles WHERE client_id = ? AND (id = ? OR name = ? OR name_en = ?) AND is_deleted = FALSE LIMIT 1",
+          [user.client_id, user.role, user.role, user.role]
         );
 
         let parsedPermissions: any = [];

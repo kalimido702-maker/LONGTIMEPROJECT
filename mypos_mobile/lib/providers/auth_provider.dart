@@ -56,11 +56,29 @@ class AuthProvider extends ChangeNotifier {
         // Load linked profiles in background
         loadLinkedProfiles().catchError((_) {});
 
+        // Refresh user data from backend (permissions may have changed)
+        _refreshUserData().catchError((_) {});
+
         return true;
       }
       return false;
     } catch (_) {
       return false;
+    }
+  }
+
+  /// Refresh user data from backend to get updated permissions.
+  Future<void> _refreshUserData() async {
+    try {
+      final response = await _api.getProfile();
+      if (response != null && response['data'] != null) {
+        final freshUser = response['data'];
+        await _storage.write(key: 'user_data', value: json.encode(freshUser));
+        _user = User.fromJson(freshUser);
+        notifyListeners();
+      }
+    } catch (_) {
+      // Silently fail — keep using cached data
     }
   }
 

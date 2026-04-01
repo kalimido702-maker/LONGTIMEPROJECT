@@ -115,6 +115,19 @@ async function registerPlugins() {
     return reply.send(createReadStream(filePath));
   });
 
+  // Serve price list PDF
+  fastify.get("/uploads/price-list/:filename", async (request, reply) => {
+    const { filename } = request.params as { filename: string };
+    if (filename.includes("..") || filename.includes("/")) {
+      return reply.code(400).send({ error: "Invalid filename" });
+    }
+    const filePath = resolve(process.cwd(), "data/price-lists", filename);
+    if (!existsSync(filePath)) return reply.code(404).send({ error: "Not found" });
+    reply.header("Content-Type", "application/pdf");
+    reply.header("Content-Disposition", `inline; filename="${filename}"`);
+    return reply.send(createReadStream(filePath));
+  });
+
   // WebSocket
   await fastify.register(fastifyWebsocket, {
     options: {

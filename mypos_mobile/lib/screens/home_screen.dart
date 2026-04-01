@@ -9,6 +9,8 @@ import '../providers/data_provider.dart';
 import '../models/user.dart';
 import '../widgets/date_filter_widget.dart';
 import '../widgets/profile_switcher_widget.dart';
+import '../services/api_service.dart';
+import '../config/api_config.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -20,6 +22,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   late DateTime _fromDate;
   late DateTime _toDate;
+  String? _priceListUrl;
 
   @override
   void initState() {
@@ -29,7 +32,23 @@ class _HomeScreenState extends State<HomeScreen> {
     _toDate = now;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadData();
+      _loadPriceList();
     });
+  }
+
+  Future<void> _loadPriceList() async {
+    try {
+      final api = ApiService();
+      final res = await api.get(ApiConfig.priceList);
+      if (res.data['exists'] == true && res.data['url'] != null) {
+        if (mounted) setState(() => _priceListUrl = res.data['url']);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _openPriceList() async {
+    if (_priceListUrl == null) return;
+    context.push('/price-list');
   }
 
   Future<void> _loadData() async {
@@ -38,29 +57,51 @@ class _HomeScreenState extends State<HomeScreen> {
     final user = authProvider.user;
 
     if (user != null) {
-      // Sales manager: no dashboard data needed (empty home)
-      if (user.isSalesManager) return;
+      if (user.isCustomer) {
+        // Customer: load all data
+        final range = DateRange(from: _fromDate, to: _toDate);
+        await dataProvider.loadAllData(
+          fromDate: range.fromParam,
+          toDate: range.toParam,
+        );
+        return;
+      }
 
-      final range = DateRange(from: _fromDate, to: _toDate);
-      await dataProvider.loadAllData(
-        fromDate: range.fromParam,
-        toDate: range.toParam,
-      );
-      // For staff, also load customers if they have permission
-      if (!user.isCustomer &&
-          (user.hasPermission('customers.view') ||
-              user.hasPermission('mobile_app.statement') ||
-              user.hasPermission('mobile_app.home'))) {
+      // Staff: load only what they have permission for
+      final hasInvoices = user.hasPermission('mobile_app.invoices') || user.hasPermission('invoices.view');
+      final hasPayments = user.hasPermission('mobile_app.payments') || user.hasPermission('payments.view');
+      final hasCustomers = user.hasPermission('mobile_app.customers') || user.hasPermission('customers.view');
+      final hasDue = user.hasPermission('mobile_app.due');
+      final hasHome = user.hasPermission('mobile_app.home');
+
+      // Only load dashboard if they have home or due or invoices or payments permission
+      if (hasHome || hasDue || hasInvoices || hasPayments) {
+        final range = DateRange(from: _fromDate, to: _toDate);
+        await dataProvider.loadDashboard(fromDate: range.fromParam, toDate: range.toParam);
+
+        final futures = <Future>[];
+        if (hasInvoices) {
+          futures.add(dataProvider.loadInvoices(refresh: true, fromDate: range.fromParam, toDate: range.toParam));
+          futures.add(dataProvider.loadReturns(refresh: true, fromDate: range.fromParam, toDate: range.toParam));
+        }
+        if (hasPayments) {
+          futures.add(dataProvider.loadPayments(refresh: true, fromDate: range.fromParam, toDate: range.toParam));
+        }
+        if (futures.isNotEmpty) await Future.wait(futures);
+      }
+
+      // Load customers if they have permission
+      if (hasCustomers || hasHome) {
         await dataProvider.loadCustomers();
       }
-      // Supervisor: also load their sales reps
-      if (user.isSupervisor) {
+      // Load sales reps if they have permission
+      if (user.hasPermission('mobile_app.sales_reps') ||
+          user.hasPermission('mobile_app.supervisors')) {
         await dataProvider.loadSalesReps();
       }
-      // Admin or General Manager: load supervisors + sales reps
-      if (user.isAdmin || user.isGeneralManager) {
+      // Load supervisors if they have permission
+      if (user.hasPermission('mobile_app.supervisors')) {
         await dataProvider.loadSupervisors();
-        await dataProvider.loadSalesReps();
       }
     }
   }
@@ -163,9 +204,7 @@ class _HomeScreenState extends State<HomeScreen> {
             : ListView(
                 padding: const EdgeInsets.all(16),
                 children: isStaff
-                    ? (user.isSalesManager
-                        ? _buildSalesManagerHomeContent()
-                        : _buildStaffHomeContent(dataProvider, formatter, user))
+                    ? _buildStaffHomeContent(dataProvider, formatter, user)
                     : _buildCustomerHomeContent(dataProvider, formatter),
               ),
       ),
@@ -259,6 +298,16 @@ class _HomeScreenState extends State<HomeScreen> {
         ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
       ),
       const SizedBox(height: 12),
+      if (_priceListUrl != null) ...[
+        _QuickActionTile(
+          icon: LucideIcons.fileSpreadsheet,
+          label: 'لستة الاسعار',
+          subtitle: 'عرض لستة الأسعار',
+          color: AppColors.primary,
+          onTap: _openPriceList,
+        ),
+        const SizedBox(height: 8),
+      ],
       _QuickActionTile(
         icon: LucideIcons.fileText,
         label: 'الفواتير المسلمة',
@@ -293,70 +342,23 @@ class _HomeScreenState extends State<HomeScreen> {
     ];
   }
 
-  // ===================== SALES MANAGER HOME (empty) =====================
-  List<Widget> _buildSalesManagerHomeContent() {
-    return [
-      const SizedBox(height: 40),
-      Center(
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Icon(
-                LucideIcons.briefcase,
-                size: 48,
-                color: AppColors.primary,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'مرحباً',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'يمكنك عرض الفواتير من التبويب أدناه',
-              style: TextStyle(
-                fontSize: 14,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    ];
-  }
-
-  // ===================== STAFF HOME (sales_rep / supervisor / admin / general_manager) =====================
+  // ===================== STAFF HOME (permission-based) =====================
   List<Widget> _buildStaffHomeContent(
     DataProvider dataProvider,
     NumberFormat formatter,
     User user,
   ) {
     final customerCount = dataProvider.customers.length;
-    final isAdmin = user.isAdmin;
-    final isGeneralManager = user.isGeneralManager;
-    final isSupervisor = user.isSupervisor;
+    final hasSupervisors = user.hasPermission('mobile_app.supervisors');
+    final hasSalesReps = user.hasPermission('mobile_app.sales_reps');
+    final hasCustomers = user.hasPermission('mobile_app.customers') || user.hasPermission('customers.view');
+    final hasInvoices = user.hasPermission('mobile_app.invoices') || user.hasPermission('invoices.view');
+    final hasPayments = user.hasPermission('mobile_app.payments') || user.hasPermission('payments.view');
+    final hasDue = user.hasPermission('mobile_app.due');
 
-    final canCreateInvoice = user.isAdmin ||
-        user.isSalesRep ||
-        user.isSalesManager ||
-        user.isGeneralManager ||
-        user.hasPermission('create_invoices');
+    final canCreateInvoice = user.hasPermission('mobile_app.create_invoice') || user.hasPermission('invoices.create');
 
-    final canCreatePayment = user.isAdmin ||
-        user.isSalesRep ||
-        user.isSalesManager ||
-        user.isGeneralManager ||
-        user.hasPermission('create_payments');
+    final canCreatePayment = user.hasPermission('mobile_app.create_payment') || user.hasPermission('collections.create');
 
     return [
       // أزرار الإجراءات السريعة
@@ -406,182 +408,113 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 16),
       ],
-      // ── Admin or General Manager: supervisors + reps + customers summary ──
-      if (isAdmin || isGeneralManager) ...[
+      // ── Summary cards based on permissions ──
+      if (hasSupervisors || hasSalesReps || hasCustomers) ...[
         _buildSummaryRow(
           items: [
-            _SummaryItem(
-              icon: LucideIcons.shield,
-              gradient: const [Color(0xFF6C5CE7), Color(0xFF8B7CF6)],
-              count: dataProvider.supervisors.length,
-              label: 'مشرف',
-              onTap: () => context.go('/supervisors'),
-            ),
-            _SummaryItem(
-              icon: LucideIcons.briefcase,
-              gradient: const [AppColors.secondary, Color(0xFF4A8FE7)],
-              count: dataProvider.salesReps.length,
-              label: 'مندوب',
-              onTap: () => context.go('/sales-reps'),
-            ),
-            _SummaryItem(
-              icon: LucideIcons.users,
-              gradient: const [AppColors.primary, AppColors.primaryLight],
-              count: customerCount,
-              label: 'عميل',
-              onTap: () => context.go('/customers'),
-            ),
+            if (hasSupervisors)
+              _SummaryItem(
+                icon: LucideIcons.shield,
+                gradient: const [Color(0xFF6C5CE7), Color(0xFF8B7CF6)],
+                count: dataProvider.supervisors.length,
+                label: 'مشرف',
+                onTap: () => context.go('/supervisors'),
+              ),
+            if (hasSalesReps)
+              _SummaryItem(
+                icon: LucideIcons.briefcase,
+                gradient: const [AppColors.secondary, Color(0xFF4A8FE7)],
+                count: dataProvider.salesReps.length,
+                label: 'مندوب',
+                onTap: () => context.go('/sales-reps'),
+              ),
+            if (hasCustomers)
+              _SummaryItem(
+                icon: LucideIcons.users,
+                gradient: const [AppColors.primary, AppColors.primaryLight],
+                count: customerCount,
+                label: 'عميل',
+                onTap: () => context.go('/customers'),
+              ),
           ],
-        ),
-      ]
-      // ── Supervisor: reps + customers summary ──
-      else if (isSupervisor) ...[
-        _buildSummaryRow(
-          items: [
-            _SummaryItem(
-              icon: LucideIcons.briefcase,
-              gradient: const [AppColors.secondary, Color(0xFF4A8FE7)],
-              count: dataProvider.salesReps.length,
-              label: 'مندوب',
-              onTap: () => context.go('/sales-reps'),
-            ),
-            _SummaryItem(
-              icon: LucideIcons.users,
-              gradient: const [AppColors.primary, AppColors.primaryLight],
-              count: customerCount,
-              label: 'عميل',
-              onTap: () => context.go('/customers'),
-            ),
-          ],
-        ),
-      ]
-      // ── Sales Rep: customers only ──
-      else ...[
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [AppColors.primary, AppColors.primaryLight],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.primary.withOpacity(0.3),
-                blurRadius: 20,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(
-                      LucideIcons.users,
-                      color: Colors.white,
-                      size: 24,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    'عدد العملاء',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.9),
-                      fontSize: 15,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Text(
-                '$customerCount عميل',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
         ),
       ],
       const SizedBox(height: 12),
 
       // Total customers debt card
-      _TotalDebtCard(
-        totalBalance: dataProvider.totalCustomersBalance,
-        formatter: formatter,
-      ),
-      const SizedBox(height: 12),
+      if (hasDue || hasInvoices || hasPayments) ...[
+        _TotalDebtCard(
+          totalBalance: dataProvider.totalCustomersBalance,
+          formatter: formatter,
+        ),
+        const SizedBox(height: 12),
+      ],
 
       // Date filter
-      Center(
-        child: DateFilterWidget(
-          fromDate: _fromDate,
-          toDate: _toDate,
-          onChanged: _onDateChanged,
+      if (hasInvoices || hasPayments) ...[
+        Center(
+          child: DateFilterWidget(
+            fromDate: _fromDate,
+            toDate: _toDate,
+            onChanged: _onDateChanged,
+          ),
         ),
-      ),
-      const SizedBox(height: 16),
+        const SizedBox(height: 16),
+      ],
 
       // Aggregate stats
-      Row(
-        children: [
-          Expanded(
-            child: _StatCard(
-              icon: LucideIcons.fileText,
-              iconColor: AppColors.secondary,
-              label: 'إجمالي الفواتير',
-              value: '${dataProvider.totalInvoices}',
-              onTap: () => context.go('/customers'),
+      if (hasInvoices) ...[
+        Row(
+          children: [
+            Expanded(
+              child: _StatCard(
+                icon: LucideIcons.fileText,
+                iconColor: AppColors.secondary,
+                label: 'إجمالي الفواتير',
+                value: '${dataProvider.totalInvoices}',
+                onTap: () => context.go('/invoices'),
+              ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _StatCard(
-              icon: LucideIcons.trendingUp,
-              iconColor: AppColors.primary,
-              label: 'إجمالي المبيعات',
-              value: formatter.format(dataProvider.totalDebt),
-              onTap: () => context.go('/customers'),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatCard(
+                icon: LucideIcons.trendingUp,
+                iconColor: AppColors.primary,
+                label: 'إجمالي المبيعات',
+                value: formatter.format(dataProvider.totalDebt),
+                onTap: () => context.go('/invoices'),
+              ),
             ),
-          ),
-        ],
-      ),
-      const SizedBox(height: 12),
-      Row(
-        children: [
-          Expanded(
-            child: _StatCard(
-              icon: LucideIcons.creditCard,
-              iconColor: AppColors.success,
-              label: 'المدفوعات',
-              value: formatter.format(dataProvider.totalPaymentAmount),
-              onTap: () => context.go('/customers'),
+          ],
+        ),
+        const SizedBox(height: 12),
+      ],
+      if (hasPayments) ...[
+        Row(
+          children: [
+            Expanded(
+              child: _StatCard(
+                icon: LucideIcons.creditCard,
+                iconColor: AppColors.success,
+                label: 'المدفوعات',
+                value: formatter.format(dataProvider.totalPaymentAmount),
+                onTap: () => context.go('/payments'),
+              ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _StatCard(
-              icon: LucideIcons.rotateCcw,
-              iconColor: AppColors.warning,
-              label: 'المرتجعات',
-              value: '${dataProvider.totalReturns}',
-              onTap: () => context.go('/customers'),
-            ),
-          ),
-        ],
-      ),
+            const SizedBox(width: 12),
+            if (hasInvoices)
+              Expanded(
+                child: _StatCard(
+                  icon: LucideIcons.rotateCcw,
+                  iconColor: AppColors.warning,
+                  label: 'المرتجعات',
+                  value: '${dataProvider.totalReturns}',
+                  onTap: () => context.go('/payments'),
+                ),
+              ),
+          ],
+        ),
+      ],
       const SizedBox(height: 24),
 
       // Quick Actions for staff
@@ -593,8 +526,18 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       const SizedBox(height: 12),
 
-      // Admin or General Manager quick actions for supervisors
-      if (isAdmin || isGeneralManager) ...[
+      if (_priceListUrl != null) ...[
+        _QuickActionTile(
+          icon: LucideIcons.fileSpreadsheet,
+          label: 'لستة الاسعار',
+          subtitle: 'عرض لستة الأسعار',
+          color: AppColors.primary,
+          onTap: _openPriceList,
+        ),
+        const SizedBox(height: 8),
+      ],
+
+      if (hasSupervisors) ...[
         _QuickActionTile(
           icon: LucideIcons.shield,
           label: 'المشرفين',
@@ -605,8 +548,7 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 8),
       ],
 
-      // Admin, General Manager, or Supervisor quick action for reps
-      if (isAdmin || isGeneralManager || isSupervisor) ...[
+      if (hasSalesReps) ...[
         _QuickActionTile(
           icon: LucideIcons.briefcase,
           label: 'المندوبين',
@@ -617,24 +559,24 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 8),
       ],
 
-      _QuickActionTile(
-        icon: LucideIcons.users,
-        label: 'العملاء',
-        subtitle: 'عرض قائمة العملاء وبياناتهم',
-        color: AppColors.primary,
-        onTap: () => context.go('/customers'),
-      ),
-      // General Manager: no notifications
-      if (!isGeneralManager) ...[
-        const SizedBox(height: 8),
+      if (hasCustomers) ...[
         _QuickActionTile(
-          icon: LucideIcons.bell,
-          label: 'الإشعارات',
-          subtitle: 'عرض الإشعارات والتنبيهات',
-          color: AppColors.secondary,
-          onTap: () => context.go('/notifications'),
+          icon: LucideIcons.users,
+          label: 'العملاء',
+          subtitle: 'عرض قائمة العملاء وبياناتهم',
+          color: AppColors.primary,
+          onTap: () => context.go('/customers'),
         ),
+        const SizedBox(height: 8),
       ],
+
+      _QuickActionTile(
+        icon: LucideIcons.bell,
+        label: 'الإشعارات',
+        subtitle: 'عرض الإشعارات والتنبيهات',
+        color: AppColors.secondary,
+        onTap: () => context.go('/notifications'),
+      ),
     ];
   }
 
