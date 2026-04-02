@@ -2096,7 +2096,7 @@ const POSv2 = ({ forceMode }: { forceMode?: "sales" | "return" } = {}) => {
                                     searchInputRef.current?.focus();
                                   }
                                 }}
-                                ref={(el) => { if (isEditingQty && el) { el.focus(); el.select(); } }}
+                                ref={(el) => { if (isEditingQty && el && document.activeElement !== el) { el.focus(); el.select(); } }}
                                 className={`h-7 w-16 text-center p-0 ${isEditingQty ? "ring-2 ring-primary" : "bg-transparent border-none"}`}
                                 min={1}
                               />
@@ -2127,7 +2127,7 @@ const POSv2 = ({ forceMode }: { forceMode?: "sales" | "return" } = {}) => {
                                     searchInputRef.current?.focus();
                                   }
                                 }}
-                                ref={(el) => { if (isEditingPrice && el) { el.focus(); el.select(); } }}
+                                ref={(el) => { if (isEditingPrice && el && document.activeElement !== el) { el.focus(); el.select(); } }}
                                 className={`h-7 w-16 text-center p-0 ${isEditingPrice ? "ring-2 ring-primary" : "bg-transparent border-none"}`}
                               />
                             </td>
