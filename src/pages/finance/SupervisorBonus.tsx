@@ -259,6 +259,7 @@ const SupervisorBonus = () => {
         const empty = {
             totalPayments: 0,
             bonusEligibleInvoicesTotal: 0,
+            lightingTotal: 0,
             totalAutoBonus: 0,
             conditionMet: false,
             byRep: [] as { id: string; name: string; payments: number; bonusEligible: number; nonEligible: number }[],
@@ -302,6 +303,7 @@ const SupervisorBonus = () => {
         });
 
         let bonusEligibleInvoicesTotal = 0;
+        let lightingTotal = 0;
         let totalBonusCalc = 0;
         const byCategorySales: Record<string, { sales: number; bonus: number; percentage: number }> = {};
         const repBonusEligible: Record<string, number> = {};
@@ -327,6 +329,11 @@ const SupervisorBonus = () => {
                 if (isBonusEligible) {
                     bonusEligibleInvoicesTotal += itemTotalAfterDiscount;
                     totalBonusCalc += Math.round(itemTotalAfterDiscount * (catBonusPercent / 100));
+                    // Track lighting category separately for condition check
+                    const catNameLower = categoryName.toLowerCase();
+                    if (catNameLower.includes('إضاء') || catNameLower.includes('اضاء') || catNameLower.includes('lighting')) {
+                        lightingTotal += itemTotalAfterDiscount;
+                    }
                     if (repId) repBonusEligible[repId] = (repBonusEligible[repId] || 0) + itemTotalAfterDiscount;
                 } else {
                     if (repId) repNonEligible[repId] = (repNonEligible[repId] || 0) + itemTotalAfterDiscount;
@@ -342,8 +349,8 @@ const SupervisorBonus = () => {
             });
         });
 
-        // 3. Condition: bonus-eligible invoices < payments → auto; else → manual
-        const conditionMet = totalPayments > 0 && bonusEligibleInvoicesTotal < totalPayments;
+        // 3. Condition: lighting invoices < payments → auto; else → manual
+        const conditionMet = totalPayments > 0 && lightingTotal < totalPayments;
 
         const byRep = teamMembers.map(rep => ({
             id: rep.id, name: rep.name,
@@ -355,6 +362,7 @@ const SupervisorBonus = () => {
         return {
             totalPayments,
             bonusEligibleInvoicesTotal,
+            lightingTotal,
             totalAutoBonus: totalBonusCalc,
             conditionMet, byRep, byCategorySales,
             invoiceIds: periodInvoices.map(inv => String(inv.id)),
@@ -700,12 +708,12 @@ const SupervisorBonus = () => {
                                             )}
                                             <span className={`font-semibold text-sm ${teamSalesData.conditionMet ? "text-green-700" : "text-red-700"}`}>
                                                 {teamSalesData.conditionMet
-                                                    ? "الشرط محقق: إجمالي فواتير الأقسام أقل من التحصيلات → حساب تلقائي"
-                                                    : "الشرط غير محقق: إجمالي فواتير الأقسام ≥ التحصيلات → يجب إدخال البونص يدوياً"}
+                                                    ? "الشرط محقق: إجمالي قسم الإضاءة أقل من التحصيلات → حساب تلقائي"
+                                                    : "الشرط غير محقق: إجمالي قسم الإضاءة ≥ التحصيلات → يجب إدخال البونص يدوياً"}
                                             </span>
                                         </div>
                                         <p className="text-xs text-muted-foreground mt-1">
-                                            فواتير الأقسام: {formatCurrency(teamSalesData.bonusEligibleInvoicesTotal)} | التحصيلات: {formatCurrency(teamSalesData.totalPayments)}
+                                            قسم الإضاءة: {formatCurrency(teamSalesData.lightingTotal)} | التحصيلات: {formatCurrency(teamSalesData.totalPayments)}
                                         </p>
                                     </div>
 

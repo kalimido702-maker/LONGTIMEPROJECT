@@ -1,6 +1,6 @@
 /**
  * Report Print Service
- * خدمة طباعة التقارير بتنسيق لونج تايم للمصناعات الكهربائية
+ * خدمة طباعة التقارير بتنسيق لونج تايم للصناعات الكهربائية
  */
 
 interface ReportPrintOptions {
@@ -15,7 +15,7 @@ interface ReportPrintOptions {
   totalRow?: { label: string; value: string | number };
 }
 
-const COMPANY_HEADER = "لونج تايم للمصناعات الكهربائية - التقارير الداخلية";
+const COMPANY_HEADER = "لونج تايم للصناعات الكهربائية - التقارير الداخلية";
 
 function formatValue(value: any): string {
   if (value === undefined || value === null || value === "") return "-";
@@ -402,7 +402,7 @@ export function printCustomerInvoicesReport(
     columns: [
       { header: "اسم العميل", dataKey: "customerName", align: "right" },
       { header: "عدد الفواتير", dataKey: "invoiceCount" },
-      { header: "قيمة الفوتير", dataKey: "invoiceValue" },
+      { header: "قيمة الفواتير", dataKey: "invoiceValue" },
       { header: "المشرف", dataKey: "supervisorName" },
     ],
     data,

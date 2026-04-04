@@ -1676,7 +1676,7 @@ const Reports = () => {
                     columns={[
                       { header: "اسم العميل", dataKey: "customerName" },
                       { header: "عدد الفواتير", dataKey: "invoiceCount" },
-                      { header: "قيمة الفوتير", dataKey: "invoiceValue" },
+                      { header: "قيمة الفواتير", dataKey: "invoiceValue" },
                       { header: "المشرف", dataKey: "supervisorName" },
                     ]}
                     summary={[
@@ -1692,7 +1692,7 @@ const Reports = () => {
                     <TableRow>
                       <TableHead>اسم العميل</TableHead>
                       <TableHead className="text-center">عدد الفواتير</TableHead>
-                      <TableHead className="text-center">قيمة الفوتير</TableHead>
+                      <TableHead className="text-center">قيمة الفواتير</TableHead>
                       <TableHead className="text-center">المشرف</TableHead>
                     </TableRow>
                   </TableHeader>
