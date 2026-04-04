@@ -1891,7 +1891,7 @@ const POSv2 = ({ forceMode }: { forceMode?: "sales" | "return" } = {}) => {
                             } ${highlightedProductIndex === index ? "bg-primary/10 ring-1 ring-primary" : "hover:bg-muted/50"}`}
                         >
                           {/* Product Image */}
-                          {product.imageUrl ? (
+                          {/* {product.imageUrl ? (
                             <img
                               src={product.imageUrl}
                               alt={product.nameAr}
@@ -1904,7 +1904,7 @@ const POSv2 = ({ forceMode }: { forceMode?: "sales" | "return" } = {}) => {
                             <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center">
                               <Package className="h-6 w-6 text-muted-foreground/50" />
                             </div>
-                          )}
+                          )} */}
 
                           {/* Product Info */}
                           <div className="flex-1 min-w-0">
